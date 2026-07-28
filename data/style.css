@@ -1,0 +1,166 @@
+.mail-sidebar { background: color-mix(in srgb, var(--window-bg-color) 94%, var(--accent-bg-color)); }
+.mail-sidebar row { border-radius: 8px; margin: 1px 8px; padding: 2px; }
+.mail-sidebar row:selected { background: color-mix(in srgb, var(--accent-bg-color) 22%, transparent); color: inherit; }
+.mail-sidebar .account-folders { margin: 5px 0 2px 10px; background: transparent; }
+.mail-sidebar expander > title { padding: 2px 0 4px; }
+.pane-resize-handle { background: transparent; transition: background 120ms ease; }
+.pane-resize-handle:hover { background: alpha(var(--accent-bg-color), .20); }
+.pane-resize-handle separator { background: alpha(currentColor, .10); min-width: 1px; }
+.attachment-row { padding: 6px 8px; border-radius: 8px; background: alpha(currentColor, .035); }
+.mailbox-count { border-radius: 10px; padding: 0 7px; background: alpha(currentColor, .10); font-size: .82em; font-weight: 600; }
+.message-list { background: var(--view-bg-color); }
+.message-list-header { padding: 12px 12px 10px 16px; background: var(--window-bg-color); }
+.mail-header-bar {
+  min-height: 46px;
+  padding: 5px 7px;
+  background: var(--headerbar-bg-color);
+  border-bottom: 1px solid alpha(currentColor, .12);
+}
+.apple-toolbar { padding: 3px 2px; }
+.apple-toolbar-button {
+  min-width: 38px;
+  min-height: 36px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: alpha(currentColor, .075);
+}
+.apple-toolbar-button:hover { background: alpha(currentColor, .12); }
+menubutton.apple-toolbar-button {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+menubutton.apple-toolbar-button > button {
+  min-width: 38px;
+  min-height: 36px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: alpha(currentColor, .075);
+}
+menubutton.apple-toolbar-button > button:hover {
+  background: alpha(currentColor, .12);
+}
+.apple-toolbar-group {
+  min-height: 36px;
+  border-radius: 999px;
+  background: alpha(currentColor, .075);
+}
+.apple-toolbar-group .apple-toolbar-button {
+  min-width: 38px;
+  min-height: 36px;
+  border-radius: 0;
+  background: transparent;
+}
+.apple-toolbar-group .apple-toolbar-button:first-child {
+  border-radius: 999px 0 0 999px;
+}
+.apple-toolbar-group .apple-toolbar-button:last-child {
+  border-radius: 0 999px 999px 0;
+}
+.apple-toolbar-search {
+  min-height: 36px;
+  border-radius: 999px;
+}
+.toolbar-palette {
+  padding: 10px 6px 8px;
+  border-radius: 14px;
+  background: alpha(currentColor, .035);
+}
+.toolbar-palette-item {
+  min-width: 78px;
+  min-height: 68px;
+  padding: 5px 3px;
+  border-radius: 12px;
+}
+.toolbar-palette-icon {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 8px;
+  border-radius: 999px;
+  background: alpha(currentColor, .09);
+}
+.toolbar-preview-scroller {
+  border-radius: 14px;
+  background: alpha(currentColor, .035);
+}
+.toolbar-preview { padding: 16px; }
+.toolbar-preview-item {
+  min-width: 126px;
+  min-height: 88px;
+  padding: 10px;
+  border-radius: 12px;
+  background: alpha(currentColor, .075);
+}
+.toolbar-preview-item:hover { background: alpha(currentColor, .12); }
+.toolbar-preview-item button {
+  min-width: 28px;
+  min-height: 26px;
+  padding: 2px 5px;
+}
+.toolbar-drop-end {
+  min-width: 90px;
+  min-height: 88px;
+  padding: 10px;
+  border: 1px dashed alpha(currentColor, .28);
+  border-radius: 12px;
+  color: alpha(currentColor, .62);
+}
+.sync-status-dialog {
+  padding: 8px 10px 10px;
+  border-radius: 9px;
+  background: var(--window-bg-color);
+  box-shadow: 0 1px 4px alpha(black, .22);
+}
+.message-row { padding: 10px 12px 10px 9px; border-left: 3px solid transparent; border-bottom: 1px solid alpha(currentColor, .08); }
+.message-row:selected { border-left-color: var(--accent-bg-color); }
+.message-row.unread .sender, .message-row.unread .subject { font-weight: 700; }
+.sender-avatar { background: color-mix(in srgb, var(--accent-bg-color) 70%, var(--window-bg-color)); color: var(--accent-fg-color); font-weight: 700; }
+.preview { color: alpha(currentColor, .62); }
+.timestamp { color: alpha(currentColor, .58); font-size: .86em; }
+.reading-pane { background: var(--view-bg-color); }
+.message-header { padding: 24px 30px 14px; }
+.message-subject { font-size: 1.55em; font-weight: 700; }
+.message-body { padding: 8px 30px 40px; font-size: 1.04em; }
+.remote-notice { margin: 0 30px 12px; }
+.empty-state { color: alpha(currentColor, .64); }
+.compose-header-fields { background: var(--view-bg-color); padding: 5px 0 4px; }
+.compose-field-row { min-height: 42px; padding: 0 16px; }
+.compose-field-label { color: color-mix(in srgb, currentColor 62%, transparent); font-weight: 500; }
+.compose-line-entry { min-height: 36px; padding: 0 2px; background: transparent; box-shadow: none; border: 0; }
+.compose-line-entry:focus, .compose-line-entry:focus-within { outline: none; box-shadow: none; }
+.compose-subject-entry { font-weight: 500; }
+.compose-field-separator { margin-left: 88px; opacity: .5; }
+.compose-recipient-reveal { min-width: 34px; min-height: 30px; padding: 2px 7px; color: var(--accent-color); }
+.compose-from-selector button { min-height: 34px; padding: 0 6px; background: transparent; box-shadow: none; border: 0; }
+.compose-body { padding: 18px; }
+.attachment-chip {
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: alpha(currentColor, .07);
+}
+.outbox-status {
+  margin: 10px 14px 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning-bg-color) 16%, var(--view-bg-color));
+  border: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
+}
+.outbox-status.accepted {
+  background: color-mix(in srgb, var(--success-bg-color) 14%, var(--view-bg-color));
+  border-color: color-mix(in srgb, var(--success-color) 28%, transparent);
+}
+.recipient-popover > contents {
+  border: 1px solid alpha(currentColor, 0.18);
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.recipient-suggestions {
+  padding: 4px;
+  min-width: 320px;
+}
+
+.recipient-suggestions row {
+  border-radius: 6px;
+}

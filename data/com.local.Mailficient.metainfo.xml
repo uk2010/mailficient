@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.local.Mailficient</id>
+  <name>Mailficient</name>
+  <summary>A focused, native desktop email client</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="com.local.mailficient"><name>Mailficient contributors</name></developer>
+  <description><p>Mailficient provides a refined three-pane interface, secure message reading, composing, search, and offline-friendly account synchronization.</p></description>
+  <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
+  <provides><binary>mailficient</binary></provides>
+  <content_rating type="oars-1.1"/>
+</component>

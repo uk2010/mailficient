@@ -1,0 +1,36 @@
+# Meson and native build output
+/build*/
+/compile_commands.json
+
+# Flatpak and packaging output
+/.flatpak-builder/
+/flatpak-build*/
+/flatpak-repo*/
+/dist/
+/Screenshots/
+/*.flatpak
+/*.snap
+
+# Local application state and credentials
+/.env
+/.env.*
+/.direnv/
+/*.db
+/*.db-*
+/*.sqlite
+/*.sqlite-*
+/*.pem
+/*.key
+/*.p12
+/*credentials*
+/*secrets*
+/*token*
+
+# Editor and temporary files
+*.swp
+*~
+.DS_Store
+*.log
+*.tmp
+*.core
+core
