@@ -144,6 +144,8 @@ private class RecordingMailEngine : Object, MailEngine {
     public bool fail_send;
     public bool reject_send;
     public bool rate_limit_send;
+    public bool stall_connect;
+    public bool stall_send;
     public Error? synchronize_failure;
     public int remote_attachment_calls;
     public int64 last_remote_attachment_maximum;
@@ -162,6 +164,18 @@ private class RecordingMailEngine : Object, MailEngine {
     }
 
     public async void connect_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
+        if (stall_connect) {
+            if (cancellable == null) {
+                yield;
+            } else {
+                ulong handler = cancellable.cancelled.connect (() => {
+                    Idle.add (() => { connect_account.callback (); return Source.REMOVE; });
+                });
+                if (!cancellable.is_cancelled ()) yield;
+                cancellable.disconnect (handler);
+                cancellable.set_error_if_cancelled ();
+            }
+        }
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         connect_calls++;
     }
@@ -206,6 +220,18 @@ private class RecordingMailEngine : Object, MailEngine {
     public async SendResult send (Draft draft, Cancellable? cancellable = null) throws Error {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         send_calls++;
+        if (stall_send) {
+            if (cancellable == null) {
+                yield;
+            } else {
+                ulong handler = cancellable.cancelled.connect (() => {
+                    Idle.add (() => { send.callback (); return Source.REMOVE; });
+                });
+                if (!cancellable.is_cancelled ()) yield;
+                cancellable.disconnect (handler);
+                cancellable.set_error_if_cancelled ();
+            }
+        }
         if (rate_limit_send) throw new MailError.RATE_LIMITED ("Too many requests; temporarily throttled");
         if (reject_send) throw new MailError.SEND_REJECTED ("550 Recipient address rejected");
         if (fail_send) throw new MailError.CONNECTION ("SMTP response was lost");
@@ -1272,6 +1298,47 @@ private void test_scheduled_delivery_timer () {
         assert (!timed_out); assert (delivered); assert (engine.send_calls == 1);
         assert (cache.find_outbox_item (draft.id) == null);
     } catch (Error error) { GLib.error ("scheduled delivery timer test failed: %s", error.message); }
+}
+
+private void test_outbound_deadlines () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-send-deadlines-%s".printf (Uuid.string_random ()));
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "deadline-account"; account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var engine = new RecordingMailEngine (account.id); engine.stall_connect = true;
+        var service = new OutboundService (cache, engine, attachments, 1, 1);
+        var connect_draft = new Draft (account.id); connect_draft.to = "maya@example.net";
+        connect_draft.body_text = "Connection must stop";
+        Error? failure = null; var loop = new MainLoop ();
+        service.deliver.begin (connect_draft, null, (object, result) => {
+            try { service.deliver.end (result); } catch (Error error) { failure = error; }
+            loop.quit ();
+        });
+        loop.run ();
+        assert (failure is MailError.TIMEOUT);
+        var connect_item = cache.find_outbox_item (connect_draft.id); assert (connect_item != null);
+        assert (connect_item.delivery_state == OutboxDeliveryState.QUEUED);
+        assert (connect_item.last_error.contains ("connecting within 1 seconds"));
+
+        engine.stall_connect = false; engine.stall_send = true; failure = null;
+        var send_draft = new Draft (account.id); send_draft.to = "maya@example.net";
+        send_draft.body_text = "SMTP must stop";
+        service.deliver.begin (send_draft, null, (object, result) => {
+            try { service.deliver.end (result); } catch (Error error) { failure = error; }
+            loop.quit ();
+        });
+        loop.run ();
+        assert (failure is MailError.DELIVERY_UNCERTAIN);
+        var send_item = cache.find_outbox_item (send_draft.id); assert (send_item != null);
+        assert (send_item.delivery_state == OutboxDeliveryState.SENDING);
+        assert (send_item.requires_resend_confirmation ());
+        assert (send_item.last_error.contains ("sending within 1 seconds"));
+    } catch (Error error) { GLib.error ("outbound deadline test failed: %s", error.message); }
 }
 
 private void test_attachment_send_preflight () {
@@ -2718,6 +2785,7 @@ int main (string[] args) {
     Test.add_func ("/storage/drafts", test_cache_drafts);
     Test.add_func ("/outbound/queue-and-retry", test_outbound_queue);
     Test.add_func ("/outbound/scheduled-delivery-timer", test_scheduled_delivery_timer);
+    Test.add_func ("/outbound/deadlines", test_outbound_deadlines);
     Test.add_func ("/outbound/attachment-preflight", test_attachment_send_preflight);
     Test.add_func ("/outbound/delivery-state-machine", test_outbox_delivery_state_machine);
     Test.add_func ("/outbound/rate-limit-backoff", test_rate_limited_send_is_retryable);

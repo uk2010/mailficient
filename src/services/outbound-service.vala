@@ -1,7 +1,53 @@
 namespace Mailficient {
 public enum SendDisposition { SENT, QUEUED }
 
+private class OperationDeadline : Object {
+    public Cancellable cancellable { get; private set; }
+    public bool timed_out { get; private set; }
+    private Cancellable? parent;
+    private ulong parent_handler;
+    private uint timeout_source;
+
+    public OperationDeadline (uint timeout_seconds, Cancellable? parent = null) {
+        cancellable = new Cancellable ();
+        this.parent = parent;
+        if (parent != null) {
+            parent_handler = parent.cancelled.connect (() => {
+                if (timeout_source != 0) {
+                    Source.remove (timeout_source);
+                    timeout_source = 0;
+                }
+                cancellable.cancel ();
+            });
+            if (parent.is_cancelled ()) {
+                cancellable.cancel ();
+                return;
+            }
+        }
+        timeout_source = Timeout.add_seconds (uint.max (1, timeout_seconds), () => {
+            timeout_source = 0;
+            timed_out = true;
+            cancellable.cancel ();
+            return Source.REMOVE;
+        });
+    }
+
+    public void close () {
+        if (timeout_source != 0) {
+            Source.remove (timeout_source);
+            timeout_source = 0;
+        }
+        if (parent != null && parent_handler != 0) {
+            parent.disconnect (parent_handler);
+            parent_handler = 0;
+        }
+        parent = null;
+    }
+}
+
 public class OutboundService : Object {
+    public const uint DEFAULT_CONNECTION_TIMEOUT_SECONDS = 30;
+    public const uint DEFAULT_DELIVERY_TIMEOUT_SECONDS = 120;
     public signal void delivered (string draft_id);
     public signal void delivery_failed (string draft_id, UserFacingError error);
     public signal void sent_filing_failed (string draft_id, string detail);
@@ -11,9 +57,15 @@ public class OutboundService : Object {
     private bool scheduler_started;
     private Gee.HashMap<string, uint> scheduled_sources = new Gee.HashMap<string, uint> ();
     private Gee.HashSet<string> retrying_accounts = new Gee.HashSet<string> ();
+    private uint connection_timeout_seconds;
+    private uint delivery_timeout_seconds;
 
-    public OutboundService (CacheDatabase cache, MailEngine? engine, AttachmentService attachment_service) {
+    public OutboundService (CacheDatabase cache, MailEngine? engine, AttachmentService attachment_service,
+                            uint connection_timeout_seconds = DEFAULT_CONNECTION_TIMEOUT_SECONDS,
+                            uint delivery_timeout_seconds = DEFAULT_DELIVERY_TIMEOUT_SECONDS) {
         this.cache = cache; this.engine = engine; this.attachment_service = attachment_service;
+        this.connection_timeout_seconds = uint.max (1, connection_timeout_seconds);
+        this.delivery_timeout_seconds = uint.max (1, delivery_timeout_seconds);
     }
 
     public async SendDisposition deliver (Draft draft, Cancellable? cancellable = null) throws Error {
@@ -30,37 +82,51 @@ public class OutboundService : Object {
         if (engine == null || draft.account_id == "demo-account") return SendDisposition.QUEUED;
         var account = cache.find_account (draft.account_id);
         if (account == null) return SendDisposition.QUEUED;
-        try { yield engine.connect_account (account, cancellable); }
+        var connection_deadline = new OperationDeadline (connection_timeout_seconds, cancellable);
+        try {
+            try { yield engine.connect_account (account, connection_deadline.cancellable); }
+            finally { connection_deadline.close (); }
+        }
         catch (Error error) {
-            cache.record_send_failure (draft.id, error.message);
-            if (error is MailError.AUTHENTICATION || error is MailError.TLS || error is MailError.OFFLINE ||
-                error is MailError.TIMEOUT || error is MailError.RATE_LIMITED ||
-                error is MailError.CANCELLED)
-                throw error;
-            throw new MailError.SEND_FAILED (error.message);
+            Error effective_error = connection_deadline.timed_out ?
+                new MailError.TIMEOUT ("The mail server did not finish connecting within %u seconds".printf (
+                    connection_timeout_seconds)) : error;
+            cache.record_send_failure (draft.id, effective_error.message);
+            if (effective_error is MailError.AUTHENTICATION || effective_error is MailError.TLS ||
+                effective_error is MailError.OFFLINE || effective_error is MailError.TIMEOUT ||
+                effective_error is MailError.RATE_LIMITED || effective_error is MailError.CANCELLED)
+                throw effective_error;
+            throw new MailError.SEND_FAILED (effective_error.message);
         }
         cache.mark_send_started (draft.id);
-        SendResult result;
-        try { result = yield engine.send (draft, cancellable); }
+        SendResult result = new SendResult ();
+        var delivery_deadline = new OperationDeadline (delivery_timeout_seconds, cancellable);
+        try {
+            try { result = yield engine.send (draft, delivery_deadline.cancellable); }
+            finally { delivery_deadline.close (); }
+        }
         catch (Error error) {
+            Error effective_error = delivery_deadline.timed_out ?
+                new MailError.TIMEOUT ("The mail server did not finish sending within %u seconds".printf (
+                    delivery_timeout_seconds)) : error;
             // Protocol rejection, authentication, TLS, and local attachment
             // failures prove SMTP did not accept the message. Keep the normal
             // retryable queue. Lost transport, timeout, and cancellation after
             // SMTP ownership remain uncertain to avoid duplicate mail.
-            if (error is MailError.SEND_REJECTED) {
-                cache.record_send_rejection (draft.id, error.message);
-                throw error;
+            if (effective_error is MailError.SEND_REJECTED) {
+                cache.record_send_rejection (draft.id, effective_error.message);
+                throw effective_error;
             }
-            if (error is MailError.SEND_FAILED || error is MailError.RATE_LIMITED ||
-                error is MailError.AUTHENTICATION || error is MailError.TLS ||
-                error is MailError.ATTACHMENT || error is MailError.INVALID_MESSAGE) {
-                cache.record_send_failure (draft.id, error.message);
-                throw error;
+            if (effective_error is MailError.SEND_FAILED || effective_error is MailError.RATE_LIMITED ||
+                effective_error is MailError.AUTHENTICATION || effective_error is MailError.TLS ||
+                effective_error is MailError.ATTACHMENT || effective_error is MailError.INVALID_MESSAGE) {
+                cache.record_send_failure (draft.id, effective_error.message);
+                throw effective_error;
             }
             // Once SMTP transmission begins, a lost response can mean either
             // failure or acceptance. Automatic retry could duplicate mail.
-            cache.record_send_uncertain (draft.id, error.message);
-            throw new MailError.DELIVERY_UNCERTAIN (error.message);
+            cache.record_send_uncertain (draft.id, effective_error.message);
+            throw new MailError.DELIVERY_UNCERTAIN (effective_error.message);
         }
         try { cache.mark_send_accepted (draft.id); }
         catch (Error error) { warning ("Could not persist confirmed delivery state: %s", error.message); }
