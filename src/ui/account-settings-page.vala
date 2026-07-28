@@ -118,12 +118,27 @@ public class AccountSettingsPage : Adw.PreferencesPage {
     }
 
     private void open_add_dialog () {
-        var dialog = new AccountDialog (account_provisioner);
-        dialog.account_saved.connect ((account) => {
+        var dialog = new ProviderChooserDialog ();
+        dialog.provider_selected.connect (open_provider);
+        dialog.present (this);
+    }
+
+    private void open_provider (MailProvider provider) {
+        if (provider == MailProvider.GOOGLE || provider == MailProvider.MICROSOFT) {
+            var online = new OnlineAccountDialog (cache, account_provisioner, online_accounts, provider);
+            online.account_saved.connect ((account) => {
+                reload ();
+                account_saved (account);
+            });
+            online.present ((Gtk.Widget) get_root ());
+            return;
+        }
+        var manual = new AccountDialog (account_provisioner, null, provider);
+        manual.account_saved.connect ((account) => {
             reload ();
             account_saved (account);
         });
-        dialog.present (this);
+        manual.present ((Gtk.Widget) get_root ());
     }
 
     private void open_edit_dialog (AccountSettings account) {

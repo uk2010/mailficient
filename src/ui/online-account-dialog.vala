@@ -10,11 +10,17 @@ public class OnlineAccountDialog : Adw.PreferencesDialog {
     private Gee.ArrayList<Gtk.Button> connect_buttons = new Gee.ArrayList<Gtk.Button> ();
     private Gtk.Spinner spinner = new Gtk.Spinner ();
     private bool connecting;
+    private MailProvider provider_filter;
 
     public OnlineAccountDialog (CacheDatabase cache, AccountProvisioningService? account_provisioner,
-                                OnlineAccountService online_accounts) {
+                                OnlineAccountService online_accounts,
+                                MailProvider provider_filter = MailProvider.OTHER) {
         this.cache = cache; this.account_provisioner = account_provisioner; this.online_accounts = online_accounts;
-        title = "GNOME Online Accounts"; content_width = 620; content_height = 320;
+        this.provider_filter = provider_filter;
+        title = provider_filter == MailProvider.GOOGLE ? "Add Google Account" :
+            provider_filter == MailProvider.MICROSOFT ? "Add Microsoft Exchange Account" :
+            "GNOME Online Accounts";
+        content_width = 620; content_height = 320;
         var page = new Adw.PreferencesPage (); page.title = "Online Accounts";
         page.icon_name = "network-server-symbolic";
         accounts_group.title = "Available Mail Accounts";
@@ -38,11 +44,34 @@ public class OnlineAccountDialog : Adw.PreferencesDialog {
                 empty.add_prefix (new Gtk.Image.from_icon_name ("dialog-information-symbolic"));
                 accounts_group.add (empty); return;
             }
-            foreach (var account in accounts) accounts_group.add (account_row (account));
+            int shown = 0;
+            foreach (var account in accounts) {
+                if (!matches_filter (account)) continue;
+                accounts_group.add (account_row (account)); shown++;
+            }
+            if (shown == 0) {
+                var empty = new Adw.ActionRow ();
+                empty.title = provider_filter == MailProvider.GOOGLE ?
+                    "No Google mail account is available" :
+                    "No Microsoft mail account is available";
+                empty.subtitle = "Add the account in Settings → Online Accounts, enable Mail, then return here.";
+                empty.add_prefix (new Gtk.Image.from_icon_name ("dialog-information-symbolic"));
+                accounts_group.add (empty);
+            }
         } catch (Error error) {
             accounts_group.remove (loading); spinner.spinning = false;
             show_error (UserFacingError.from_error (error));
         }
+    }
+
+    private bool matches_filter (OnlineMailAccount account) {
+        if (provider_filter == MailProvider.OTHER) return true;
+        string name = account.provider_name.down ();
+        if (provider_filter == MailProvider.GOOGLE) return name.contains ("google");
+        if (provider_filter == MailProvider.MICROSOFT)
+            return name.contains ("microsoft") || name.contains ("windows") ||
+                name.contains ("exchange") || name.contains ("office");
+        return false;
     }
 
     private Adw.ActionRow account_row (OnlineMailAccount account) {

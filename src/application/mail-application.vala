@@ -203,6 +203,8 @@ public class MailApplication : Adw.Application {
             window.show_preferences ("accounts");
         if (Environment.get_variable ("MAILFICIENT_QA_ONLINE_ACCOUNTS") == "1")
             new OnlineAccountDialog (cache, account_provisioner, new DemoOnlineAccountService ()).present (window);
+        if (Environment.get_variable ("MAILFICIENT_QA_PROVIDERS") == "1")
+            new ProviderChooserDialog ().present (window);
         string? qa_preferences = Environment.get_variable ("MAILFICIENT_QA_PREFERENCES");
         if (qa_preferences != null && qa_preferences != "" && qa_preferences != "0") window.show_preferences ();
     }

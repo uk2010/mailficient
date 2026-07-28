@@ -84,6 +84,7 @@ sources = files(
   'ui/compose-header.vala',
   'ui/rich-text-buffer.vala',
   'ui/account-dialog.vala',
+  'ui/provider-chooser-dialog.vala',
   'ui/account-manager-dialog.vala',
   'ui/account-settings-page.vala',
   'ui/online-account-dialog.vala',

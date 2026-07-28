@@ -1,6 +1,7 @@
 namespace Mailficient {
 public enum EncryptionMode { TLS, STARTTLS, NONE }
 public enum AuthenticationMode { PASSWORD, GNOME_ONLINE_ACCOUNTS }
+public enum MailProvider { OTHER, ICLOUD, MICROSOFT, GOOGLE, YAHOO, AOL }
 
 public class AccountSettings : Object {
     public string id { get; set; default = Uuid.string_random (); }
@@ -39,11 +40,50 @@ public class AccountSettings : Object {
     }
 
     public static AccountSettings for_email (string display_name, string email) {
+        string domain = email.contains ("@") ? email.substring (email.last_index_of_char ('@') + 1).down () : "";
+        MailProvider provider = MailProvider.OTHER;
+        if (domain == "gmail.com" || domain == "googlemail.com") provider = MailProvider.GOOGLE;
+        else if (domain == "outlook.com" || domain == "hotmail.com" || domain == "live.com" ||
+                 domain == "msn.com") provider = MailProvider.MICROSOFT;
+        else if (domain == "icloud.com" || domain == "me.com" || domain == "mac.com")
+            provider = MailProvider.ICLOUD;
+        else if (domain == "yahoo.com" || domain == "ymail.com" || domain == "rocketmail.com")
+            provider = MailProvider.YAHOO;
+        else if (domain == "aol.com") provider = MailProvider.AOL;
+        return for_provider (provider, display_name, email);
+    }
+
+    public static AccountSettings for_provider (MailProvider provider, string display_name, string email) {
         var value = new AccountSettings (); value.display_name = display_name; value.email = email;
         value.incoming_username = email; value.outgoing_username = email;
-        string domain = email.contains ("@") ? email.substring (email.last_index_of_char ('@') + 1).down () : "";
-        if (domain == "gmail.com") { value.incoming_host = "imap.gmail.com"; value.outgoing_host = "smtp.gmail.com"; value.outgoing_port = 465; }
-        else if (domain == "outlook.com" || domain == "hotmail.com" || domain == "live.com") { value.incoming_host = "outlook.office365.com"; value.outgoing_host = "smtp.office365.com"; value.outgoing_port = 587; value.outgoing_encryption = EncryptionMode.STARTTLS; }
+        switch (provider) {
+        case MailProvider.ICLOUD:
+            value.incoming_host = "imap.mail.me.com"; value.incoming_port = 993;
+            value.outgoing_host = "smtp.mail.me.com"; value.outgoing_port = 587;
+            value.outgoing_encryption = EncryptionMode.STARTTLS;
+            if (email.contains ("@"))
+                value.incoming_username = email.substring (0, email.last_index_of_char ('@'));
+            break;
+        case MailProvider.MICROSOFT:
+            value.incoming_host = "outlook.office365.com"; value.incoming_port = 993;
+            value.outgoing_host = "smtp.office365.com"; value.outgoing_port = 587;
+            value.outgoing_encryption = EncryptionMode.STARTTLS;
+            break;
+        case MailProvider.GOOGLE:
+            value.incoming_host = "imap.gmail.com"; value.incoming_port = 993;
+            value.outgoing_host = "smtp.gmail.com"; value.outgoing_port = 465;
+            break;
+        case MailProvider.YAHOO:
+            value.incoming_host = "imap.mail.yahoo.com"; value.incoming_port = 993;
+            value.outgoing_host = "smtp.mail.yahoo.com"; value.outgoing_port = 465;
+            break;
+        case MailProvider.AOL:
+            value.incoming_host = "imap.aol.com"; value.incoming_port = 993;
+            value.outgoing_host = "smtp.aol.com"; value.outgoing_port = 465;
+            break;
+        default:
+            break;
+        }
         return value;
     }
 }

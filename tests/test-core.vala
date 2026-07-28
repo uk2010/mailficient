@@ -844,6 +844,28 @@ private void test_account_validation () {
     try { settings.validate (); } catch (Error error) { assert_not_reached (); }
     settings.incoming_port = 0;
     try { settings.validate (); assert_not_reached (); } catch (MailError error) { assert (error is MailError.INVALID_ACCOUNT); }
+
+    var icloud = AccountSettings.for_email ("Alex", "alex@icloud.com");
+    assert (icloud.incoming_host == "imap.mail.me.com");
+    assert (icloud.incoming_username == "alex");
+    assert (icloud.outgoing_host == "smtp.mail.me.com");
+    assert (icloud.outgoing_port == 587);
+    assert (icloud.outgoing_encryption == EncryptionMode.STARTTLS);
+
+    var yahoo = AccountSettings.for_email ("Alex", "alex@yahoo.com");
+    assert (yahoo.incoming_host == "imap.mail.yahoo.com");
+    assert (yahoo.outgoing_host == "smtp.mail.yahoo.com");
+    assert (yahoo.outgoing_port == 465);
+
+    var aol = AccountSettings.for_email ("Alex", "alex@aol.com");
+    assert (aol.incoming_host == "imap.aol.com");
+    assert (aol.outgoing_host == "smtp.aol.com");
+
+    var microsoft = AccountSettings.for_provider (
+        MailProvider.MICROSOFT, "Alex", "alex@business.example");
+    assert (microsoft.incoming_host == "outlook.office365.com");
+    assert (microsoft.outgoing_host == "smtp.office365.com");
+    assert (microsoft.outgoing_encryption == EncryptionMode.STARTTLS);
 }
 
 private Variant test_goa_interfaces (bool smtp_xoauth2 = true) {

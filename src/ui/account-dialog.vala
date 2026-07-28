@@ -20,14 +20,19 @@ public class AccountDialog : Adw.PreferencesDialog {
     private Gtk.Button save = new Gtk.Button.with_label ("Test and Add Account");
     private bool applied_defaults;
     private AccountSettings? existing;
+    private MailProvider provider;
 
-    public AccountDialog (AccountProvisioningService? provisioner, AccountSettings? existing = null) {
+    public AccountDialog (AccountProvisioningService? provisioner, AccountSettings? existing = null,
+                          MailProvider provider = MailProvider.OTHER) {
         this.provisioner = provisioner;
         this.existing = existing;
-        title = existing == null ? "Add Mail Account" : "Edit Mail Account";
+        this.provider = provider;
+        title = existing == null ? provider_title (provider) : "Edit Mail Account";
         content_width = 680; content_height = 760;
         var page = new Adw.PreferencesPage (); page.title = "Account"; page.icon_name = "avatar-default-symbolic";
         var identity = new Adw.PreferencesGroup (); identity.title = "Identity";
+        string guidance = provider_guidance (provider);
+        if (existing == null && guidance != "") identity.description = guidance;
         identity.add (display_name_row); identity.add (email);
         var incoming = new Adw.PreferencesGroup (); incoming.title = "Incoming Mail (IMAP)";
         incoming.add (incoming_host); incoming.add (incoming_user); incoming.add (incoming_port); incoming.add (incoming_security); incoming.add (authentication);
@@ -42,6 +47,11 @@ public class AccountDialog : Adw.PreferencesDialog {
         page.add (identity); page.add (incoming); page.add (outgoing); page.add (actions); add (page);
         email.changed.connect (apply_provider_defaults);
         if (existing != null) populate (existing);
+        else if (provider != MailProvider.OTHER) {
+            apply_preset (AccountSettings.for_provider (provider, "", ""));
+            applied_defaults = true;
+            password.title = "App-specific password";
+        }
         if (Environment.get_variable ("MAILFICIENT_QA_ACCOUNT_TLS_ERROR") == "1") {
             Idle.add (() => {
                 show_connection_error (new MailError.TLS (
@@ -87,13 +97,45 @@ public class AccountDialog : Adw.PreferencesDialog {
     }
 
     private void apply_provider_defaults () {
-        if (applied_defaults || !RecipientParser.is_valid_address (email.text)) return;
-        var preset = AccountSettings.for_email (display_name_row.text, email.text);
+        if (!RecipientParser.is_valid_address (email.text)) return;
+        var preset = provider == MailProvider.OTHER ?
+            AccountSettings.for_email (display_name_row.text, email.text) :
+            AccountSettings.for_provider (provider, display_name_row.text, email.text);
         if (preset.incoming_host == "") return;
-        incoming_host.text = preset.incoming_host; incoming_port.text = preset.incoming_port.to_string (); incoming_user.text = email.text;
-        outgoing_host.text = preset.outgoing_host; outgoing_port.text = preset.outgoing_port.to_string (); outgoing_user.text = email.text;
-        outgoing_security.selected = preset.outgoing_encryption == EncryptionMode.TLS ? 0 : 1;
+        if (provider == MailProvider.OTHER && applied_defaults) return;
+        apply_preset (preset);
         applied_defaults = true;
+    }
+
+    private void apply_preset (AccountSettings preset) {
+        incoming_host.text = preset.incoming_host; incoming_port.text = preset.incoming_port.to_string ();
+        outgoing_host.text = preset.outgoing_host; outgoing_port.text = preset.outgoing_port.to_string ();
+        incoming_user.text = preset.incoming_username;
+        outgoing_user.text = preset.outgoing_username;
+        incoming_security.selected = preset.incoming_encryption == EncryptionMode.TLS ? 0 : 1;
+        outgoing_security.selected = preset.outgoing_encryption == EncryptionMode.TLS ? 0 : 1;
+    }
+
+    private static string provider_title (MailProvider provider) {
+        switch (provider) {
+        case MailProvider.ICLOUD: return "Add iCloud Account";
+        case MailProvider.YAHOO: return "Add Yahoo Account";
+        case MailProvider.AOL: return "Add AOL Account";
+        default: return "Add Mail Account";
+        }
+    }
+
+    private static string provider_guidance (MailProvider provider) {
+        switch (provider) {
+        case MailProvider.ICLOUD:
+            return "Generate an app-specific password in your Apple Account, then enter it below.";
+        case MailProvider.YAHOO:
+            return "Generate a third-party app password in Yahoo Account Security, then enter it below.";
+        case MailProvider.AOL:
+            return "If AOL rejects your regular password, generate an app password in AOL Account Security.";
+        default:
+            return "";
+        }
     }
 
     private AccountSettings settings_from_form () throws MailError {
