@@ -65,6 +65,24 @@ Snap installations do not auto-connect that sensitive interface. The Snap has
 its own application data directory, so accounts and cached mail from a Flatpak
 installation are not imported automatically.
 
+## Debian package (Ubuntu 26.04 AMD64)
+
+The Debian-package builder produces a native host package that does not require
+Flatpak after installation. It uses Ubuntu's GTK, Libadwaita, WebKitGTK, and
+libsecret runtime libraries while privately bundling the matching Camel mail
+engine used by the qualified application build:
+
+```sh
+tools/build-deb.sh
+sudo apt install ./dist/mailficient_0.1.0_amd64.deb
+mailficient
+```
+
+The resulting package is intended for Ubuntu 26.04 on AMD64. Building it
+requires the GNOME 49 SDK and the checked Camel-enabled build artifacts; these
+are already present in the documented Flatpak development environment.
+The builder also writes a matching `.deb.sha256` checksum for release uploads.
+
 ## Status
 
 The complete feature roadmap is implemented: bounded page-by-page browsing and search; multi-selection and bulk actions; recoverable Trash moves plus confirmed permanent deletion and Empty Trash/Junk; rich composition with formatting, links, lists, inline images, and attachments; local rules and labels; scheduled sending, snooze, templates, and per-account vacation replies; EML/PDF export and printing; and OpenPGP/S/MIME signing, encryption, decryption, and signature verification. See [the feature guide](docs/features.md) for the controls and operational details.

@@ -11,7 +11,7 @@ Highlights include:
 - Offline cache, full-text search, drafts, Outbox, and background sync
 - Safe plain-text and sanitized HTML message display
 - Compose, reply, forwarding, attachments, signatures, and rich formatting
-- Flatpak and Snap packaging definitions
+- Flatpak, Debian, and Snap packaging
 - Automated core, Camel-boundary, accessibility, and visual-QA helpers
 
 The standard IMAP/SMTP path is implemented. Controlled real-provider

@@ -5,6 +5,7 @@
   <summary>A focused, native desktop email client</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
+  <url type="homepage">https://github.com/uk2010/mailficient</url>
   <developer id="com.local.mailficient"><name>Mailficient contributors</name></developer>
   <description><p>Mailficient provides a refined three-pane interface, secure message reading, composing, search, and offline-friendly account synchronization.</p></description>
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>

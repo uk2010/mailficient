@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+private_lib=/usr/lib/mailficient
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    export LD_LIBRARY_PATH="$private_lib:$private_lib/evolution-data-server:$LD_LIBRARY_PATH"
+else
+    export LD_LIBRARY_PATH="$private_lib:$private_lib/evolution-data-server"
+fi
+export EDS_CAMEL_PROVIDER_DIR="$private_lib/evolution-data-server/camel-providers"
+
+exec "$private_lib/mailficient.real" "$@"
