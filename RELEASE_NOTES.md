@@ -1,7 +1,9 @@
-# Mailficient 0.1.0
+# Mailficient 0.1.1
 
-Mailficient 0.1.0 is the first public source release of the native Linux
-desktop email client.
+Mailficient 0.1.1 is the corrected Debian release of the native Linux desktop
+email client. It removes an obsolete scalable icon that caused GNOME to show
+the wrong application artwork and uses the intended black-and-white Mailficient
+icon set.
 
 Highlights include:
 

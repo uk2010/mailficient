@@ -74,7 +74,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.0_amd64.deb
+sudo apt install ./dist/mailficient_0.1.1_amd64.deb
 mailficient
 ```
 

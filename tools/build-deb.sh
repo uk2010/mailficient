@@ -68,11 +68,6 @@ for icon_size in 64x64 128x128 256x256 512x512; do
         "$root_dir/data/icons/hicolor/$icon_size/apps/com.local.Mailficient.png" \
         "$stage/usr/share/icons/hicolor/$icon_size/apps/"
 done
-install -d "$stage/usr/share/icons/hicolor/scalable/apps"
-install -m 0644 \
-    "$root_dir/data/icons/hicolor/scalable/apps/com.local.Mailficient.svg" \
-    "$stage/usr/share/icons/hicolor/scalable/apps/"
-
 install -m 0644 "$root_dir/README.md" "$stage/usr/share/doc/mailficient/README.md"
 install -m 0644 "$root_dir/RELEASE_NOTES.md" \
     "$stage/usr/share/doc/mailficient/RELEASE_NOTES.md"
