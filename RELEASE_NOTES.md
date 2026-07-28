@@ -1,9 +1,10 @@
 # Mailficient 0.1.1
 
-Mailficient 0.1.1 is the corrected Debian release of the native Linux desktop
-email client. It removes an obsolete scalable icon that caused GNOME to show
-the wrong application artwork and uses the intended black-and-white Mailficient
-icon set.
+Mailficient 0.1.1 is the corrected packaging release of the native Linux
+desktop email client. It removes an obsolete scalable icon that caused GNOME
+to show the wrong application artwork and uses the intended black-and-white
+Mailficient icon set. The release includes both an Ubuntu 26.04 AMD64 `.deb`
+and an x86-64 Flatpak bundle.
 
 Highlights include:
 
@@ -14,6 +15,7 @@ Highlights include:
 - Safe plain-text and sanitized HTML message display
 - Compose, reply, forwarding, attachments, signatures, and rich formatting
 - Flatpak, Debian, and Snap packaging
+- Reproducible Flatpak source manifest with pinned libical and Camel dependencies
 - Automated core, Camel-boundary, accessibility, and visual-QA helpers
 
 The standard IMAP/SMTP path is implemented. Controlled real-provider

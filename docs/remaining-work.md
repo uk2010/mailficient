@@ -18,7 +18,7 @@ This removes the known unbounded application allocations. A 240-cycle streamed s
 4. The credential-free OAuth boundary covers GNOME Online Accounts discovery parsing, XOAUTH2 selection, short-lived token bridging, and token removal.
 5. The live AT-SPI audit found 51 visible interactive controls and no unnamed actionable control. Automated keyboard QA verifies Ctrl+F, Ctrl+N, and forward Tab focus.
 6. Light, dark, and narrow screenshots were repeated and inspected without a visual defect.
-7. A clean Flatpak Builder build compiled libical, Evolution Data Server, and Mailficient from the manifest, then passed the full core and Camel suites during the build. Desktop metadata, XML, and icon checks pass. AppStream reports only the expected missing-homepage warning because this local project has no published homepage; no URL was fabricated.
+7. A clean Flatpak Builder build compiled libical, Evolution Data Server, and Mailficient from the manifest, then passed the full core and Camel suites during the build. Desktop metadata, XML, icon, and AppStream checks pass.
 
 ## External qualification still required
 

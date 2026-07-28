@@ -39,6 +39,21 @@ Fedora equivalents include `vala`, `meson`, `ninja-build`, `gtk4-devel`, `libadw
 
 Without host development packages, use GNOME Builder or a GNOME SDK shell. The Flatpak manifest builds Evolution Data Server 3.60.2 from its checksum-pinned official source and enables the conditional Camel adapter.
 
+## Flatpak package
+
+Download `Mailficient-0.1.1-x86_64.flatpak` from the
+[v0.1.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.1),
+then install and run it with:
+
+```sh
+flatpak install --user ./Mailficient-0.1.1-x86_64.flatpak
+flatpak run --user com.local.Mailficient
+```
+
+The complete application source, tests, icons, metadata, and pinned Flatpak
+manifest are in this repository. See [the Flatpak build guide](docs/flatpak.md)
+for a clean source build and bundle instructions.
+
 ## Snap packages (AMD64 and ARM64)
 
 The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
