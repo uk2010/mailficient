@@ -52,6 +52,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Button delete_button = new Gtk.Button.from_icon_name ("user-trash-symbolic");
     private Gtk.Button junk_button = new Gtk.Button.from_icon_name ("dialog-warning-symbolic");
     private Gtk.Button flag_button = new Gtk.Button.from_icon_name ("mailficient-flag-symbolic");
+    private Gtk.MenuButton flag_color_button = new Gtk.MenuButton ();
     private Gtk.MenuButton more_button = new Gtk.MenuButton ();
     private Gtk.MenuButton move_button = new Gtk.MenuButton ();
     private SimpleAction? group_messages_action;
@@ -149,6 +150,11 @@ public class MailWindow : Adw.ApplicationWindow {
         sidebar.rename_folder_requested.connect ((mailbox) => prompt_rename_folder.begin (mailbox));
         sidebar.delete_folder_requested.connect ((mailbox) => prompt_delete_folder.begin (mailbox));
         sidebar.empty_role_requested.connect ((role) => prompt_empty_role.begin (role));
+        sidebar.empty_mailbox_requested.connect ((mailbox) => prompt_empty_mailbox.begin (mailbox));
+        sidebar.export_mailbox_requested.connect ((mailbox) => export_mailbox.begin (mailbox));
+        sidebar.synchronize_account_requested.connect ((account) => synchronize_account.begin (account));
+        sidebar.edit_account_requested.connect (edit_account);
+        sidebar.account_info_requested.connect (show_account_info);
         message_list.message_selected.connect ((message) => {
             if (is_local_draft (message.id)) {
                 selected_message = null; reader.show_empty (); update_action_sensitivity (); return;
@@ -449,6 +455,25 @@ public class MailWindow : Adw.ApplicationWindow {
         } catch (Error error) { show_operation_error (error); }
     }
 
+    private async void prompt_empty_mailbox (Mailbox mailbox) {
+        string name = mailbox.role == MailboxRole.TRASH ? "Trash" : "Junk";
+        AccountSettings? account = null;
+        try { account = cache.find_account (mailbox.account_id); }
+        catch (Error error) { show_operation_error (error); return; }
+        string account_name = account == null ? "this account" : account.display_name;
+        var dialog = new Adw.AlertDialog ("Empty %s?".printf (name),
+            "Every message in %s for %s will be permanently deleted. This cannot be undone.".printf (
+                name, account_name));
+        dialog.add_response ("cancel", "Cancel"); dialog.add_response ("empty", "Empty %s".printf (name));
+        dialog.default_response = "cancel"; dialog.close_response = "cancel";
+        dialog.set_response_appearance ("empty", Adw.ResponseAppearance.DESTRUCTIVE);
+        if ((yield dialog.choose (this, null)) != "empty") return;
+        try {
+            repository.empty_mailbox (mailbox); selected_message = null; reader.show_empty ();
+            toast_overlay.add_toast (new Adw.Toast ("%s will be emptied".printf (name)));
+        } catch (Error error) { show_operation_error (error); }
+    }
+
     private async void prompt_permanent_delete (string next_message_id) {
         var messages = action_messages (); if (messages.size == 0) return;
         string subject = messages.size == 1 ? "Delete this message permanently?" :
@@ -535,6 +560,8 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu.append ("Settings", "win.preferences");
         app_menu.append ("Keyboard Shortcuts", "win.shortcuts"); app_menu.append ("About Mailficient", "win.about");
         var app_menu_button = new Gtk.MenuButton (); app_menu_button.icon_name = "open-menu-symbolic";
+        app_menu_button.add_css_class ("app-menu-button");
+        app_menu_button.valign = Gtk.Align.CENTER;
         app_menu_button.tooltip_text = "Mailficient menu"; app_menu_button.menu_model = app_menu; header.append (app_menu_button);
         Accessibility.label (app_menu_button, "Mailficient menu");
         var window_controls = new Gtk.WindowControls (Gtk.PackType.END);
@@ -645,7 +672,7 @@ public class MailWindow : Adw.ApplicationWindow {
         case "archive": archive_button = make_toolbar_button (id, "win.archive"); return archive_button;
         case "trash": delete_button = make_toolbar_button (id, "win.trash"); return delete_button;
         case "junk": junk_button = make_toolbar_button (id, "win.junk"); return junk_button;
-        case "flag": flag_button = make_toolbar_button (id, "win.flag"); return flag_button;
+        case "flag": return make_flag_control ();
         case "toggle-read": return make_toolbar_button (id, "win.toggle-read");
         case "labels": return make_toolbar_button (id, "win.labels");
         case "snooze": return make_toolbar_button (id, "win.snooze");
@@ -672,6 +699,74 @@ public class MailWindow : Adw.ApplicationWindow {
             return flexible;
         default: return null;
         }
+    }
+
+    private Gtk.Widget make_flag_control () {
+        var control = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        control.add_css_class ("linked");
+        control.add_css_class ("flag-control");
+
+        flag_button = make_toolbar_button ("flag", "win.flag");
+        flag_button.tooltip_text = "Toggle flag";
+        control.append (flag_button);
+
+        flag_color_button = new Gtk.MenuButton ();
+        flag_color_button.icon_name = "pan-down-symbolic";
+        flag_color_button.tooltip_text = "Choose flag color";
+        flag_color_button.add_css_class ("apple-toolbar-button");
+        Accessibility.label (flag_color_button, "Choose flag color");
+
+        var popover = new Gtk.Popover ();
+        popover.has_arrow = false;
+        var menu = new Gtk.Box (Gtk.Orientation.VERTICAL, 1);
+        menu.add_css_class ("flag-color-menu");
+        menu.append (make_flag_color_row ("orange", "Orange", popover));
+        menu.append (make_flag_color_row ("red", "Red", popover));
+        menu.append (make_flag_color_row ("purple", "Purple", popover));
+        menu.append (make_flag_color_row ("blue", "Blue", popover));
+        menu.append (make_flag_color_row ("yellow", "Yellow", popover));
+        menu.append (make_flag_color_row ("green", "Green", popover));
+        menu.append (make_flag_color_row ("gray", "Gray", popover));
+        menu.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
+
+        var clear = new Gtk.Button.with_label ("Clear Flag");
+        clear.halign = Gtk.Align.FILL;
+        clear.clicked.connect (() => {
+            popover.popdown ();
+            clear_selected_flags ();
+        });
+        menu.append (clear);
+        var toggle = new Gtk.Button.with_label ("Toggle Flag");
+        toggle.halign = Gtk.Align.FILL;
+        toggle.clicked.connect (() => {
+            popover.popdown ();
+            toggle_selected_flag ();
+        });
+        menu.append (toggle);
+        popover.child = menu;
+        flag_color_button.popover = popover;
+        control.append (flag_color_button);
+        update_flag_button_color ();
+        return control;
+    }
+
+    private Gtk.Button make_flag_color_row (string color, string label, Gtk.Popover popover) {
+        var row = new Gtk.Button ();
+        var content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        var icon = new Gtk.Image.from_icon_name ("mailficient-flag-symbolic");
+        icon.add_css_class ("flag-" + color);
+        var text = new Gtk.Label (label);
+        text.xalign = 0;
+        text.hexpand = true;
+        content.append (icon);
+        content.append (text);
+        row.child = content;
+        row.clicked.connect (() => {
+            popover.popdown ();
+            set_selected_flag_color (color);
+        });
+        Accessibility.label (row, "Flag %s".printf (label.down ()));
+        return row;
     }
 
     private void show_toolbar_customization () {
@@ -738,6 +833,12 @@ public class MailWindow : Adw.ApplicationWindow {
         var trash = new SimpleAction ("trash", null); trash.activate.connect (() => move_selected (MailboxRole.TRASH)); add_action (trash);
         var junk = new SimpleAction ("junk", null); junk.activate.connect (classify_selected_junk); add_action (junk);
         var flag = new SimpleAction ("flag", null); flag.activate.connect (toggle_selected_flag); add_action (flag);
+        var clear_flag = new SimpleAction ("clear-flag", null); clear_flag.activate.connect (clear_selected_flags); add_action (clear_flag);
+        var set_flag_color = new SimpleAction ("set-flag-color", VariantType.STRING);
+        set_flag_color.activate.connect ((parameter) => {
+            if (parameter != null) set_selected_flag_color (parameter.get_string ());
+        });
+        add_action (set_flag_color);
         var toggle_read = new SimpleAction ("toggle-read", null); toggle_read.activate.connect (toggle_selected_read); add_action (toggle_read);
         var labels = new SimpleAction ("labels", null); labels.activate.connect (() => edit_selected_labels.begin ()); add_action (labels);
         var snooze = new SimpleAction ("snooze", null); snooze.activate.connect (() => snooze_selected.begin ()); add_action (snooze);
@@ -908,14 +1009,15 @@ public class MailWindow : Adw.ApplicationWindow {
         reply_button.sensitive = single; reply_all_button.sensitive = single; forward_button.sensitive = single;
         archive_button.sensitive = server_messages; delete_button.sensitive = selected;
         junk_button.sensitive = server_messages; move_button.sensitive = server_messages;
-        flag_button.sensitive = selected;
+        flag_button.sensitive = selected; flag_color_button.sensitive = selected;
+        update_flag_button_color ();
         foreach (var name in new string[] { "reply", "reply-all", "forward" }) {
             var action = lookup_action (name) as SimpleAction; if (action != null) action.set_enabled (single);
         }
         foreach (var name in new string[] { "export-message", "print-message" }) {
             var action = lookup_action (name) as SimpleAction; if (action != null) action.set_enabled (single);
         }
-        foreach (var name in new string[] { "flag", "toggle-read", "labels", "snooze" }) {
+        foreach (var name in new string[] { "flag", "clear-flag", "set-flag-color", "toggle-read", "labels", "snooze" }) {
             var action = lookup_action (name) as SimpleAction; if (action != null) action.set_enabled (selected);
         }
         foreach (var name in new string[] { "archive", "junk", "move-to", "copy-to", "show-move" }) {
@@ -1024,7 +1126,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.3"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.5"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -1040,6 +1142,32 @@ public class MailWindow : Adw.ApplicationWindow {
         dialog.accounts_changed.connect (() => account_changed (null));
         if (onboarding) dialog.closed.connect (() => settings.onboarding_completed = true);
         dialog.present (this);
+    }
+
+    private void edit_account (AccountSettings account) {
+        var dialog = new AccountDialog (account_provisioner, account);
+        dialog.account_saved.connect ((saved) => account_changed (saved));
+        dialog.present (this);
+    }
+
+    private void show_account_info (AccountSettings account) {
+        string authentication = account.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS ?
+            "GNOME Online Accounts OAuth" : "Password / app password";
+        var dialog = new Adw.AlertDialog (account.display_name,
+            "%s\n\nIncoming: %s:%u\nOutgoing: %s:%u\nAuthentication: %s".printf (
+                account.email, account.incoming_host, account.incoming_port,
+                account.outgoing_host, account.outgoing_port, authentication));
+        dialog.add_response ("close", "Close"); dialog.close_response = "close";
+        dialog.present (this);
+    }
+
+    private async void synchronize_account (AccountSettings account) {
+        if (sync_service == null) {
+            toast_overlay.add_toast (new Adw.Toast ("Account synchronization is unavailable in this build"));
+            return;
+        }
+        toast_overlay.add_toast (new Adw.Toast ("Synchronizing %s…".printf (account.display_name)));
+        yield sync_service.sync_account (account);
     }
 
     public void show_account_onboarding () { show_accounts (true); }
@@ -1067,6 +1195,38 @@ public class MailWindow : Adw.ApplicationWindow {
         foreach (var message in messages) { message.flagged = flag; repository.set_flagged (message.id, flag); }
         message_list.finish_bulk_action ();
         message_list.refresh ();
+    }
+
+    private void clear_selected_flags () {
+        var messages = action_messages (); if (messages.size == 0) return;
+        foreach (var message in messages) {
+            message.flagged = false;
+            repository.set_flagged (message.id, false);
+        }
+        message_list.finish_bulk_action ();
+        message_list.refresh ();
+    }
+
+    private void set_selected_flag_color (string color) {
+        var messages = action_messages (); if (messages.size == 0) return;
+        foreach (var message in messages) {
+            message.flag_color = color;
+            message.flagged = true;
+            repository.set_flag_color (message.id, color);
+        }
+        message_list.finish_bulk_action ();
+        message_list.refresh ();
+    }
+
+    private void update_flag_button_color () {
+        var image = flag_button.get_child () as Gtk.Image;
+        if (image == null) return;
+        foreach (var color in new string[] { "orange", "red", "purple", "blue", "yellow", "green", "gray" })
+            image.remove_css_class ("flag-" + color);
+        string selected_color = "red";
+        var messages = action_messages ();
+        if (messages.size > 0) selected_color = messages[0].flag_color;
+        image.add_css_class ("flag-" + selected_color);
     }
 
     private void toggle_selected_read () {
@@ -1284,6 +1444,16 @@ public class MailWindow : Adw.ApplicationWindow {
             var destination = yield dialog.save (this, null);
             new MessageExportService ().export_eml (message, destination);
             toast_overlay.add_toast (new Adw.Toast ("Message exported"));
+        } catch (Error error) { if (!(error is IOError.CANCELLED)) show_operation_error (error); }
+    }
+
+    private async void export_mailbox (Mailbox mailbox) {
+        var dialog = new Gtk.FileDialog (); dialog.title = "Export Mailbox"; dialog.accept_label = "Export";
+        dialog.initial_name = AttachmentSafety.safe_filename (mailbox.name) + ".mbox";
+        try {
+            var destination = yield dialog.save (this, null);
+            new MessageExportService ().export_mbox (repository, mailbox, destination);
+            toast_overlay.add_toast (new Adw.Toast ("Mailbox exported"));
         } catch (Error error) { if (!(error is IOError.CANCELLED)) show_operation_error (error); }
     }
 

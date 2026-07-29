@@ -12,6 +12,7 @@ public interface MailRepository : Object {
     public abstract Gee.List<Message> conversation_for (Message message);
     public abstract void mark_read (string id, bool read);
     public abstract void set_flagged (string id, bool flagged);
+    public abstract void set_flag_color (string id, string color);
     public abstract bool sender_is_vip (Message message);
     public abstract void set_sender_vip (Message message, bool vip) throws MailError;
     public abstract void reload ();
@@ -21,6 +22,7 @@ public interface MailRepository : Object {
     public abstract void undo_transfer (string id, string original_mailbox_id) throws MailError;
     public abstract void permanently_delete (string id) throws MailError;
     public abstract void empty_role (MailboxRole role) throws MailError;
+    public abstract void empty_mailbox (Mailbox mailbox) throws MailError;
     public abstract Gee.List<MailLabel> list_labels () throws MailError;
     public abstract MailLabel create_label (string name, string color = "#3584e4") throws MailError;
     public abstract void delete_label (int64 id) throws MailError;

@@ -127,6 +127,14 @@ public class DemoMailRepository : Object, MailRepository {
             message.flagged = flagged; changed ();
         }
     }
+    public void set_flag_color (string id, string color) {
+        var message = find_message (id);
+        if (message != null) {
+            message.flag_color = color;
+            message.flagged = true;
+            changed ();
+        }
+    }
     public bool sender_is_vip (Message message) { return vip_senders.contains (message.sender_address.down ()); }
     public void set_sender_vip (Message message, bool vip) throws MailError {
         if (vip) vip_senders.add (message.sender_address.down ()); else vip_senders.remove (message.sender_address.down ());
@@ -167,6 +175,13 @@ public class DemoMailRepository : Object, MailRepository {
             if (messages[index].mailbox_id == mailbox_id) messages.remove_at (index);
         changed ();
     }
+    public void empty_mailbox (Mailbox mailbox) throws MailError {
+        if (mailbox.role != MailboxRole.TRASH && mailbox.role != MailboxRole.JUNK)
+            throw new MailError.STORAGE ("Only Trash or Junk can be emptied");
+        for (int index = messages.size - 1; index >= 0; index--)
+            if (messages[index].mailbox_id == mailbox.id) messages.remove_at (index);
+        changed ();
+    }
     public Gee.List<MailLabel> list_labels () throws MailError { return mail_labels; }
     public MailLabel create_label (string name, string color = "#3584e4") throws MailError {
         var label = new MailLabel (mail_labels.size + 1, name.strip (), color); mail_labels.add (label); changed (); return label;
@@ -201,6 +216,7 @@ public class DemoMailRepository : Object, MailRepository {
             source.account_id, source.remote_uid, source.internet_message_id,
             source.in_reply_to, source.references, source.date_unix);
         result.body_html = source.body_html;
+        result.flag_color = source.flag_color;
         foreach (var attachment in source.attachments) result.add_attachment (attachment);
         return result;
     }

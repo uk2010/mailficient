@@ -5,6 +5,11 @@ public class MailboxSidebar : Gtk.Box {
     public signal void rename_folder_requested (Mailbox mailbox);
     public signal void delete_folder_requested (Mailbox mailbox);
     public signal void empty_role_requested (MailboxRole role);
+    public signal void empty_mailbox_requested (Mailbox mailbox);
+    public signal void export_mailbox_requested (Mailbox mailbox);
+    public signal void synchronize_account_requested (AccountSettings account);
+    public signal void edit_account_requested (AccountSettings account);
+    public signal void account_info_requested (AccountSettings account);
     private Gtk.ListBox list = new Gtk.ListBox ();
     private MailRepository repository;
     private CacheDatabase cache;
@@ -64,8 +69,8 @@ public class MailboxSidebar : Gtk.Box {
             box.append (count);
         }
         row.set_child (box);
-        if ((mailbox.account_id != "" && mailbox.role == MailboxRole.CUSTOM) ||
-            mailbox.role == MailboxRole.TRASH || mailbox.role == MailboxRole.JUNK) {
+        if (mailbox.account_id != "" || mailbox.role == MailboxRole.TRASH ||
+            mailbox.role == MailboxRole.JUNK) {
             var context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
             context_click.pressed.connect ((count, x, y) => show_folder_menu (row, mailbox));
             row.add_controller (context_click);
@@ -91,31 +96,103 @@ public class MailboxSidebar : Gtk.Box {
         var popover = new Gtk.Popover (); popover.set_parent (anchor); popover.autohide = true;
         var box = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); box.set_margin_top (6); box.set_margin_bottom (6);
         box.set_margin_start (6); box.set_margin_end (6);
+        AccountSettings? account = null;
+        try { if (mailbox.account_id != "") account = cache.find_account (mailbox.account_id); }
+        catch (Error error) { warning ("Could not resolve folder account: %s", error.message); }
+
+        if (account != null) {
+            var new_mailbox = menu_button ("New Mailbox…", "folder-new-symbolic");
+            new_mailbox.clicked.connect (() => {
+                popover.popdown (); create_folder_requested (account, null);
+            });
+            box.append (new_mailbox);
+        }
+
+        if (mailbox.account_id != "") {
+            bool favorite = is_favorite (mailbox.id);
+            var favorite_button = menu_button (
+                favorite ? "Remove from Favorites" : "Add to Favorites",
+                favorite ? "starred-symbolic" : "non-starred-symbolic");
+            favorite_button.clicked.connect (() => {
+                popover.popdown (); set_favorite (mailbox.id, !favorite);
+            });
+            box.append (favorite_button);
+            box.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
+        }
+
+        if (mailbox.role == MailboxRole.CUSTOM) {
+            var rename = menu_button ("Rename Mailbox…", "document-edit-symbolic");
+            rename.clicked.connect (() => { popover.popdown (); rename_folder_requested (mailbox); });
+            var remove = menu_button ("Delete Mailbox…", "user-trash-symbolic");
+            remove.add_css_class ("error");
+            remove.clicked.connect (() => { popover.popdown (); delete_folder_requested (mailbox); });
+            box.append (rename); box.append (remove);
+        }
+
+        if (mailbox.account_id != "") {
+            var export = menu_button ("Export Mailbox…", "document-save-symbolic");
+            export.clicked.connect (() => { popover.popdown (); export_mailbox_requested (mailbox); });
+            box.append (export);
+        }
+
         if (mailbox.role == MailboxRole.TRASH || mailbox.role == MailboxRole.JUNK) {
             var empty = menu_button (mailbox.role == MailboxRole.TRASH ? "Empty Trash…" : "Empty Junk…",
                 "edit-delete-symbolic");
             empty.add_css_class ("error");
-            empty.clicked.connect (() => { popover.popdown (); empty_role_requested (mailbox.role); });
-            box.append (empty); popover.child = box;
-            popover.closed.connect (() => popover.unparent ()); popover.popup (); return;
+            empty.clicked.connect (() => {
+                popover.popdown ();
+                if (account != null) empty_mailbox_requested (mailbox);
+                else empty_role_requested (mailbox.role);
+            });
+            box.append (empty);
         }
-        var subfolder = menu_button ("New Subfolder…", "folder-new-symbolic");
-        subfolder.clicked.connect (() => {
-            popover.popdown ();
-            try { var account = cache.find_account (mailbox.account_id); if (account != null) create_folder_requested (account, mailbox); }
-            catch (Error error) { warning ("Could not resolve folder account: %s", error.message); }
-        });
-        var rename = menu_button ("Rename…", "document-edit-symbolic");
-        rename.clicked.connect (() => { popover.popdown (); rename_folder_requested (mailbox); });
-        var remove = menu_button ("Delete…", "user-trash-symbolic");
-        remove.add_css_class ("error"); remove.clicked.connect (() => { popover.popdown (); delete_folder_requested (mailbox); });
-        box.append (subfolder); box.append (rename); box.append (remove); popover.child = box;
+
+        if (account != null) {
+            box.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
+            var sync = menu_button ("Synchronize “%s”".printf (account.display_name), "view-refresh-symbolic");
+            sync.clicked.connect (() => { popover.popdown (); synchronize_account_requested (account); });
+            var edit = menu_button ("Edit “%s”…".printf (account.display_name), "document-edit-symbolic");
+            edit.clicked.connect (() => { popover.popdown (); edit_account_requested (account); });
+            var info = menu_button ("Get Account Info", "dialog-information-symbolic");
+            info.clicked.connect (() => { popover.popdown (); account_info_requested (account); });
+            box.append (sync); box.append (edit); box.append (info);
+        }
+
+        popover.child = box;
         popover.closed.connect (() => popover.unparent ()); popover.popup ();
     }
 
     private static Gtk.Button menu_button (string label, string icon_name) {
-        var button = new Gtk.Button.with_label (label); button.icon_name = icon_name;
-        button.has_frame = false; button.halign = Gtk.Align.FILL; return button;
+        var button = new Gtk.Button ();
+        var content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+        content.append (new Gtk.Image.from_icon_name (icon_name));
+        var text = new Gtk.Label (label); text.xalign = 0; text.hexpand = true;
+        content.append (text); button.child = content;
+        button.has_frame = false; button.halign = Gtk.Align.FILL;
+        Accessibility.label (button, label); return button;
+    }
+
+    private Gee.HashSet<string> favorite_ids () {
+        var result = new Gee.HashSet<string> ();
+        try {
+            foreach (var id in cache.preference ("favorite-mailboxes", "").split ("\n"))
+                if (id.strip () != "") result.add (id.strip ());
+        } catch (Error error) { warning ("Could not load favorite mailboxes: %s", error.message); }
+        return result;
+    }
+
+    private bool is_favorite (string id) { return favorite_ids ().contains (id); }
+
+    private void set_favorite (string id, bool favorite) {
+        var ids = favorite_ids ();
+        if (favorite) ids.add (id); else ids.remove (id);
+        var serialized = new StringBuilder ();
+        foreach (var value in ids) {
+            if (serialized.len > 0) serialized.append_c ('\n');
+            serialized.append (value);
+        }
+        try { cache.set_preference ("favorite-mailboxes", serialized.str); reload (false); }
+        catch (Error error) { warning ("Could not save favorite mailboxes: %s", error.message); }
     }
 
     private void add_account_group (string account_id, string display_name, string email,
@@ -167,10 +244,14 @@ public class MailboxSidebar : Gtk.Box {
         var mailboxes = repository.list_mailboxes ();
         try {
             var accounts = cache.list_accounts ();
+            var favorites = favorite_ids ();
             bool demo = accounts.size == 0 && Environment.get_variable ("MAILFICIENT_QA") == "1" &&
                 Environment.get_variable ("MAILFICIENT_QA_NO_DEMO") != "1";
             foreach (var mailbox in mailboxes)
                 if (demo || mailbox.account_id == "") append_mailbox (list, mailbox);
+            if (!demo) foreach (var mailbox in mailboxes)
+                if (mailbox.account_id != "" && favorites.contains (mailbox.id))
+                    append_mailbox (list, mailbox);
             if (demo) add_account_group (DemoMailRepository.ACCOUNT_ID, "Demo Account", "alex@example.com", mailboxes, false);
             else foreach (var account in accounts)
                 add_account_group (account.id, account.display_name, account.email, mailboxes, true);

@@ -41,6 +41,58 @@ menubutton.apple-toolbar-button > button {
 menubutton.apple-toolbar-button > button:hover {
   background: alpha(currentColor, .12);
 }
+.flag-orange { color: #ff9f0a; }
+.flag-red { color: #ff453a; }
+.flag-purple { color: #6e7cff; }
+.flag-blue { color: #32d4e9; }
+.flag-yellow { color: #ffd60a; }
+.flag-green { color: #30d158; }
+.flag-gray { color: #9a9a9e; }
+.flag-control {
+  min-height: 36px;
+  border-radius: 999px;
+  background: alpha(currentColor, .075);
+}
+.flag-control .apple-toolbar-button,
+.flag-control menubutton.apple-toolbar-button > button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 5px 9px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.flag-control .apple-toolbar-button:first-child { border-radius: 999px 0 0 999px; }
+.flag-control menubutton.apple-toolbar-button > button {
+  min-width: 30px;
+  padding: 5px 7px;
+  border-radius: 0 999px 999px 0;
+}
+.flag-color-menu { padding: 6px; }
+.flag-color-menu button {
+  min-width: 180px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: transparent;
+}
+.flag-color-menu button:hover { background: alpha(currentColor, .10); }
+.flag-color-menu separator { margin: 5px 8px; }
+menubutton.app-menu-button {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+menubutton.app-menu-button > button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  border: 0;
+  box-shadow: none;
+  background: alpha(currentColor, .075);
+}
+menubutton.app-menu-button > button:hover { background: alpha(currentColor, .12); }
 .apple-toolbar-group {
   min-height: 36px;
   border-radius: 999px;

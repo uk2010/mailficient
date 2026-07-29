@@ -122,6 +122,12 @@ public class CachedMailRepository : Object, MailRepository {
         try { cache.set_cached_flagged (id, flagged); changed (); }
         catch (Error error) { warning ("Could not update flag state: %s", error.message); }
     }
+    public void set_flag_color (string id, string color) {
+        if (id.has_prefix (DRAFT_PREFIX) || id.has_prefix (OUTBOX_PREFIX)) return;
+        if (is_demo_mode ()) { demo.set_flag_color (id, color); return; }
+        try { cache.set_cached_flag_color (id, color); changed (); }
+        catch (Error error) { warning ("Could not update flag color: %s", error.message); }
+    }
     public bool sender_is_vip (Message message) {
         if (is_demo_mode ()) return demo.sender_is_vip (message);
         try { return cache.is_vip_sender (message.sender_address); }
@@ -156,6 +162,10 @@ public class CachedMailRepository : Object, MailRepository {
     public void empty_role (MailboxRole role) throws MailError {
         if (is_demo_mode ()) { demo.empty_role (role); return; }
         cache.queue_role_purge (role); changed ();
+    }
+    public void empty_mailbox (Mailbox mailbox) throws MailError {
+        if (is_demo_mode ()) { demo.empty_mailbox (mailbox); return; }
+        cache.queue_mailbox_purge (mailbox.id); changed ();
     }
     public Gee.List<MailLabel> list_labels () throws MailError { return cache.list_mail_labels (); }
     public MailLabel create_label (string name, string color = "#3584e4") throws MailError {

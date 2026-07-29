@@ -1,6 +1,38 @@
 namespace Mailficient {
 public class MessageExportService : Object {
     public void export_eml (Message message, File destination) throws Error {
+        string source = message_source (message, false);
+        string? etag;
+        destination.replace_contents (source.data, null, false,
+            FileCreateFlags.REPLACE_DESTINATION, out etag, null);
+    }
+
+    public void export_mbox (MailRepository repository, Mailbox mailbox,
+                             File destination) throws Error {
+        var stream = destination.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null);
+        int total = repository.message_count (mailbox.id);
+        for (int offset = 0; offset < total; offset += CacheDatabase.MESSAGE_LIST_LIMIT) {
+            var messages = repository.list_messages (
+                mailbox.id, "", CacheDatabase.MESSAGE_LIST_LIMIT, offset);
+            if (messages.size == 0) break;
+            foreach (var summary in messages) {
+                var message = repository.find_message (summary.id) ?? summary;
+                string sender = message.sender_address.replace ("\r", "").replace ("\n", "");
+                string date = message.timestamp.replace ("\r", " ").replace ("\n", " ");
+                write_string (stream, "From %s %s\n".printf (
+                    sender == "" ? "MAILER-DAEMON" : sender,
+                    date == "" ? "unknown-date" : date));
+                foreach (var line in message_source (message, true).replace ("\r\n", "\n").split ("\n")) {
+                    if (line.has_prefix ("From ")) write_string (stream, ">");
+                    write_string (stream, line + "\n");
+                }
+                write_string (stream, "\n");
+            }
+        }
+        stream.close ();
+    }
+
+    private string message_source (Message message, bool skip_unavailable) throws Error {
         string boundary = "mailficient-" + Uuid.string_random ();
         var output = new StringBuilder ();
         output.append ("From: %s <%s>\r\n".printf (header (message.sender_name), header (message.sender_address)));
@@ -19,7 +51,14 @@ public class MessageExportService : Object {
             foreach (var attachment in message.attachments) {
                 if (!attachment.is_downloaded ()) continue;
                 uint8[] contents; string? etag;
-                File.new_for_path (attachment.path).load_contents (null, out contents, out etag);
+                try {
+                    var source = attachment.path.contains ("://") ?
+                        File.new_for_uri (attachment.path) : File.new_for_path (attachment.path);
+                    source.load_contents (null, out contents, out etag);
+                } catch (Error error) {
+                    if (skip_unavailable) continue;
+                    throw error;
+                }
                 output.append ("--").append (boundary).append ("\r\nContent-Type: ").append (header (attachment.content_type));
                 output.append ("; name=\"").append (header (attachment.name)).append ("\"\r\n");
                 output.append ("Content-Disposition: attachment; filename=\"").append (header (attachment.name)).append ("\"\r\n");
@@ -27,8 +66,7 @@ public class MessageExportService : Object {
             }
             output.append ("--").append (boundary).append ("--\r\n");
         }
-        string? etag;
-        destination.replace_contents (output.str.data, null, false, FileCreateFlags.REPLACE_DESTINATION, out etag, null);
+        return output.str;
     }
 
     public void export_pdf (Message message, File destination) throws Error {
@@ -54,6 +92,10 @@ public class MessageExportService : Object {
     }
 
     private static string header (string value) { return value.replace ("\r", " ").replace ("\n", " "); }
+    private static void write_string (OutputStream stream, string value) throws Error {
+        size_t written;
+        stream.write_all (value.data, out written, null);
+    }
     private static void append_base64 (StringBuilder output, string encoded) {
         for (int offset = 0; offset < encoded.length; offset += 76)
             output.append (encoded.substring (offset, int.min (76, encoded.length - offset))).append ("\r\n");

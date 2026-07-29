@@ -1,19 +1,20 @@
-# Mailficient 0.1.4
+# Mailficient 0.1.5
 
-Mailficient 0.1.4 improves message-list continuity and makes flag controls
-render consistently on every supported desktop theme.
+Mailficient 0.1.5 adds modern bulk selection, colored flags, and a complete
+mailbox context menu.
 
 Highlights:
 
-- Bundles a proper symbolic flag icon instead of relying on a theme icon that
-  could appear as a red missing-image square
-- Uses the flag consistently in message rows, the main toolbar, toolbar
-  customization, and the Flagged mailbox
-- Selects the next adjacent message after archive, Trash, permanent deletion,
-  or Junk classification instead of leaving the reading pane empty
-- Keeps the existing provider-guided setup, calendar invitation support,
-  bounded synchronization, offline cache, drafts, Outbox, and secure
-  libsecret credential storage
+- Adds Orange, Red, Purple, Blue, Yellow, Green, and Gray message flags with
+  persistent local colors and standard IMAP flag synchronization
+- Adds Shift-click and Ctrl-click range selection with bulk right-click actions
+  and fixes the checkbox multi-select crash
+- Adds mailbox right-click actions for Favorites, create, rename, delete,
+  `.mbox` export, account-specific Trash/Junk emptying, synchronization,
+  account editing, and account information
+- Refines the toolbar flag split button and circular application menu button
+- Keeps provider-guided setup, calendar invitations, bounded synchronization,
+  offline cache, drafts, Outbox, and secure libsecret credential storage
 
 This release provides an x86-64 Flatpak bundle, an Ubuntu 26.04 AMD64 `.deb`,
 and an AMD64 Snap as GitHub Release downloads. Matching SHA-256 checksum files

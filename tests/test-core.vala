@@ -313,6 +313,9 @@ private void test_cached_search () {
         cache.cache_message (new Message ("m2", "archive", "Noah Williams", "noah@example.org", "Alex <alex@example.com>", "Dinner", "Thursday", "How does Thursday sound?", "Yesterday"));
         var matches = cache.search_messages (SearchQuery.parse ("from:maya to:alex mailbox:inbox is:unread is:flagged has:attachment schedule"));
         assert (matches.size == 1); assert (matches[0].id == "m1"); assert (matches[0].flagged); assert (matches[0].has_attachment);
+        cache.set_cached_flag_color ("m1", "purple");
+        assert (cache.find_cached_message ("m1").flag_color == "purple");
+        assert (cache.search_messages (SearchQuery.parse ("schedule"))[0].flag_color == "purple");
         assert (cache.search_messages (SearchQuery.parse ("sched")).size == 1);
         assert (cache.count_search_messages (SearchQuery.parse ("rele rev")) == 1);
         assert (cache.search_messages (SearchQuery.parse ("Thursday")).size == 1);
@@ -323,6 +326,7 @@ private void test_cached_search () {
         assert (cache.search_messages (SearchQuery.parse ("label:work")).size == 1);
         cache.cache_message (new Message ("m1", "inbox", "Maya Chen", "maya@example.net", "Alex <alex@example.com>", "Release schedule", "Ready", "Updated body", "Today", true, true, true));
         assert (cache.labels_for_message ("m1").size == 1);
+        assert (cache.find_cached_message ("m1").flag_color == "purple");
         var snapshot = new MailSyncResult ("search-account");
         var archive = new Mailbox ("search-account:opaque-folder-id", "Archive", "folder-symbolic",
             MailboxRole.ARCHIVE, 0, "search-account", "All Mail");
@@ -430,6 +434,12 @@ private void test_message_export () {
         service.export_eml (message, File.new_for_path (eml_path)); string eml; FileUtils.get_contents (eml_path, out eml);
         assert (eml.contains ("Subject: Export subject")); assert (eml.contains ("multipart/mixed"));
         assert (eml.contains (Base64.encode ("attachment bytes".data)));
+        var demo = new DemoMailRepository ();
+        string mbox_path = Path.build_filename (root, "inbox.mbox");
+        service.export_mbox (demo, demo.list_mailboxes ()[0], File.new_for_path (mbox_path));
+        string mbox; FileUtils.get_contents (mbox_path, out mbox);
+        assert (mbox.has_prefix ("From "));
+        assert (mbox.contains ("\nSubject: "));
         string pdf_path = Path.build_filename (root, "message.pdf"); service.export_pdf (message, File.new_for_path (pdf_path));
         uint8[] prefix = new uint8[5]; var input = File.new_for_path (pdf_path).read (); assert (input.read (prefix) == 5);
         assert ((char) prefix[0] == '%' && (char) prefix[1] == 'P' && (char) prefix[2] == 'D' && (char) prefix[3] == 'F');

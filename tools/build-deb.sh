@@ -4,6 +4,8 @@ set -eu
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 app_tree=${MAILFICIENT_FLATPAK_APP_TREE:-"$root_dir/flatpak-build-custom-toolbar/files"}
 native_build=${MAILFICIENT_NATIVE_BUILD:-"$root_dir/build-menu-state"}
+mailficient_binary=${MAILFICIENT_NATIVE_BINARY:-"$native_build/src/mailficient"}
+probe_binary=${MAILFICIENT_PROBE_BINARY:-"$native_build/src/mailficient-addressbook-probe"}
 sdk_location=$(flatpak info -l org.gnome.Sdk//49)
 version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
     head -n 1 |
@@ -22,8 +24,8 @@ require_file() {
     fi
 }
 
-require_file "$native_build/src/mailficient"
-require_file "$native_build/src/mailficient-addressbook-probe"
+require_file "$mailficient_binary"
+require_file "$probe_binary"
 require_file "$app_tree/lib/libcamel-1.2.so.67"
 require_file "$app_tree/lib/evolution-data-server/camel-providers/libcamelimapx.so"
 require_file "$sdk_location/files/lib/x86_64-linux-gnu/libicuuc.so.77"
@@ -38,8 +40,8 @@ install -d \
     "$stage/usr/share/icons/hicolor" \
     "$stage/usr/share/metainfo"
 
-install -m 0755 "$native_build/src/mailficient" "$private_lib/mailficient.real"
-install -m 0755 "$native_build/src/mailficient-addressbook-probe" \
+install -m 0755 "$mailficient_binary" "$private_lib/mailficient.real"
+install -m 0755 "$probe_binary" \
     "$private_lib/mailficient-addressbook-probe.real"
 install -m 0755 "$root_dir/packaging/debian/mailficient" "$stage/usr/bin/mailficient"
 install -m 0755 "$root_dir/packaging/debian/mailficient-addressbook-probe" \

@@ -41,7 +41,9 @@ public class MessageList : Gtk.Box {
         select_multiple.icon_name = "object-select-symbolic";
         select_multiple.tooltip_text = "Select multiple messages";
         Accessibility.label (select_multiple, "Select multiple messages");
-        select_multiple.toggled.connect (() => configure_selection (false));
+        // Multi-selection is always available through the standard Shift-click
+        // and Ctrl-click gestures. This button only reveals checkboxes.
+        select_multiple.toggled.connect (refresh_row_widgets);
         header.append (select_multiple);
         append (header); append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
 
@@ -234,12 +236,7 @@ public class MessageList : Gtk.Box {
 
     private void configure_selection (bool select_first = false) {
         if (model == null) return;
-        if (select_multiple.active) selection = new Gtk.MultiSelection (model);
-        else {
-            var single = new Gtk.SingleSelection (model);
-            single.autoselect = false; single.can_unselect = true;
-            selection = single;
-        }
+        selection = new Gtk.MultiSelection (model);
         selection.selection_changed.connect ((position, count) => {
             if (suppress_selection) return;
             var selected = selected_messages ();
@@ -251,6 +248,14 @@ public class MessageList : Gtk.Box {
         if (select_first && model.get_n_items () > 0) selection.select_item (0, true);
         else selection.unselect_all ();
         if (!suppress_selection) selection_changed (selected_messages ());
+    }
+
+    private void refresh_row_widgets () {
+        // Reassigning the existing selection model makes ListView rebind its
+        // rows without disturbing the selected range.
+        var current = selection;
+        list.model = null;
+        list.model = current;
     }
 
     private void show_status (string title, string description, string icon_name) {

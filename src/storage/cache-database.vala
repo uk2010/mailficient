@@ -85,6 +85,7 @@ public class CacheDatabase : Object, AccountStore {
         ensure_column ("cached_messages", "date_unix", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("cached_messages", "cc_recipients", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("cached_messages", "security_status", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "flag_color", "TEXT NOT NULL DEFAULT 'red'");
         // Older builds ignored top-level text/plain and text/html MIME bodies
         // and cached only the server preview. A zero value makes those rows
         // eligible for the normal bounded sync backfill.
@@ -752,7 +753,7 @@ public class CacheDatabase : Object, AccountStore {
     private void cache_message_row (Message message) throws MailError {
         reconcile_moved_message_identity (message);
         Sqlite.Statement statement;
-        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,content_extracted=1";
+        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,content_extracted=1";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare message caching");
         statement.bind_text (1, message.id); statement.bind_text (2, message.mailbox_id); statement.bind_text (3, message.sender_name); statement.bind_text (4, message.sender_address);
         statement.bind_text (5, message.recipients); statement.bind_text (6, message.subject); statement.bind_text (7, message.preview); statement.bind_text (8, message.body); statement.bind_text (9, message.timestamp);
@@ -764,6 +765,7 @@ public class CacheDatabase : Object, AccountStore {
         statement.bind_int64 (21, message.date_unix);
         statement.bind_text (22, message.cc_recipients);
         statement.bind_text (23, message.security_status);
+        statement.bind_text (24, message.flag_color);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not cache the message");
         if (database.prepare_v2 ("DELETE FROM message_fts WHERE id=?", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not update the search index");
         statement.bind_text (1, message.id); if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update the search index");
@@ -989,7 +991,7 @@ public class CacheDatabase : Object, AccountStore {
         Sqlite.Statement statement;
         // Lists can contain tens of thousands of rows. Bodies, HTML, and
         // attachment objects are loaded only after selecting a message.
-        const string columns = "m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients";
+        const string columns = "m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color";
         bool bind_mailbox = false;
         string predicate = cached_mailbox_predicate (mailbox_id, out bind_mailbox);
         if (unread_only) predicate += " AND m.unread=1";
@@ -1122,7 +1124,7 @@ public class CacheDatabase : Object, AccountStore {
 
     public Message? find_cached_message (string id) throws MailError {
         Sqlite.Statement statement;
-        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status FROM cached_messages WHERE id=?";
+        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color FROM cached_messages WHERE id=?";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare cached message lookup");
         statement.bind_text (1, id); int row = statement.step ();
         if (row == Sqlite.DONE) return null;
@@ -1148,7 +1150,7 @@ public class CacheDatabase : Object, AccountStore {
 
     public Gee.List<Message> conversation_for (Message selected) throws MailError {
         Sqlite.Statement statement;
-        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients FROM cached_messages WHERE account_id=? ORDER BY rowid";
+        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,flag_color FROM cached_messages WHERE account_id=? ORDER BY rowid";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare conversation loading");
         statement.bind_text (1, selected.account_id); var candidates = new Gee.ArrayList<Message> (); int row;
@@ -1186,14 +1188,15 @@ public class CacheDatabase : Object, AccountStore {
             statement.column_int (10) != 0, (uint) statement.column_int (11),
             statement.column_int (12) != 0, statement.column_text (13),
             statement.column_text (14), statement.column_text (15), statement.column_text (16),
-            statement.column_text (17), statement.column_int64 (18), statement.column_text (19));
+            statement.column_text (17), statement.column_int64 (18), statement.column_text (19),
+            statement.column_text (20));
     }
 
     private static Message message_from_row (Sqlite.Statement statement) {
         var message = new Message (statement.column_text (0), statement.column_text (1), statement.column_text (2), statement.column_text (3), statement.column_text (4),
             statement.column_text (5), statement.column_text (6), statement.column_text (7), statement.column_text (8), statement.column_int (9) != 0,
             statement.column_int (10) != 0, statement.column_int (11) != 0, (uint) statement.column_int (12), statement.column_int (13) != 0,
-            statement.column_text (15), statement.column_text (16), statement.column_text (17), statement.column_text (18), statement.column_text (19), statement.column_int64 (20), statement.column_text (21));
+            statement.column_text (15), statement.column_text (16), statement.column_text (17), statement.column_text (18), statement.column_text (19), statement.column_int64 (20), statement.column_text (21), statement.column_text (23));
         message.body_html = statement.column_text (14); message.security_status = statement.column_text (22); return message;
     }
 
@@ -1291,6 +1294,25 @@ public class CacheDatabase : Object, AccountStore {
         try {
             update_cached_flag (id, "flagged", flagged ? 1 : 0);
             changed_account = queue_message_state_rows (id, MessageStateField.FLAGGED, flagged);
+            execute ("COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+        if (changed_account != null) mutation_queued (changed_account);
+    }
+
+    public void set_cached_flag_color (string id, string color) throws MailError {
+        string? changed_account = null;
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            if (database.prepare_v2 ("UPDATE cached_messages SET flag_color=?,flagged=1 WHERE id=?", -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare flag color update");
+            statement.bind_text (1, color); statement.bind_text (2, id);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not update flag color");
+            changed_account = queue_message_state_rows (id, MessageStateField.FLAGGED, true);
             execute ("COMMIT");
         } catch (MailError error) {
             try { execute ("ROLLBACK"); } catch (MailError ignored) { }
@@ -1541,7 +1563,7 @@ public class CacheDatabase : Object, AccountStore {
             if (mailbox.role == role) queue_mailbox_purge (mailbox.id);
     }
 
-    private void queue_mailbox_purge (string mailbox_id) throws MailError {
+    public void queue_mailbox_purge (string mailbox_id) throws MailError {
         execute ("BEGIN IMMEDIATE"); string account_id = "";
         try {
             Sqlite.Statement statement;
@@ -1678,7 +1700,7 @@ public class CacheDatabase : Object, AccountStore {
                                               int limit = MESSAGE_LIST_LIMIT,
                                               int offset = 0,
                                               MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
-        var sql = new StringBuilder ("SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
+        var sql = new StringBuilder ("SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
         var values = new Gee.ArrayList<string> ();
         append_search_predicates (sql, query, values);
         int bounded_limit = int.max (1, int.min (MESSAGE_LIST_LIMIT + 1, limit));

@@ -46,7 +46,12 @@ public class MessageRow : Gtk.Box {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); content.hexpand = true;
         var top = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
         var sender = new Gtk.Label (message.sender_name); sender.xalign = 0; sender.hexpand = true; sender.ellipsize = Pango.EllipsizeMode.END; sender.add_css_class ("sender"); top.append (sender);
-        if (message.flagged) top.append (new Gtk.Image.from_icon_name ("mailficient-flag-symbolic"));
+        if (message.flagged) {
+            var flag = new Gtk.Image.from_icon_name ("mailficient-flag-symbolic");
+            flag.add_css_class ("flag-" + message.flag_color);
+            flag.tooltip_text = "%s flag".printf (flag_color_label (message.flag_color));
+            top.append (flag);
+        }
         var time = new Gtk.Label (message.timestamp); time.add_css_class ("timestamp"); top.append (time);
         content.append (top);
         var subject_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 5);
@@ -61,7 +66,7 @@ public class MessageRow : Gtk.Box {
         var accessible = new StringBuilder (message.unread ? "Unread message" : "Read message");
         accessible.append (" from ").append (message.sender_name).append (", subject ").append (message.subject);
         if (message.timestamp != "") accessible.append (", ").append (message.timestamp);
-        if (message.flagged) accessible.append (", flagged");
+        if (message.flagged) accessible.append_printf (", %s flag", flag_color_label (message.flag_color).down ());
         if (message.has_attachment) accessible.append (", has attachment");
         if (message.conversation_count > 1) accessible.append_printf (", %u messages in conversation", message.conversation_count);
         Accessibility.label (this, accessible.str);
@@ -71,6 +76,16 @@ public class MessageRow : Gtk.Box {
         menu.append ("Move or Copy…", "win.show-move");
         menu.append ("Move to Trash", "win.trash"); menu.append ("Mark Read or Unread", "win.toggle-read");
         menu.append ("Flag or Unflag", "win.flag");
+        var flag_colors = new Menu ();
+        flag_colors.append ("Orange", "win.set-flag-color::orange");
+        flag_colors.append ("Red", "win.set-flag-color::red");
+        flag_colors.append ("Purple", "win.set-flag-color::purple");
+        flag_colors.append ("Blue", "win.set-flag-color::blue");
+        flag_colors.append ("Yellow", "win.set-flag-color::yellow");
+        flag_colors.append ("Green", "win.set-flag-color::green");
+        flag_colors.append ("Gray", "win.set-flag-color::gray");
+        flag_colors.append ("Clear Flag", "win.clear-flag");
+        menu.append_submenu ("Flag Color", flag_colors);
         menu.append ("Labels…", "win.labels");
         menu.append ("Snooze…", "win.snooze");
         menu.append ("Export Message…", "win.export-message"); menu.append ("Print…", "win.print-message");
@@ -79,7 +94,9 @@ public class MessageRow : Gtk.Box {
         weak Gtk.SelectionModel? row_selection = context_selection;
         uint row_position = model_position;
         context_click.pressed.connect ((count, x, y) => {
-            if (row_selection != null)
+            // Right-clicking anywhere inside an existing range must preserve
+            // the range so the chosen action applies to every selected item.
+            if (row_selection != null && !row_selection.is_selected (row_position))
                 row_selection.select_item (row_position, true);
             popover.pointing_to = { (int) x, (int) y, 1, 1 }; popover.popup ();
         });
@@ -91,6 +108,18 @@ public class MessageRow : Gtk.Box {
             context_selection.disconnect (selection_handler);
         selection_handler = 0;
         context_selection = null;
+    }
+
+    private static string flag_color_label (string color) {
+        switch (color) {
+        case "orange": return "Orange";
+        case "purple": return "Purple";
+        case "blue": return "Blue";
+        case "yellow": return "Yellow";
+        case "green": return "Green";
+        case "gray": return "Gray";
+        default: return "Red";
+        }
     }
 }
 }
