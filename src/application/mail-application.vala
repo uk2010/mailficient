@@ -36,6 +36,8 @@ public class MailApplication : Adw.Application {
     protected override void startup () {
         base.startup ();
         Gtk.Window.set_default_icon_name ("com.local.Mailficient");
+        var icon_theme = Gtk.IconTheme.get_for_display (Gdk.Display.get_default ());
+        icon_theme.add_resource_path ("/com/local/Mailficient/icons");
         if (Environment.get_variable ("MAILFICIENT_QA_DARK") == "1")
             Adw.StyleManager.get_default ().color_scheme = Adw.ColorScheme.FORCE_DARK;
         else if (Environment.get_variable ("MAILFICIENT_QA") == "1")

@@ -99,7 +99,7 @@ public class ToolbarLayout : Object {
         case "trash": return "user-trash-symbolic";
         case "junk": return "dialog-warning-symbolic";
         case "move": return "folder-symbolic";
-        case "flag": return "flag-symbolic";
+        case "flag": return "mailficient-flag-symbolic";
         case "toggle-read": return "mail-unread-symbolic";
         case "labels": return "tag-symbolic";
         case "snooze": return "alarm-symbolic";

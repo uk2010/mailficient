@@ -12,7 +12,7 @@ public class DemoMailRepository : Object, MailRepository {
         vip_senders.add ("maya@example.net");
         mailboxes.add (new Mailbox ("inbox", "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, 0, ACCOUNT_ID, "INBOX"));
         mailboxes.add (new Mailbox ("vip", "VIP", "starred-symbolic", MailboxRole.VIP, 0, ACCOUNT_ID, "VIP"));
-        mailboxes.add (new Mailbox ("flagged", "Flagged", "flag-symbolic", MailboxRole.FLAGGED, 0, ACCOUNT_ID, "Flagged"));
+        mailboxes.add (new Mailbox ("flagged", "Flagged", "mailficient-flag-symbolic", MailboxRole.FLAGGED, 0, ACCOUNT_ID, "Flagged"));
         mailboxes.add (new Mailbox ("drafts", "Drafts", "document-edit-symbolic", MailboxRole.DRAFTS, 0, ACCOUNT_ID, "Drafts"));
         mailboxes.add (new Mailbox ("sent", "Sent", "mail-sent-symbolic", MailboxRole.SENT, 0, ACCOUNT_ID, "Sent"));
         mailboxes.add (new Mailbox ("archive", "Archive", "package-x-generic-symbolic", MailboxRole.ARCHIVE, 0, ACCOUNT_ID, "Archive"));

@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.1.3', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.1.4', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 gnome = import('gnome')
 i18n = import('i18n')
@@ -116,7 +116,7 @@ if camel_test_dep.found()
   )
   camel_tests = executable('camel-tests', camel_test_sources,
     dependencies: [gee, gio, camel_test_dep],
-    vala_args: ['--target-glib=2.76'])
+    vala_args: ['--target-glib=2.76'] + camel_vala_args)
   test('camel', camel_tests)
 endif
 

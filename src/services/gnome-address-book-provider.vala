@@ -85,7 +85,7 @@ public class GnomeAddressBookProvider : Object, ContactSuggestionProvider {
                                      Gee.HashSet<string> addresses, E.Contact contact,
                                      uint limit) {
         string name = contact.get<string> (E.ContactField.FULL_NAME) ?? "";
-        foreach (var attribute in contact.get_attributes ()) {
+        foreach (var attribute in ((E.VCard) contact).get_attributes ()) {
             if (attribute.get_name ().ascii_casecmp (E.EVC_EMAIL) != 0) continue;
             foreach (var value in attribute.get_values ()) {
                 string address = value.strip ().down ();

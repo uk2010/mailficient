@@ -104,6 +104,9 @@ if camel.found()
   )
   deps += camel
   camel_vala_args = ['--define=HAVE_CAMEL']
+  if camel.version().version_compare('<3.58')
+    camel_vala_args += ['--define=EDS_LEGACY']
+  endif
 else
   camel_vala_args = []
 endif

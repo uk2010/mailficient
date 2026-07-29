@@ -51,7 +51,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Button archive_button = new Gtk.Button.from_icon_name ("package-x-generic-symbolic");
     private Gtk.Button delete_button = new Gtk.Button.from_icon_name ("user-trash-symbolic");
     private Gtk.Button junk_button = new Gtk.Button.from_icon_name ("dialog-warning-symbolic");
-    private Gtk.Button flag_button = new Gtk.Button.from_icon_name ("flag-symbolic");
+    private Gtk.Button flag_button = new Gtk.Button.from_icon_name ("mailficient-flag-symbolic");
     private Gtk.MenuButton more_button = new Gtk.MenuButton ();
     private Gtk.MenuButton move_button = new Gtk.MenuButton ();
     private SimpleAction? group_messages_action;
@@ -449,7 +449,7 @@ public class MailWindow : Adw.ApplicationWindow {
         } catch (Error error) { show_operation_error (error); }
     }
 
-    private async void prompt_permanent_delete () {
+    private async void prompt_permanent_delete (string next_message_id) {
         var messages = action_messages (); if (messages.size == 0) return;
         string subject = messages.size == 1 ? "Delete this message permanently?" :
             "Delete %d messages permanently?".printf (messages.size);
@@ -464,7 +464,7 @@ public class MailWindow : Adw.ApplicationWindow {
             try { repository.permanently_delete (message.id); completed++; }
             catch (Error error) { show_operation_error (error); }
         }
-        message_list.finish_bulk_action (); selected_message = null; reader.show_empty ();
+        select_after_removal (next_message_id, completed);
         toast_overlay.add_toast (new Adw.Toast (completed == 1 ? "Message permanently deleted" :
             "%d messages permanently deleted".printf (completed)));
     }
@@ -1079,17 +1079,18 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void move_selected (MailboxRole role) {
         var messages = action_messages (); if (messages.size == 0) return;
+        string next_message_id = message_list.adjacent_message_id_after_selection ();
         if (role == MailboxRole.TRASH) {
             bool has_local = false;
             foreach (var message in messages)
                 if (is_local_draft (message.id)) { has_local = true; break; }
             if (has_local) {
-                prompt_delete_local_messages.begin (messages);
+                prompt_delete_local_messages.begin (messages, next_message_id);
                 return;
             }
         }
         if (role == MailboxRole.TRASH && selected_are_in_discard_folders ()) {
-            prompt_permanent_delete.begin (); return;
+            prompt_permanent_delete.begin (next_message_id); return;
         }
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
         foreach (var message in messages) {
@@ -1102,14 +1103,14 @@ public class MailWindow : Adw.ApplicationWindow {
                 toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (friendly.title, friendly.suggestion)));
             }
         }
-        message_list.finish_bulk_action ();
-        selected_message = null; reader.show_empty (); update_action_sensitivity ();
+        select_after_removal (next_message_id, completed);
         string action = role == MailboxRole.TRASH ? "moved to Trash" : "archived";
         show_transfer_undo (completed == 1 ? "Message %s".printf (action) :
             "%d messages %s".printf (completed, action), undo);
     }
 
-    private async void prompt_delete_local_messages (Gee.List<Message> messages) {
+    private async void prompt_delete_local_messages (Gee.List<Message> messages,
+                                                     string next_message_id) {
         var dialog = new Adw.AlertDialog (
             messages.size == 1 ? "Delete this message?" :
                 "Delete %d messages?".printf (messages.size),
@@ -1132,8 +1133,8 @@ public class MailWindow : Adw.ApplicationWindow {
                 deleted++;
             } catch (Error error) { show_operation_error (error); }
         }
-        message_list.finish_bulk_action ();
-        selected_message = null; reader.show_empty (); repository.reload ();
+        repository.reload ();
+        select_after_removal (next_message_id, deleted);
         toast_overlay.add_toast (new Adw.Toast (deleted == 1 ?
             "Message deleted" : "%d messages deleted".printf (deleted)));
     }
@@ -1163,6 +1164,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void classify_selected_junk () {
         var messages = action_messages (); if (messages.size == 0) return;
+        string next_message_id = message_list.adjacent_message_id_after_selection ();
         bool mark_junk = !selected_is_junk ();
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
         foreach (var message in messages) {
@@ -1175,11 +1177,19 @@ public class MailWindow : Adw.ApplicationWindow {
                 toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (friendly.title, friendly.suggestion)));
             }
         }
-        message_list.finish_bulk_action ();
-        selected_message = null; reader.show_empty (); update_action_sensitivity ();
+        select_after_removal (next_message_id, completed);
         show_transfer_undo (completed == 1 ? (mark_junk ? "Marked as junk" : "Returned to Inbox") :
             (mark_junk ? "%d messages marked as junk".printf (completed) :
                          "%d messages returned to Inbox".printf (completed)), undo);
+    }
+
+    private void select_after_removal (string next_message_id, int completed) {
+        message_list.finish_bulk_action ();
+        if (completed > 0 && next_message_id != "" &&
+            message_list.select_message (next_message_id)) return;
+        selected_message = null;
+        reader.show_empty ();
+        update_action_sensitivity ();
     }
 
     private Gee.List<Message> action_messages () {

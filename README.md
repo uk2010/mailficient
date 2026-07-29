@@ -41,12 +41,12 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Flatpak package
 
-Download `Mailficient-0.1.1-x86_64.flatpak` from the
-[v0.1.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.1),
+Download `Mailficient-0.1.4-x86_64.flatpak` from the
+[v0.1.4 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.4),
 then install and run it with:
 
 ```sh
-flatpak install --user ./Mailficient-0.1.1-x86_64.flatpak
+flatpak install --user ./Mailficient-0.1.4-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -62,7 +62,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.1.0_arm64.snap
+sudo snap install --dangerous ./mailficient_0.1.4_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -89,7 +89,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.3_amd64.deb
+sudo apt install ./dist/mailficient_0.1.4_amd64.deb
 mailficient
 ```
 

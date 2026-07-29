@@ -4,6 +4,10 @@
 
 # Flatpak and packaging output
 /.flatpak-builder/
+/.craft/
+/parts/
+/prime/
+/stage/
 /flatpak-build*/
 /flatpak-repo*/
 /dist/

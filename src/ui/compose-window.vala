@@ -659,7 +659,7 @@ public class ComposeWindow : Adw.Window {
             new DateTime.from_unix_local (queued_item.next_attempt_at) :
             new DateTime.now_local ().add_hours (1);
         var picker = new Gtk.Box (Gtk.Orientation.VERTICAL, 10);
-        var calendar = new Gtk.Calendar (); calendar.set_date (initial);
+        var calendar = new Gtk.Calendar (); calendar.select_day (initial);
         calendar.show_day_names = true; calendar.show_heading = true;
         picker.append (calendar);
         var time_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);

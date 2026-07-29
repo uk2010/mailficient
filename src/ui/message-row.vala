@@ -46,7 +46,7 @@ public class MessageRow : Gtk.Box {
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); content.hexpand = true;
         var top = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
         var sender = new Gtk.Label (message.sender_name); sender.xalign = 0; sender.hexpand = true; sender.ellipsize = Pango.EllipsizeMode.END; sender.add_css_class ("sender"); top.append (sender);
-        if (message.flagged) top.append (new Gtk.Image.from_icon_name ("flag-symbolic"));
+        if (message.flagged) top.append (new Gtk.Image.from_icon_name ("mailficient-flag-symbolic"));
         var time = new Gtk.Label (message.timestamp); time.add_css_class ("timestamp"); top.append (time);
         content.append (top);
         var subject_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 5);

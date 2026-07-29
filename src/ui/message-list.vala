@@ -103,16 +103,36 @@ public class MessageList : Gtk.Box {
         return model == null ? null : model.get_item (0) as Message;
     }
 
-    public void select_message (string id) {
-        if (model == null || selection == null) return;
+    public bool select_message (string id) {
+        if (model == null || selection == null) return false;
         for (uint position = 0; position < model.get_n_items (); position++) {
             var message = model.get_item (position) as Message;
             if (message != null && message.id == id) {
                 selection.select_item (position, true);
                 list.scroll_to (position, Gtk.ListScrollFlags.FOCUS, null);
-                return;
+                return true;
             }
         }
+        return false;
+    }
+
+    public string adjacent_message_id_after_selection () {
+        if (model == null || selection == null) return "";
+        var selected = selection.get_selection ();
+        if (selected.is_empty ()) return "";
+
+        uint last = selected.get_maximum ();
+        for (uint position = last + 1; position < model.get_n_items (); position++) {
+            var message = model.get_item (position) as Message;
+            if (message != null && !selected.contains (position)) return message.id;
+        }
+
+        uint first = selected.get_minimum ();
+        for (int position = (int) first - 1; position >= 0; position--) {
+            var message = model.get_item ((uint) position) as Message;
+            if (message != null && !selected.contains ((uint) position)) return message.id;
+        }
+        return "";
     }
 
     public void activate_message (string id) {

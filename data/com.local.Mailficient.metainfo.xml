@@ -10,5 +10,8 @@
   <description><p>Mailficient provides a refined three-pane interface, secure message reading, composing, search, and offline-friendly account synchronization.</p></description>
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
+  <releases>
+    <release version="0.1.4" date="2026-07-29"/>
+  </releases>
   <content_rating type="oars-1.1"/>
 </component>

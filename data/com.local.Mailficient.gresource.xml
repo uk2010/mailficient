@@ -4,5 +4,6 @@
     <file>style.css</file>
     <file>sample-data/design-review-notes.txt</file>
     <file alias="sample-data/mailficient-preview.png">icons/hicolor/256x256/apps/com.local.Mailficient.png</file>
+    <file>icons/scalable/actions/mailficient-flag-symbolic.svg</file>
   </gresource>
 </gresources>

@@ -40,7 +40,7 @@ public class CachedMailRepository : Object, MailRepository {
             if (cache.list_accounts ().size == 0) return result;
             result.add (new Mailbox ("unified-inbox", "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, cache.unified_unread_count ()));
             result.add (new Mailbox ("unified-vip", "VIP", "starred-symbolic", MailboxRole.VIP, cache.smart_unread_count ("unified-vip")));
-            result.add (new Mailbox ("unified-flagged", "Flagged", "flag-symbolic", MailboxRole.FLAGGED, cache.smart_unread_count ("unified-flagged")));
+            result.add (new Mailbox ("unified-flagged", "Flagged", "mailficient-flag-symbolic", MailboxRole.FLAGGED, cache.smart_unread_count ("unified-flagged")));
             result.add (new Mailbox (LOCAL_DRAFTS_ID, "Drafts", "document-edit-symbolic", MailboxRole.DRAFTS, (uint) cache.saved_draft_count ()));
             result.add (new Mailbox (LOCAL_OUTBOX_ID, "Outbox", "mail-send-symbolic", MailboxRole.CUSTOM, (uint) cache.outbox_count ()));
             result.add (new Mailbox ("unified-sent", "Sent", "mail-sent-symbolic", MailboxRole.SENT));

@@ -388,7 +388,11 @@ public class CamelMailEngine : Object, MailEngine {
                     if (folder == null)
                         throw new MailError.CONNECTION ("The folder is not currently available");
                     yield folder.refresh_info (Priority.DEFAULT, cancellable);
+#if EDS_LEGACY
+                    var uids = folder.get_uids ();
+#else
                     var uids = folder.dup_uids ();
+#endif
                     var plan = new FolderDownloadPlan (mailbox, folder);
                     for (int index = 0; index < (int) uids.length; index++) {
                         string uid = uids[index];
@@ -1139,11 +1143,19 @@ public class CamelMailEngine : Object, MailEngine {
         var source_info = source.get_message_info (remote_uid);
         if (source_info != null) source_message_id = source_info.get_message_id ();
         var destination_before = new Gee.HashSet<string> ();
+#if EDS_LEGACY
+        var prior_destination_uids = destination.get_uids ();
+#else
         var prior_destination_uids = destination.dup_uids ();
+#endif
         for (uint index = 0; index < prior_destination_uids.length; index++)
             destination_before.add (prior_destination_uids[index]);
         var uids = new GenericArray<string> (); uids.add (remote_uid);
+#if EDS_LEGACY
+        GenericArray<string>? transferred;
+#else
         GenericArray<weak string>? transferred;
+#endif
         bool accepted = yield source.transfer_messages_to (uids, destination, !copy,
             Priority.DEFAULT, cancellable, out transferred);
         if (!accepted) throw new MailError.CONNECTION (copy ?
@@ -1159,7 +1171,11 @@ public class CamelMailEngine : Object, MailEngine {
         try {
             yield destination.refresh_info (Priority.DEFAULT, cancellable);
             var destination_after = new Gee.HashMap<string, uint64?> ();
+#if EDS_LEGACY
+            var current_destination_uids = destination.get_uids ();
+#else
             var current_destination_uids = destination.dup_uids ();
+#endif
             for (uint index = 0; index < current_destination_uids.length; index++) {
                 string uid = current_destination_uids[index];
                 var info = destination.get_message_info (uid);
@@ -1231,7 +1247,11 @@ public class CamelMailEngine : Object, MailEngine {
                                              Priority.DEFAULT, cancellable);
         if (folder == null) throw new MailError.CONNECTION ("The folder is unavailable");
         uint32 deleted = Camel.MessageFlags.DELETED;
+#if EDS_LEGACY
+        var uids = folder.get_uids ();
+#else
         var uids = folder.dup_uids ();
+#endif
         for (uint index = 0; index < uids.length; index++)
             folder.set_message_flags (uids[index], deleted, deleted);
         yield folder.synchronize (true, Priority.DEFAULT, cancellable);
