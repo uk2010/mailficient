@@ -598,6 +598,12 @@ private void test_filename () {
         "text/plain", text, text.length));
     assert (!AttachmentSafety.preview_signature_matches (AttachmentPreviewKind.TEXT,
         "text/plain", binary_text, binary_text.length));
+    assert (new Attachment ("calendar", "/unused", "meeting.ics", 100,
+        "application/octet-stream").is_calendar_invitation ());
+    assert (new Attachment ("calendar-mime", "/unused", "invite", 100,
+        "text/calendar; method=REQUEST").is_calendar_invitation ());
+    assert (!new Attachment ("not-calendar", "/unused", "notes.txt", 100,
+        "text/plain").is_calendar_invitation ());
 }
 
 private void test_attachment_import () {
@@ -682,6 +688,36 @@ private async void exercise_remote_attachment_download () throws Error {
     catch (Error error) { oversized_error = error; }
     assert (oversized_error is MailError.ATTACHMENT);
     assert (engine.remote_attachment_calls == 2);
+
+    string local_calendar_path = Path.build_filename (root, "meeting.ics");
+    string calendar_contents = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
+    FileUtils.set_contents (local_calendar_path, calendar_contents);
+    var local_calendar = new Attachment ("local-calendar", local_calendar_path,
+        "meeting.ics", calendar_contents.length, "application/octet-stream");
+    var staged_local = yield service.stage_calendar_invitation (loaded, local_calendar);
+    assert (staged_local.get_path () != local_calendar_path);
+    assert (staged_local.get_basename ().has_suffix (".ics"));
+    assert (FileUtils.get_contents (staged_local.get_path (), out contents));
+    assert (contents == calendar_contents);
+    staged_local.delete (null);
+
+    var remote_calendar = new Attachment ("remote-calendar", "", "meeting.ics", 128,
+        "text/calendar; method=REQUEST", "", 4);
+    var staged_remote = yield service.stage_calendar_invitation (loaded, remote_calendar);
+    assert (engine.remote_attachment_calls == 3);
+    assert (engine.last_remote_attachment_maximum ==
+        ReceivedAttachmentService.MAX_CALENDAR_INVITATION_BYTES);
+    assert (FileUtils.get_contents (staged_remote.get_path (), out contents));
+    assert (contents == "downloaded attachment");
+    staged_remote.delete (null);
+
+    var oversized_calendar = new Attachment ("oversized-calendar", "", "huge.ics",
+        ReceivedAttachmentService.MAX_CALENDAR_INVITATION_BYTES + 1, "text/calendar", "", 5);
+    oversized_error = null;
+    try { yield service.stage_calendar_invitation (loaded, oversized_calendar); }
+    catch (Error error) { oversized_error = error; }
+    assert (oversized_error is MailError.ATTACHMENT);
+    assert (engine.remote_attachment_calls == 3);
 }
 
 private void test_remote_attachment_download () {

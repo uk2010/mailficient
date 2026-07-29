@@ -334,6 +334,16 @@ public class ReadingPane : Gtk.Box {
                     preview.clicked.connect (() => preview_attachment (attachment));
                     row.append (preview);
                 }
+                if (attachment.is_calendar_invitation ()) {
+                    var calendar = new Gtk.Button.with_label ("Add to Calendar");
+                    calendar.add_css_class ("flat");
+                    calendar.tooltip_text = "Open this invitation in your desktop calendar";
+                    Accessibility.label (calendar,
+                        "Add calendar invitation %s to calendar".printf (attachment.name));
+                    calendar.clicked.connect (() =>
+                        open_calendar_invitation.begin (message, attachment, calendar));
+                    row.append (calendar);
+                }
                 var save = new Gtk.Button.from_icon_name ("document-save-symbolic");
                 save.add_css_class ("flat");
                 save.icon_name = attachment.is_downloaded () ?
@@ -355,6 +365,38 @@ public class ReadingPane : Gtk.Box {
         var root_window = get_root () as Gtk.Window;
         if (root_window == null) return;
         new AttachmentPreviewWindow (root_window, attachment).present ();
+    }
+
+    private async void open_calendar_invitation (Message message, Attachment attachment,
+                                                  Gtk.Button button) {
+        button.sensitive = false;
+        var spinner = new Gtk.Spinner (); spinner.spinning = true; button.child = spinner;
+        File? staged = null;
+        try {
+            staged = yield attachment_service.stage_calendar_invitation (message, attachment);
+            AppInfo.launch_default_for_uri (staged.get_uri (), null);
+            // Desktop calendar applications and portals may read the file after
+            // launch returns. Keep it briefly, then remove the private copy.
+            File cleanup_file = staged;
+            Timeout.add_seconds (300, () => {
+                try {
+                    if (cleanup_file.query_exists ()) cleanup_file.delete (null);
+                } catch (Error ignored) { }
+                return Source.REMOVE;
+            });
+            staged = null;
+        } catch (Error error) {
+            if (staged != null) {
+                try {
+                    if (staged.query_exists ()) staged.delete (null);
+                } catch (Error ignored) { }
+            }
+            attachment_failed (error);
+        } finally {
+            button.child = null;
+            button.label = "Add to Calendar";
+            button.sensitive = true;
+        }
     }
 
     private async void choose_attachment_destination (Message message, Attachment attachment,

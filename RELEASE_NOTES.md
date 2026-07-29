@@ -1,27 +1,27 @@
-# Mailficient 0.1.1
+# Mailficient 0.1.2
 
-Mailficient 0.1.1 is the corrected packaging release of the native Linux
-desktop email client. It removes an obsolete scalable icon that caused GNOME
-to show the wrong application artwork and uses the intended black-and-white
-Mailficient icon set. The release includes both an Ubuntu 26.04 AMD64 `.deb`
-and an x86-64 Flatpak bundle.
+Mailficient 0.1.2 adds provider-guided account setup, calendar-invitation
+interoperability, and a fresh Ubuntu 26.04 AMD64 Debian package containing the
+latest sending fixes.
 
-Highlights include:
+Highlights:
 
-- Adaptive three-pane GTK4 and Libadwaita interface
-- Standard IMAP and SMTP account support through Evolution Data Server
-- Secure credential storage with libsecret
-- Offline cache, full-text search, drafts, Outbox, and background sync
-- Safe plain-text and sanitized HTML message display
-- Compose, reply, forwarding, attachments, signatures, and rich formatting
-- Flatpak, Debian, and Snap packaging
-- Reproducible Flatpak source manifest with pinned libical and Camel dependencies
-- Automated core, Camel-boundary, accessibility, and visual-QA helpers
+- Adds provider choices for iCloud, Microsoft, Google, Yahoo, AOL, and custom
+  IMAP/SMTP accounts
+- Prevents stalled SMTP connections from leaving manual-account sends hanging
+  indefinitely
+- Adds an **Add to Calendar** action for `.ics` and `text/calendar`
+  attachments
+- Opens invitations with the desktop's registered calendar application,
+  including GNOME Calendar
+- Bounds calendar invitation staging to 2 MB and uses a private temporary copy
+- Includes the corrected Mailficient application icon in the Debian package
+- Retains the adaptive GTK4/Libadwaita interface, offline cache, full-text
+  search, drafts, Outbox, secure libsecret credentials, and Camel IMAP/SMTP
 
-The standard IMAP/SMTP path is implemented. Controlled real-provider
-qualification, long-duration memory profiling, and a hands-on screen-reader
-review remain environment-dependent checks. See
-[`docs/remaining-work.md`](docs/remaining-work.md) for details.
+This release provides an Ubuntu 26.04 AMD64 `.deb`. The existing v0.1.1
+x86-64 Flatpak remains available from its release, and all Flatpak build source
+and its checksum-pinned manifest remain in this repository.
 
-The source is licensed under GPL-3.0-or-later. Binary release archives should
-be published as GitHub Release assets rather than committed to the repository.
+The source is licensed under GPL-3.0-or-later. Binary release archives are
+published as GitHub Release assets rather than committed to the repository.

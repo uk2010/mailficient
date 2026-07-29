@@ -16,6 +16,11 @@ public class Attachment : Object {
 
     public bool is_downloaded () { return path != ""; }
 
+    public bool is_calendar_invitation () {
+        string media_type = content_type.down ().split (";", 2)[0].strip ();
+        return media_type == "text/calendar" || name.down ().has_suffix (".ics");
+    }
+
     public string formatted_size () {
         if (size <= 0) return "Size unavailable";
         if (size >= 1024 * 1024) return "%.1f MB".printf ((double) size / (1024.0 * 1024.0));

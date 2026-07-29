@@ -89,7 +89,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.1_amd64.deb
+sudo apt install ./dist/mailficient_0.1.2_amd64.deb
 mailficient
 ```
 
@@ -103,6 +103,11 @@ The builder also writes a matching `.deb.sha256` checksum for release uploads.
 The complete feature roadmap is implemented: bounded page-by-page browsing and search; multi-selection and bulk actions; recoverable Trash moves plus confirmed permanent deletion and Empty Trash/Junk; rich composition with formatting, links, lists, inline images, and attachments; local rules and labels; scheduled sending, snooze, templates, and per-account vacation replies; EML/PDF export and printing; and OpenPGP/S/MIME signing, encryption, decryption, and signature verification. See [the feature guide](docs/features.md) for the controls and operational details.
 
 Attachment rows provide signature-verified image, bounded text, and PDF previews. Remote images can be loaded once or allowed for a sender; the complete trusted-sender list remains reviewable and revocable under Preferences → Privacy. Background checking defaults to five minutes and can be changed to 15, 30, or 60 minutes—or manual-only—under Preferences → General; startup checking is independently configurable. Preferences also reopens to the last section used.
+
+Calendar invitations (`text/calendar` or `.ics`) have an **Add to Calendar**
+action. Mailficient copies the invitation to a private, size-bounded temporary
+file and opens it with the desktop's registered calendar application, including
+GNOME Calendar when it is the default `text/calendar` handler.
 
 If the local mail database cannot be opened, Mailficient now shows a non-destructive recovery window with understandable guidance, expandable diagnostics, and a safe retry action rather than silently exiting or replacing the cache.
 
