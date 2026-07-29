@@ -1,11 +1,13 @@
-# Mailficient 0.1.2
+# Mailficient 0.1.3
 
-Mailficient 0.1.2 adds provider-guided account setup, calendar-invitation
-interoperability, and a fresh Ubuntu 26.04 AMD64 Debian package containing the
-latest sending fixes.
+Mailficient 0.1.3 makes iCloud Mail setup directly visible on the Accounts
+screen. It also includes the provider-guided setup, calendar-invitation
+interoperability, and manual-account sending fixes introduced in 0.1.2.
 
 Highlights:
 
+- Adds a dedicated **iCloud Mail** row and **Add iCloud** button
+- Explains that iCloud uses an Apple Account email and app-specific password
 - Adds provider choices for iCloud, Microsoft, Google, Yahoo, AOL, and custom
   IMAP/SMTP accounts
 - Prevents stalled SMTP connections from leaving manual-account sends hanging

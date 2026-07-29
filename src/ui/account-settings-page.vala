@@ -35,15 +35,27 @@ public class AccountSettingsPage : Adw.PreferencesPage {
 
         var add_group = new Adw.PreferencesGroup ();
         add_group.title = "Add an Account";
+        var icloud_row = new Adw.ActionRow ();
+        icloud_row.title = "iCloud Mail";
+        icloud_row.subtitle = "Connect using your Apple Account email and an app-specific password";
+        icloud_row.add_prefix (new Gtk.Image.from_icon_name ("folder-remote-symbolic"));
+        icloud_row.activatable = true;
+        icloud_row.activated.connect (open_icloud_dialog);
+        var icloud_button = new Gtk.Button.with_label ("Add iCloud");
+        icloud_button.valign = Gtk.Align.CENTER;
+        icloud_button.add_css_class ("suggested-action");
+        icloud_button.clicked.connect (open_icloud_dialog);
+        icloud_row.add_suffix (icloud_button);
+        add_group.add (icloud_row);
+
         var add_row = new Adw.ActionRow ();
-        add_row.title = "Standard Mail Account";
-        add_row.subtitle = "Connect an IMAP and SMTP account";
+        add_row.title = "Other Mail Provider";
+        add_row.subtitle = "Google, Microsoft, Yahoo, AOL, or custom IMAP/SMTP";
         add_row.add_prefix (new Gtk.Image.from_icon_name ("list-add-symbolic"));
         add_row.activatable = true;
         add_row.activated.connect (open_add_dialog);
-        var add_button = new Gtk.Button.with_label ("Add Account");
+        var add_button = new Gtk.Button.with_label ("Choose Provider");
         add_button.valign = Gtk.Align.CENTER;
-        add_button.add_css_class ("suggested-action");
         add_button.clicked.connect (open_add_dialog);
         add_row.add_suffix (add_button);
         add_group.add (add_row);
@@ -121,6 +133,10 @@ public class AccountSettingsPage : Adw.PreferencesPage {
         var dialog = new ProviderChooserDialog ();
         dialog.provider_selected.connect (open_provider);
         dialog.present (this);
+    }
+
+    private void open_icloud_dialog () {
+        open_provider (MailProvider.ICLOUD);
     }
 
     private void open_provider (MailProvider provider) {
