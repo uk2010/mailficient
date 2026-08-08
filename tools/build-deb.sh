@@ -7,14 +7,18 @@ native_build=${MAILFICIENT_NATIVE_BUILD:-"$root_dir/build-menu-state"}
 mailficient_binary=${MAILFICIENT_NATIVE_BINARY:-"$native_build/src/mailficient"}
 probe_binary=${MAILFICIENT_PROBE_BINARY:-"$native_build/src/mailficient-addressbook-probe"}
 sdk_location=$(flatpak info -l org.gnome.Sdk//49)
+architecture=${MAILFICIENT_DEB_ARCHITECTURE:-$(dpkg --print-architecture)}
+multiarch=${MAILFICIENT_DEB_MULTIARCH:-$(dpkg-architecture -qDEB_HOST_MULTIARCH)}
+sdk_lib="$sdk_location/files/lib/$multiarch"
 app_version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
     head -n 1 |
     cut -d "'" -f 2)
 package_version="$app_version-${MAILFICIENT_DEB_REVISION:-1}"
 build_root=$(mktemp -d "$root_dir/build-deb.XXXXXX")
+trap 'rm -rf "$build_root"' EXIT HUP INT TERM
 stage="$build_root/stage"
 output_dir="$root_dir/dist"
-output="$output_dir/mailficient_${package_version}_amd64.deb"
+output="$output_dir/mailficient_${package_version}_${architecture}.deb"
 checksum="$output.sha256"
 private_lib="$stage/usr/lib/mailficient"
 
@@ -29,7 +33,7 @@ require_file "$mailficient_binary"
 require_file "$probe_binary"
 require_file "$app_tree/lib/libcamel-1.2.so.67"
 require_file "$app_tree/lib/evolution-data-server/camel-providers/libcamelimapx.so"
-require_file "$sdk_location/files/lib/x86_64-linux-gnu/libicuuc.so.77"
+require_file "$sdk_lib/libicuuc.so.77"
 
 install -d \
     "$stage/DEBIAN" \
@@ -53,15 +57,18 @@ cp -a "$app_tree/lib/evolution-data-server/camel-providers" \
     "$private_lib/evolution-data-server/"
 cp -a "$app_tree/lib/evolution-data-server/libedbus-private.so" \
     "$private_lib/evolution-data-server/"
-cp -a "$sdk_location"/files/lib/x86_64-linux-gnu/libicuuc.so.77* "$private_lib/"
-cp -a "$sdk_location"/files/lib/x86_64-linux-gnu/libicui18n.so.77* "$private_lib/"
-cp -a "$sdk_location"/files/lib/x86_64-linux-gnu/libicudata.so.77* "$private_lib/"
+cp -a "$sdk_lib"/libicuuc.so.77* "$private_lib/"
+cp -a "$sdk_lib"/libicui18n.so.77* "$private_lib/"
+cp -a "$sdk_lib"/libicudata.so.77* "$private_lib/"
 
-install -m 0644 "$root_dir/data/com.local.Mailficient.desktop" \
-    "$stage/usr/share/applications/"
+sed 's|^Exec=.*$|Exec=/usr/bin/mailficient|' \
+    "$root_dir/data/com.local.Mailficient.desktop" \
+    > "$stage/usr/share/applications/com.local.Mailficient.desktop"
+chmod 0644 "$stage/usr/share/applications/com.local.Mailficient.desktop"
 sed 's|Exec=/app/bin/mailficient|Exec=/usr/bin/mailficient|' \
     "$root_dir/data/com.local.Mailficient.service" \
     > "$stage/usr/share/dbus-1/services/com.local.Mailficient.service"
+chmod 0644 "$stage/usr/share/dbus-1/services/com.local.Mailficient.service"
 install -m 0644 "$root_dir/data/com.local.Mailficient.metainfo.xml" \
     "$stage/usr/share/metainfo/"
 
@@ -77,12 +84,35 @@ install -m 0644 "$root_dir/RELEASE_NOTES.md" \
 install -m 0644 "$root_dir/packaging/debian/copyright" \
     "$stage/usr/share/doc/mailficient/copyright"
 
+# Normalize permissions inherited from bundled runtime artifacts. Package
+# payloads must never depend on the umask or ownership of the build machine.
+find "$private_lib" -type d -exec chmod 0755 {} +
+find "$private_lib" -type f -exec chmod 0644 {} +
+find "$stage" -type d -exec chmod 0755 {} +
+chmod 0755 \
+    "$private_lib/mailficient.real" \
+    "$private_lib/mailficient-addressbook-probe.real" \
+    "$stage/usr/bin/mailficient" \
+    "$stage/usr/bin/mailficient-addressbook-probe"
+
 install -m 0755 "$root_dir/packaging/debian/postinst" "$stage/DEBIAN/postinst"
 install -m 0755 "$root_dir/packaging/debian/postrm" "$stage/DEBIAN/postrm"
+
+# Fail before packaging if launchers or desktop integration files have unsafe
+# or unusable modes. dpkg-deb --root-owner-group normalizes package ownership.
+test "$(stat -c %a "$stage/usr/bin/mailficient")" = 755
+test "$(stat -c %a "$stage/usr/lib/mailficient/mailficient.real")" = 755
+test "$(stat -c %a "$stage/usr/share/applications/com.local.Mailficient.desktop")" = 644
+test "$(stat -c %a "$stage/usr/share/dbus-1/services/com.local.Mailficient.service")" = 644
+if find "$stage" -xdev ! -type l -perm /0022 -print -quit | grep -q .; then
+    printf '%s\n' "Package contains group- or world-writable files" >&2
+    exit 1
+fi
 
 installed_size=$(du -sk "$stage/usr" | awk '{print $1}')
 sed \
     -e "s/@VERSION@/$package_version/" \
+    -e "s/@ARCHITECTURE@/$architecture/" \
     -e "s/@INSTALLED_SIZE@/$installed_size/" \
     "$root_dir/packaging/debian/control.in" > "$stage/DEBIAN/control"
 

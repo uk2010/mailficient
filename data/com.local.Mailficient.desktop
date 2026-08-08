@@ -8,5 +8,5 @@ Type=Application
 Categories=Network;Email;
 Keywords=mail;email;imap;smtp;
 StartupNotify=true
-StartupWMClass=mailficient
+StartupWMClass=com.local.Mailficient
 DBusActivatable=true

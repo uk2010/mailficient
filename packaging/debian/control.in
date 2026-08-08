@@ -1,6 +1,6 @@
 Package: mailficient
 Version: @VERSION@
-Architecture: amd64
+Architecture: @ARCHITECTURE@
 Maintainer: uk2010 <uk2010@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
 Section: mail

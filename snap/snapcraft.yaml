@@ -46,6 +46,8 @@ apps:
       - network-status
       - online-accounts-service
       - password-manager-service
+      - home
+      - removable-media
 
 parts:
   mailficient:
@@ -86,5 +88,17 @@ parts:
       # A snap is launched through /snap/bin instead of exporting that service.
       sed -i 's/^DBusActivatable=true$/DBusActivatable=false/' \
         "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop"
+      sed -i \
+        -e 's|^Exec=.*$|Exec=mailficient|' \
+        -e 's|^Icon=.*$|Icon=${SNAP}/usr/share/icons/hicolor/512x512/apps/com.local.Mailficient.png|' \
+        "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop"
       rm -f \
         "$CRAFT_PART_INSTALL/usr/share/dbus-1/services/com.local.Mailficient.service"
+      chmod 0755 \
+        "$CRAFT_PART_INSTALL/usr/bin/mailficient" \
+        "$CRAFT_PART_INSTALL/usr/bin/mailficient-addressbook-probe"
+      chmod 0644 \
+        "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop" \
+        "$CRAFT_PART_INSTALL/usr/share/metainfo/com.local.Mailficient.metainfo.xml"
+      find "$CRAFT_PART_INSTALL/usr/share/icons/hicolor" -type d -exec chmod 0755 {} +
+      find "$CRAFT_PART_INSTALL/usr/share/icons/hicolor" -type f -exec chmod 0644 {} +
