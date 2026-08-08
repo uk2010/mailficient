@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.1.5', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.1.6', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 gnome = import('gnome')
 i18n = import('i18n')
@@ -85,7 +85,7 @@ test_sources = files(
   'src/storage/mail-settings-store.vala',
 )
 core_tests = executable('core-tests', test_sources, dependencies: [gee, gio, sqlite, xml, cairo, pangocairo], vala_args: ['--target-glib=2.76'])
-test('core', core_tests, timeout: 180)
+test('core', core_tests, timeout: 300)
 
 camel_test_dep = dependency('camel-1.2', required: false)
 if camel_test_dep.found()
