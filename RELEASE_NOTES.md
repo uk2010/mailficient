@@ -16,9 +16,9 @@ Highlights:
 - Prevents Get Mail from crashing after an Evolution Data Server upgrade by
   rebuilding incompatible, disposable Camel folder-summary caches
 
-This release provides an x86-64 Flatpak bundle, an Ubuntu 26.04 AMD64 `.deb`,
-and an AMD64 Snap as GitHub Release downloads. ARM64 packages can be added from
-a native ARM64 build. Matching SHA-256 checksum files accompany each package.
+This release provides an x86-64 Flatpak bundle, Ubuntu 26.04 AMD64 and ARM64
+`.deb` packages, and an AMD64 Snap as GitHub Release downloads. Matching
+SHA-256 checksum files accompany each package.
 
 The source is licensed under GPL-3.0-or-later. Binary release artifacts are
 published as GitHub Release assets rather than committed to the repository.
