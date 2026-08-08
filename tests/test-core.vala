@@ -2662,13 +2662,15 @@ private void test_vip_and_unified_mailboxes () {
         snapshot.messages.add (new Message ("vip-account:inbox:1", inbox.id, "Maya", "MAYA@example.net", "Alex",
             "VIP mail", "", "Body", "Today", true, true, false, 1, false, "vip-account", "1", "same-message@example.net"));
         snapshot.messages.add (new Message ("vip-account:all:1", all_mail.id, "Maya", "maya@example.net", "Alex",
-            "VIP mail", "", "Body", "Today", true, false, false, 1, false, "vip-account", "101", "same-message@example.net"));
+            "VIP mail", "", "Body", "Today", true, true, false, 1, false, "vip-account", "101", "same-message@example.net"));
         snapshot.messages.add (new Message ("vip-account:important:1", important.id, "Maya", "maya@example.net", "Alex",
-            "VIP mail", "", "Body", "Today", true, false, false, 1, false, "vip-account", "201", "same-message@example.net"));
+            "VIP mail", "", "Body", "Today", true, true, false, 1, false, "vip-account", "201", "same-message@example.net"));
         snapshot.messages.add (new Message ("vip-account:sent:2", sent.id, "Alex", "alex@example.net", "Maya",
             "Sent mail", "", "Body", "Today", false, false, false, 1, false, "vip-account", "2"));
         cache.store_sync_result (snapshot);
         assert (cache.list_cached_messages ("unified-flagged").size == 1);
+        assert (cache.count_cached_messages ("unified-flagged") == 1);
+        assert (cache.smart_unread_count ("unified-flagged") == 1);
         assert (cache.list_cached_messages ("unified-sent").size == 1);
         assert (cache.list_cached_messages ("unified-vip").size == 0);
         cache.set_vip_sender ("maya@example.net", true);

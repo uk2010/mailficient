@@ -995,7 +995,7 @@ public class CacheDatabase : Object, AccountStore {
         bool bind_mailbox = false;
         string predicate = cached_mailbox_predicate (mailbox_id, out bind_mailbox);
         if (unread_only) predicate += " AND m.unread=1";
-        string grouping = mailbox_id == "unified-vip" ?
+        string grouping = is_grouped_smart_mailbox (mailbox_id) ?
             " GROUP BY m.account_id,COALESCE(NULLIF(m.internet_message_id,''),m.id)" : "";
         int bounded_limit = int.max (1, int.min (MESSAGE_LIST_LIMIT + 1, limit));
         int bounded_offset = int.max (0, offset);
@@ -1014,7 +1014,7 @@ public class CacheDatabase : Object, AccountStore {
         Sqlite.Statement statement; bool bind_mailbox = false;
         string predicate = cached_mailbox_predicate (mailbox_id, out bind_mailbox);
         if (unread_only) predicate += " AND m.unread=1";
-        string sql = mailbox_id == "unified-vip" ?
+        string sql = is_grouped_smart_mailbox (mailbox_id) ?
             "SELECT COUNT(*) FROM (SELECT 1 FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE %s GROUP BY m.account_id,COALESCE(NULLIF(m.internet_message_id,''),m.id))".printf (predicate) :
             "SELECT COUNT(*) FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE %s".printf (predicate);
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
@@ -1040,6 +1040,10 @@ public class CacheDatabase : Object, AccountStore {
         if (mailbox_id != "unified-snoozed")
             predicate += " AND NOT EXISTS(SELECT 1 FROM snoozed_messages s WHERE s.message_id=m.id AND s.until_unix>strftime('%s','now'))";
         return predicate;
+    }
+
+    private static bool is_grouped_smart_mailbox (string mailbox_id) {
+        return mailbox_id == "unified-vip" || mailbox_id == "unified-flagged";
     }
 
     private static string message_order (MessageSortMode mode) {
@@ -1114,7 +1118,7 @@ public class CacheDatabase : Object, AccountStore {
         case "unified-flagged": predicate = "m.flagged=1"; break;
         default: predicate = "0"; break;
         }
-        string sql = mailbox_id == "unified-vip" ?
+        string sql = is_grouped_smart_mailbox (mailbox_id) ?
             "SELECT COUNT(*) FROM (SELECT 1 FROM cached_messages m WHERE m.unread=1 AND %s GROUP BY m.account_id,COALESCE(NULLIF(m.internet_message_id,''),m.id))".printf (predicate) :
             "SELECT COUNT(*) FROM cached_messages m WHERE m.unread=1 AND %s".printf (predicate);
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare smart mailbox counting");
