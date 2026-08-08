@@ -35,6 +35,14 @@ require_file "$app_tree/lib/libcamel-1.2.so.67"
 require_file "$app_tree/lib/evolution-data-server/camel-providers/libcamelimapx.so"
 require_file "$sdk_lib/libicuuc.so.77"
 
+# The executable and the privately bundled EDS stack must come from the same
+# build environment. Mixing host EDS with the bundled provider can load two
+# incompatible Camel ABIs and crash as soon as Get Mail initializes IMAP.
+for soname in $(objdump -p "$mailficient_binary" |
+    awk '/NEEDED/ && $2 ~ /^lib(camel|ebook|ebook-contacts|edataserver|edata-book)-/ { print $2 }'); do
+    require_file "$app_tree/lib/$soname"
+done
+
 install -d \
     "$stage/DEBIAN" \
     "$stage/usr/bin" \

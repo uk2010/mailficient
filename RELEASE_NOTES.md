@@ -15,6 +15,8 @@ Highlights:
   installed file permissions
 - Prevents Get Mail from crashing after an Evolution Data Server upgrade by
   rebuilding incompatible, disposable Camel folder-summary caches
+- Ensures Debian packages cannot mix an executable and bundled Camel libraries
+  from incompatible Evolution Data Server ABIs
 
 This release provides an x86-64 Flatpak bundle, Ubuntu 26.04 AMD64 and ARM64
 `.deb` packages, and an AMD64 Snap as GitHub Release downloads. Matching
