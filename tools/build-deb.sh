@@ -7,13 +7,14 @@ native_build=${MAILFICIENT_NATIVE_BUILD:-"$root_dir/build-menu-state"}
 mailficient_binary=${MAILFICIENT_NATIVE_BINARY:-"$native_build/src/mailficient"}
 probe_binary=${MAILFICIENT_PROBE_BINARY:-"$native_build/src/mailficient-addressbook-probe"}
 sdk_location=$(flatpak info -l org.gnome.Sdk//49)
-version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
+app_version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
     head -n 1 |
     cut -d "'" -f 2)
+package_version="$app_version-${MAILFICIENT_DEB_REVISION:-1}"
 build_root=$(mktemp -d "$root_dir/build-deb.XXXXXX")
 stage="$build_root/stage"
 output_dir="$root_dir/dist"
-output="$output_dir/mailficient_${version}_amd64.deb"
+output="$output_dir/mailficient_${package_version}_amd64.deb"
 checksum="$output.sha256"
 private_lib="$stage/usr/lib/mailficient"
 
@@ -81,7 +82,7 @@ install -m 0755 "$root_dir/packaging/debian/postrm" "$stage/DEBIAN/postrm"
 
 installed_size=$(du -sk "$stage/usr" | awk '{print $1}')
 sed \
-    -e "s/@VERSION@/$version/" \
+    -e "s/@VERSION@/$package_version/" \
     -e "s/@INSTALLED_SIZE@/$installed_size/" \
     "$root_dir/packaging/debian/control.in" > "$stage/DEBIAN/control"
 

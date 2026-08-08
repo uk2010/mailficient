@@ -98,8 +98,29 @@ public class MessageList : Gtk.Box {
     }
 
     public void refresh () { reload (); }
-    public void refresh_preserving_selection () { reload (true, true); }
+    public void refresh_preserving_selection () {
+        // An unread-only list is a reading queue. Repository changes caused by
+        // opening its selected message must not immediately remove that row
+        // from under the reader. Keep the snapshot until the filter is toggled.
+        if (unread_filter.active) {
+            refresh_row_widgets ();
+            return;
+        }
+        reload (true, true);
+    }
     public void set_sort (MessageSortMode mode) { sort_mode = mode; reload (); }
+
+    public void mark_read_in_place (string id) {
+        if (!unread_filter.active || model == null) return;
+        for (uint position = 0; position < model.get_n_items (); position++) {
+            var message = model.get_item (position) as Message;
+            if (message != null && message.id == id) {
+                message.unread = false;
+                refresh_row_widgets ();
+                return;
+            }
+        }
+    }
 
     public Message? first_message () {
         return model == null ? null : model.get_item (0) as Message;

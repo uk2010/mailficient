@@ -529,7 +529,7 @@ public class MailWindow : Adw.ApplicationWindow {
         header.append (message_back);
 
         search.placeholder_text = "Search Mail";
-        search.set_size_request (220, -1);
+        search.set_size_request (280, -1);
         search.add_css_class ("apple-toolbar-search");
         Accessibility.label (search, "Search mail");
         search.search_changed.connect (() => message_list.search (search.text));
@@ -582,6 +582,7 @@ public class MailWindow : Adw.ApplicationWindow {
         if (action_name != "") button.action_name = action_name;
         button.tooltip_text = ToolbarLayout.label (id);
         button.add_css_class ("apple-toolbar-button");
+        if (id == "compose") button.add_css_class ("compose-toolbar-button");
         Accessibility.label (button, ToolbarLayout.label (id));
         return button;
     }
@@ -616,6 +617,28 @@ public class MailWindow : Adw.ApplicationWindow {
         }
     }
 
+    private bool belongs_in_action_cluster (string id) {
+        switch (id) {
+        case "reply-group":
+        case "mail-actions":
+        case "reply":
+        case "reply-all":
+        case "forward":
+        case "archive":
+        case "trash":
+        case "junk":
+        case "move":
+        case "flag":
+        case "toggle-read":
+        case "labels":
+        case "snooze":
+        case "print":
+            return true;
+        default:
+            return false;
+        }
+    }
+
     private void rebuild_toolbar () {
         Gtk.Widget? child = customizable_toolbar.get_first_child ();
         while (child != null) {
@@ -627,8 +650,10 @@ public class MailWindow : Adw.ApplicationWindow {
         var layout = ToolbarLayout.parse (settings.toolbar_layout);
         if (layout.size == 0) layout = ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT);
         bool added_overflow = false;
+        Gtk.Box? action_cluster = null;
         foreach (var id in layout) {
             if (compact_toolbar && overflows_in_compact_toolbar (id)) {
+                action_cluster = null;
                 if (!added_overflow) {
                     more_button.add_css_class ("apple-toolbar-button");
                     customizable_toolbar.append (more_button);
@@ -637,9 +662,21 @@ public class MailWindow : Adw.ApplicationWindow {
                 continue;
             }
             Gtk.Widget? item = toolbar_widget_for (id);
-            if (item != null) customizable_toolbar.append (item);
+            if (item == null) continue;
+            if (belongs_in_action_cluster (id)) {
+                if (action_cluster == null) {
+                    action_cluster = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+                    action_cluster.add_css_class ("toolbar-action-cluster");
+                    customizable_toolbar.append (action_cluster);
+                }
+                item.add_css_class ("toolbar-cluster-segment");
+                action_cluster.append (item);
+            } else {
+                action_cluster = null;
+                customizable_toolbar.append (item);
+            }
         }
-        search.set_size_request (compact_toolbar ? 150 : 220, -1);
+        search.set_size_request (compact_toolbar ? 150 : 280, -1);
         update_action_sensitivity ();
     }
 
@@ -663,8 +700,8 @@ public class MailWindow : Adw.ApplicationWindow {
                 ToolbarLayout.label (id));
         case "mail-actions":
             return make_toolbar_group (
-                { "archive", "trash", "junk" },
-                { "win.archive", "win.trash", "win.junk" },
+                { "trash", "archive", "junk" },
+                { "win.trash", "win.archive", "win.junk" },
                 ToolbarLayout.label (id));
         case "reply": reply_button = make_toolbar_button (id, "win.reply"); return reply_button;
         case "reply-all": reply_all_button = make_toolbar_button (id, "win.reply-all"); return reply_all_button;
@@ -1079,6 +1116,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void mark_read_after_selection (string message_id) {
         Idle.add (() => {
+            message_list.mark_read_in_place (message_id);
             repository.mark_read (message_id, true);
             return Source.REMOVE;
         });
