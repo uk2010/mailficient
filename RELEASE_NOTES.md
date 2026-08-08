@@ -13,6 +13,8 @@ Highlights:
   Inbox, All Mail, and Important
 - Corrects Debian and Snap desktop integration, architecture detection, and
   installed file permissions
+- Prevents Get Mail from crashing after an Evolution Data Server upgrade by
+  rebuilding incompatible, disposable Camel folder-summary caches
 
 This release provides an x86-64 Flatpak bundle, an Ubuntu 26.04 AMD64 `.deb`,
 and an AMD64 Snap as GitHub Release downloads. ARM64 packages can be added from
