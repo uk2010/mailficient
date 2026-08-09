@@ -6,10 +6,17 @@ app_tree=${MAILFICIENT_FLATPAK_APP_TREE:-"$root_dir/flatpak-build-custom-toolbar
 native_build=${MAILFICIENT_NATIVE_BUILD:-"$root_dir/build-menu-state"}
 mailficient_binary=${MAILFICIENT_NATIVE_BINARY:-"$native_build/src/mailficient"}
 probe_binary=${MAILFICIENT_PROBE_BINARY:-"$native_build/src/mailficient-addressbook-probe"}
-sdk_location=$(flatpak info -l org.gnome.Sdk//49)
 architecture=${MAILFICIENT_DEB_ARCHITECTURE:-$(dpkg --print-architecture)}
 multiarch=${MAILFICIENT_DEB_MULTIARCH:-$(dpkg-architecture -qDEB_HOST_MULTIARCH)}
-sdk_lib="$sdk_location/files/lib/$multiarch"
+if [ -n "${MAILFICIENT_SDK_LIB:-}" ]; then
+    sdk_lib=$MAILFICIENT_SDK_LIB
+else
+    sdk_location=$(flatpak info -l org.gnome.Sdk//49)
+    sdk_lib="$sdk_location/files/lib/$multiarch"
+fi
+runtime_lib=${MAILFICIENT_RUNTIME_LIB_DIR:-"$app_tree/lib"}
+provider_dir=${MAILFICIENT_PROVIDER_DIR:-"$runtime_lib/evolution-data-server/camel-providers"}
+eds_private_lib=${MAILFICIENT_EDS_PRIVATE_LIB:-"$runtime_lib/evolution-data-server/libedbus-private.so"}
 app_version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
     head -n 1 |
     cut -d "'" -f 2)
@@ -31,16 +38,24 @@ require_file() {
 
 require_file "$mailficient_binary"
 require_file "$probe_binary"
-require_file "$app_tree/lib/libcamel-1.2.so.67"
-require_file "$app_tree/lib/evolution-data-server/camel-providers/libcamelimapx.so"
-require_file "$sdk_lib/libicuuc.so.77"
+require_file "$provider_dir/libcamelimapx.so"
+require_file "$eds_private_lib"
+
+# ICU and Camel SONAMEs vary between distributions and architectures. Resolve
+# them from the selected runtime instead of coupling packages to one SDK build.
+set -- "$sdk_lib"/libicuuc.so.*
+require_file "$1"
+set -- "$sdk_lib"/libicui18n.so.*
+require_file "$1"
+set -- "$sdk_lib"/libicudata.so.*
+require_file "$1"
 
 # The executable and the privately bundled EDS stack must come from the same
 # build environment. Mixing host EDS with the bundled provider can load two
 # incompatible Camel ABIs and crash as soon as Get Mail initializes IMAP.
 for soname in $(objdump -p "$mailficient_binary" |
     awk '/NEEDED/ && $2 ~ /^lib(camel|ebook|ebook-contacts|edataserver|edata-book)-/ { print $2 }'); do
-    require_file "$app_tree/lib/$soname"
+    require_file "$runtime_lib/$soname"
 done
 
 install -d \
@@ -60,14 +75,14 @@ install -m 0755 "$root_dir/packaging/debian/mailficient" "$stage/usr/bin/mailfic
 install -m 0755 "$root_dir/packaging/debian/mailficient-addressbook-probe" \
     "$stage/usr/bin/mailficient-addressbook-probe"
 
-cp -a "$app_tree"/lib/*.so* "$private_lib/"
-cp -a "$app_tree/lib/evolution-data-server/camel-providers" \
+cp -a "$runtime_lib"/*.so* "$private_lib/"
+cp -a "$provider_dir" \
     "$private_lib/evolution-data-server/"
-cp -a "$app_tree/lib/evolution-data-server/libedbus-private.so" \
+cp -a "$eds_private_lib" \
     "$private_lib/evolution-data-server/"
-cp -a "$sdk_lib"/libicuuc.so.77* "$private_lib/"
-cp -a "$sdk_lib"/libicui18n.so.77* "$private_lib/"
-cp -a "$sdk_lib"/libicudata.so.77* "$private_lib/"
+cp -a "$sdk_lib"/libicuuc.so.* "$private_lib/"
+cp -a "$sdk_lib"/libicui18n.so.* "$private_lib/"
+cp -a "$sdk_lib"/libicudata.so.* "$private_lib/"
 
 sed 's|^Exec=.*$|Exec=/usr/bin/mailficient|' \
     "$root_dir/data/com.local.Mailficient.desktop" \
