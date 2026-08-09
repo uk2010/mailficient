@@ -914,6 +914,58 @@ private void test_account_validation () {
     assert (microsoft.outgoing_encryption == EncryptionMode.STARTTLS);
 }
 
+private void test_mobileconfig_import () {
+    string profile = """<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>PayloadContent</key><array><dict>
+<key>PayloadType</key><string>com.apple.mail.managed</string>
+<key>EmailAccountType</key><string>EmailTypeIMAP</string>
+<key>EmailAccountName</key><string>Profile User</string>
+<key>EmailAddress</key><string>profile@example.net</string>
+<key>IncomingMailServerAuthentication</key><string>EmailAuthPassword</string>
+<key>IncomingMailServerHostName</key><string>imap.example.net</string>
+<key>IncomingMailServerPortNumber</key><integer>993</integer>
+<key>IncomingMailServerUseSSL</key><true/>
+<key>IncomingMailServerUsername</key><string>profile@example.net</string>
+<key>IncomingMailServerPassword</key><string>candidate-secret</string>
+<key>OutgoingMailServerAuthentication</key><string>EmailAuthPassword</string>
+<key>OutgoingMailServerHostName</key><string>smtp.example.net</string>
+<key>OutgoingMailServerPortNumber</key><integer>587</integer>
+<key>OutgoingMailServerUseSSL</key><false/>
+<key>OutgoingMailServerUsername</key><string>profile@example.net</string>
+<key>OutgoingPasswordSameAsIncomingPassword</key><true/>
+</dict></array></dict></plist>""";
+    try {
+        var imported = MobileConfigImporter.parse ((uint8[]) profile.data);
+        assert (imported.size == 1);
+        var account = imported[0];
+        assert (account.settings.display_name == "Profile User");
+        assert (account.settings.email == "profile@example.net");
+        assert (account.settings.incoming_host == "imap.example.net");
+        assert (account.settings.incoming_port == 993);
+        assert (account.settings.incoming_encryption == EncryptionMode.TLS);
+        assert (account.settings.outgoing_host == "smtp.example.net");
+        assert (account.settings.outgoing_port == 587);
+        assert (account.settings.outgoing_encryption == EncryptionMode.STARTTLS);
+        assert (account.incoming_password == "candidate-secret");
+        assert (account.outgoing_password == "candidate-secret");
+    } catch (Error error) { GLib.error ("mobileconfig import test failed: %s", error.message); }
+}
+
+private void test_signed_mobileconfig_fixture () {
+    string? path = Environment.get_variable ("MAILFICIENT_TEST_MOBILECONFIG");
+    if (path == null || path == "") {
+        Test.skip ("Set MAILFICIENT_TEST_MOBILECONFIG to exercise a signed profile fixture");
+        return;
+    }
+    try {
+        uint8[] contents;
+        FileUtils.get_data (path, out contents);
+        var imported = MobileConfigImporter.parse (contents);
+        assert (imported.size > 0);
+        foreach (var account in imported) account.settings.validate ();
+    } catch (Error error) { GLib.error ("signed mobileconfig fixture failed: %s", error.message); }
+}
+
 private Variant test_goa_interfaces (bool smtp_xoauth2 = true) {
     var account = new VariantBuilder (new VariantType ("a{sv}"));
     account.add ("{sv}", "ProviderName", new Variant.string ("Google"));
@@ -1247,6 +1299,8 @@ private void test_signature_service () {
         assert (!updated.contains ("Design Team")); assert (updated.contains ("Alex\nNorthstar"));
         string quoted_same_text = updated + "\n> -- \nAlex\nNorthstar";
         settings.set_signature_enabled ("personal", false);
+        assert (service.block_for ("personal") == "");
+        assert (service.configured_block_for ("personal").contains ("Alex Morgan"));
         string removed = service.replace (applied, "personal", quoted_same_text, out applied);
         assert (removed.contains ("> -- \nAlex\nNorthstar")); assert (!removed.has_prefix ("\n\n-- "));
     } catch (Error caught) { GLib.error ("signature service test failed: %s", caught.message); }
@@ -2814,6 +2868,7 @@ private void test_toolbar_layout () {
     assert (ToolbarLayout.is_repeatable ("space"));
     assert (!ToolbarLayout.is_repeatable ("archive"));
     assert (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT).size > 0);
+    assert (ToolbarLayout.icon_name ("junk") == "dialog-warning-symbolic");
 }
 
 int main (string[] args) {
@@ -2836,6 +2891,8 @@ int main (string[] args) {
     Test.add_func ("/mail/sorting", test_message_sorting);
     Test.add_func ("/mail/conversation", test_conversation_builder);
     Test.add_func ("/account/validation", test_account_validation);
+    Test.add_func ("/account/mobileconfig-import", test_mobileconfig_import);
+    Test.add_func ("/account/mobileconfig-signed-fixture", test_signed_mobileconfig_fixture);
     Test.add_func ("/account/online-account-mapping-and-storage", test_online_account_mapping_and_storage);
     Test.add_func ("/account/online-account-security-requirements", test_online_account_security_requirements);
     Test.add_func ("/account/provisioning-transaction", test_account_provisioning_transaction);

@@ -16,12 +16,14 @@ public class MailboxSidebar : Gtk.Box {
     private Gee.HashMap<string, Gtk.ListBoxRow> mailbox_rows = new Gee.HashMap<string, Gtk.ListBoxRow> ();
     private Gee.HashMap<string, Gtk.ListBox> mailbox_owners = new Gee.HashMap<string, Gtk.ListBox> ();
     private Gee.ArrayList<Gtk.ListBox> account_lists = new Gee.ArrayList<Gtk.ListBox> ();
+    private Gee.HashSet<string> collapsed_accounts = new Gee.HashSet<string> ();
     private string selected_mailbox_id = "";
     private bool suppress_announcement;
 
     public MailboxSidebar (MailRepository repository, CacheDatabase cache) {
         Object (orientation: Gtk.Orientation.VERTICAL);
         this.repository = repository; this.cache = cache;
+        load_collapsed_accounts ();
         add_css_class ("mail-sidebar");
         list.selection_mode = Gtk.SelectionMode.SINGLE;
         list.add_css_class ("navigation-sidebar");
@@ -198,7 +200,11 @@ public class MailboxSidebar : Gtk.Box {
     private void add_account_group (string account_id, string display_name, string email,
                                     Gee.List<Mailbox> mailboxes, bool allow_folder_creation) {
         var row = new Gtk.ListBoxRow (); row.selectable = false; row.activatable = false;
-        var expander = new Gtk.Expander (null); expander.expanded = true;
+        var expander = new Gtk.Expander (null);
+        expander.expanded = !collapsed_accounts.contains (account_id);
+        expander.notify["expanded"].connect (() => {
+            set_account_collapsed (account_id, !expander.expanded);
+        });
         expander.set_margin_start (12); expander.set_margin_end (10); expander.set_margin_top (8); expander.set_margin_bottom (6);
         var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
         box.append (new Gtk.Image.from_icon_name ("avatar-default-symbolic"));
@@ -233,6 +239,28 @@ public class MailboxSidebar : Gtk.Box {
             if (mailbox.account_id == account_id && mailbox.role != MailboxRole.VIP && mailbox.role != MailboxRole.FLAGGED)
                 append_mailbox (folders, mailbox);
         expander.child = folders; row.set_child (expander); list.append (row);
+    }
+
+    private void load_collapsed_accounts () {
+        try {
+            foreach (var id in cache.preference ("collapsed-sidebar-accounts", "").split ("\n"))
+                if (id.strip () != "") collapsed_accounts.add (id.strip ());
+        } catch (Error error) {
+            warning ("Could not load collapsed sidebar accounts: %s", error.message);
+        }
+    }
+
+    private void set_account_collapsed (string account_id, bool collapsed) {
+        bool changed = collapsed ? collapsed_accounts.add (account_id) :
+            collapsed_accounts.remove (account_id);
+        if (!changed) return;
+        var serialized = new StringBuilder ();
+        foreach (var id in collapsed_accounts) {
+            if (serialized.len > 0) serialized.append_c ('\n');
+            serialized.append (id);
+        }
+        try { cache.set_preference ("collapsed-sidebar-accounts", serialized.str); }
+        catch (Error error) { warning ("Could not save collapsed sidebar accounts: %s", error.message); }
     }
 
     public void reload (bool announce = true) {

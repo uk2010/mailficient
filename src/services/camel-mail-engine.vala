@@ -347,8 +347,12 @@ public class CamelMailEngine : Object, MailEngine {
         network.set_auth_mechanism (authentication_mechanism (authentication));
     }
 
-    internal static string? authentication_mechanism (AuthenticationMode authentication) {
-        return authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS ? "XOAUTH2" : null;
+    internal static string authentication_mechanism (AuthenticationMode authentication) {
+        // A null SMTP mechanism means "do not authenticate" to Camel. That can
+        // make connection testing appear successful while MAIL FROM is rejected
+        // later. Password accounts use SASL PLAIN only inside the configured
+        // TLS/STARTTLS channel; brokered accounts use their explicit OAuth flow.
+        return authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS ? "XOAUTH2" : "PLAIN";
     }
 
     public async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,

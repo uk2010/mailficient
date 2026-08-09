@@ -213,7 +213,7 @@ private void test_certificate_failure_detail () {
 }
 
 private void test_authentication_mechanism () {
-    assert (CamelMailEngine.authentication_mechanism (AuthenticationMode.PASSWORD) == null);
+    assert (CamelMailEngine.authentication_mechanism (AuthenticationMode.PASSWORD) == "PLAIN");
     assert (CamelMailEngine.authentication_mechanism (
         AuthenticationMode.GNOME_ONLINE_ACCOUNTS) == "XOAUTH2");
 }

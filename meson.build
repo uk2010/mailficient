@@ -1,4 +1,6 @@
-project('mailficient', 'vala', 'c', version: '0.1.7', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.1.8', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+
+cc = meson.get_compiler('c')
 
 gnome = import('gnome')
 i18n = import('i18n')
@@ -12,6 +14,7 @@ sqlite = dependency('sqlite3')
 secret = dependency('libsecret-1')
 webkit = dependency('webkitgtk-6.0')
 xml = dependency('libxml-2.0')
+crypto = cc.find_library('crypto', required: true)
 cairo = dependency('cairo')
 pangocairo = dependency('pangocairo')
 
@@ -74,6 +77,8 @@ test_sources = files(
   'src/services/vacation-responder-service.vala',
   'src/services/message-export-service.vala',
   'src/services/account-provisioning-service.vala',
+  'src/services/mobileconfig-importer.vala',
+  'src/services/mobileconfig-decoder.c',
   'src/models/account-settings.vala',
   'src/models/draft.vala',
   'src/models/attachment.vala',
@@ -84,7 +89,10 @@ test_sources = files(
   'src/storage/local-data-migration.vala',
   'src/storage/mail-settings-store.vala',
 )
-core_tests = executable('core-tests', test_sources, dependencies: [gee, gio, sqlite, xml, cairo, pangocairo], vala_args: ['--target-glib=2.76'])
+core_tests = executable('core-tests', test_sources,
+  include_directories: include_directories('src'),
+  dependencies: [gee, gio, sqlite, xml, crypto, cairo, pangocairo],
+  vala_args: ['--target-glib=2.76'])
 test('core', core_tests, timeout: 300)
 
 camel_test_dep = dependency('camel-1.2', required: false)

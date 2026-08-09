@@ -23,11 +23,13 @@ public class AccountDialog : Adw.PreferencesDialog {
     private MailProvider provider;
 
     public AccountDialog (AccountProvisioningService? provisioner, AccountSettings? existing = null,
-                          MailProvider provider = MailProvider.OTHER) {
+                          MailProvider provider = MailProvider.OTHER,
+                          MobileConfigAccount? imported = null) {
         this.provisioner = provisioner;
         this.existing = existing;
         this.provider = provider;
-        title = existing == null ? provider_title (provider) : "Edit Mail Account";
+        title = imported != null ? "Review Imported Mail Account" :
+            (existing == null ? provider_title (provider) : "Edit Mail Account");
         content_width = 680; content_height = 760;
         var page = new Adw.PreferencesPage (); page.title = "Account"; page.icon_name = "avatar-default-symbolic";
         var identity = new Adw.PreferencesGroup (); identity.title = "Identity";
@@ -47,6 +49,7 @@ public class AccountDialog : Adw.PreferencesDialog {
         page.add (identity); page.add (incoming); page.add (outgoing); page.add (actions); add (page);
         email.changed.connect (apply_provider_defaults);
         if (existing != null) populate (existing);
+        else if (imported != null) populate_import (imported);
         else if (provider != MailProvider.OTHER) {
             apply_preset (AccountSettings.for_provider (provider, "", ""));
             applied_defaults = true;
@@ -59,6 +62,19 @@ public class AccountDialog : Adw.PreferencesDialog {
                 return Source.REMOVE;
             });
         }
+    }
+
+    private void populate_import (MobileConfigAccount imported) {
+        var account = imported.settings;
+        display_name_row.text = account.display_name; email.text = account.email;
+        apply_preset (account);
+        password.text = imported.incoming_password;
+        outgoing_password.text = imported.outgoing_password;
+        status.title = "Imported settings ready to test";
+        status.subtitle = imported.incoming_password == "" ?
+            "Review the server settings and enter the account password." :
+            "Review the server settings before connecting the imported account.";
+        applied_defaults = true;
     }
 
     private void populate (AccountSettings account) {

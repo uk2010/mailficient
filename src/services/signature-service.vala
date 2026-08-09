@@ -4,10 +4,14 @@ public class SignatureService : Object {
 
     public SignatureService (MailSettingsStore settings) { this.settings = settings; }
 
-    public string block_for (string account_id) {
-        if (!settings.signature_enabled (account_id)) return "";
+    public string configured_block_for (string account_id) {
         string value = settings.signature (account_id).strip ();
         return value == "" ? "" : "\n\n-- \n" + value;
+    }
+
+    public string block_for (string account_id) {
+        if (!settings.signature_enabled (account_id)) return "";
+        return configured_block_for (account_id);
     }
 
     public string apply (string account_id, string body, out string applied_block) {

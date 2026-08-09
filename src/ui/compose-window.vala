@@ -370,7 +370,9 @@ public class ComposeWindow : Adw.Window {
     }
 
     private void insert_signature () {
-        string block = signatures.block_for (draft.account_id);
+        // Manual insertion is available whenever signature text is configured;
+        // the enabled preference controls automatic insertion only.
+        string block = signatures.configured_block_for (draft.account_id);
         if (block == "") {
             overlay.add_toast (new Adw.Toast ("Set up a signature in Settings → Composing"));
             return;

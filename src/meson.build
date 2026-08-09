@@ -57,6 +57,8 @@ sources = files(
   'services/vacation-responder-service.vala',
   'services/message-export-service.vala',
   'services/account-provisioning-service.vala',
+  'services/mobileconfig-importer.vala',
+  'services/mobileconfig-decoder.c',
   'security/html-sanitizer.vala',
   'security/html-content-policy.vala',
   'security/attachment-safety.vala',
@@ -95,7 +97,7 @@ sources = files(
   'ui/html-message-view.vala',
 )
 
-deps = [gtk, adw, gee, gio, json, sqlite, secret, webkit, xml, cairo, pangocairo]
+deps = [gtk, adw, gee, gio, json, sqlite, secret, webkit, xml, crypto, cairo, pangocairo]
 camel = dependency('camel-1.2', required: get_option('camel'))
 if camel.found()
   sources += files(

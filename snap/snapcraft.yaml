@@ -1,6 +1,6 @@
 name: mailficient
 base: core24
-version: '0.1.7'
+version: '0.1.8'
 title: Mailficient
 summary: A native desktop email client
 description: |
@@ -67,6 +67,7 @@ parts:
       - libgee-0.8-dev
       - libjson-glib-dev
       - libsecret-1-dev
+      - libssl-dev
       - libsqlite3-dev
       - libwebkitgtk-6.0-dev
       - libxml2-dev
@@ -79,6 +80,7 @@ parts:
       - libgee-0.8-2
       - libjson-glib-1.0-0
       - libsecret-1-0
+      - libssl3t64
       - libsqlite3-0
       - libwebkitgtk-6.0-4
       - libxml2

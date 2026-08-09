@@ -62,6 +62,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Box customizable_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
     private bool compact_toolbar;
     private Message? selected_message;
+    private Mailbox? active_mailbox;
     private Adw.OverlaySplitView mailbox_split = new Adw.OverlaySplitView ();
     private Adw.NavigationSplitView message_split = new Adw.NavigationSplitView ();
     private Gtk.Button mailbox_toggle = new Gtk.Button.from_icon_name ("sidebar-show-symbolic");
@@ -137,6 +138,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var header = build_header (); toolbar.add_top_bar (header);
         sidebar = new MailboxSidebar (repository, cache); sidebar.set_size_request (220, -1);
         sidebar.mailbox_selected.connect ((mailbox) => {
+            active_mailbox = mailbox;
             settings.selected_mailbox_id = mailbox.id;
             if (search.text != "") search.text = "";
             message_list.show_mailbox (mailbox);
@@ -621,7 +623,19 @@ public class MailWindow : Adw.ApplicationWindow {
         group.add_css_class ("linked");
         group.add_css_class ("apple-toolbar-group");
         group.tooltip_text = label;
-        for (int i = 0; i < ids.length; i++) group.append (make_toolbar_button (ids[i], actions[i]));
+        for (int i = 0; i < ids.length; i++) {
+            var button = make_toolbar_button (ids[i], actions[i]);
+            switch (ids[i]) {
+            case "reply": reply_button = button; break;
+            case "reply-all": reply_all_button = button; break;
+            case "forward": forward_button = button; break;
+            case "archive": archive_button = button; break;
+            case "trash": delete_button = button; break;
+            case "junk": junk_button = button; break;
+            default: break;
+            }
+            group.append (button);
+        }
         return group;
     }
 
@@ -1078,8 +1092,9 @@ public class MailWindow : Adw.ApplicationWindow {
             if (message.account_id == "" || is_local_draft (message.id)) server_messages = false;
             if (!is_local_draft (message.id)) local_messages = false;
         }
-        bool in_junk = selected_is_junk ();
+        bool in_junk = active_mailbox != null && active_mailbox.role == MailboxRole.JUNK;
         bool permanent = selected && selected_are_in_discard_folders ();
+        junk_button.icon_name = in_junk ? "security-high-symbolic" : "dialog-warning-symbolic";
         junk_button.tooltip_text = in_junk ? "Mark as Not Junk" : "Move to Junk";
         delete_button.tooltip_text = local_messages ? "Delete message" :
             permanent ? "Delete permanently" : "Move to Trash";
@@ -1206,7 +1221,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.7"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.8"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

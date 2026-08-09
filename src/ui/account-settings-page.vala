@@ -72,6 +72,18 @@ public class AccountSettingsPage : Adw.PreferencesPage {
         online_row.add_suffix (online_button);
         add_group.add (online_row);
 
+        var profile_row = new Adw.ActionRow ();
+        profile_row.title = "Import Apple Configuration Profile";
+        profile_row.subtitle = "Use mail settings from a downloaded .mobileconfig file";
+        profile_row.add_prefix (new Gtk.Image.from_icon_name ("document-open-symbolic"));
+        profile_row.activatable = true;
+        profile_row.activated.connect (() => import_profile.begin ());
+        var profile_button = new Gtk.Button.with_label ("Import Profile");
+        profile_button.valign = Gtk.Align.CENTER;
+        profile_button.clicked.connect (() => import_profile.begin ());
+        profile_row.add_suffix (profile_button);
+        add_group.add (profile_row);
+
         status.add_prefix (new Gtk.Image.from_icon_name ("dialog-warning-symbolic"));
         status.visible = false;
         add_group.add (status);
@@ -173,6 +185,73 @@ public class AccountSettingsPage : Adw.PreferencesPage {
             account_saved (account);
         });
         dialog.present (this);
+    }
+
+    private async void import_profile () {
+        var dialog = new Gtk.FileDialog ();
+        dialog.title = "Import Apple Mail Configuration";
+        dialog.accept_label = "Import";
+        var filter = new Gtk.FileFilter ();
+        filter.name = "Apple configuration profiles";
+        filter.add_pattern ("*.mobileconfig");
+        var filters = new ListStore (typeof (Gtk.FileFilter));
+        filters.append (filter);
+        dialog.filters = filters;
+        dialog.default_filter = filter;
+        try {
+            var root_window = get_root () as Gtk.Window;
+            if (root_window == null) return;
+            var file = yield dialog.open (root_window, null);
+            var info = yield file.query_info_async (
+                FileAttribute.STANDARD_SIZE + "," + FileAttribute.STANDARD_TYPE,
+                FileQueryInfoFlags.NOFOLLOW_SYMLINKS, Priority.DEFAULT, null);
+            if (info.get_file_type () != FileType.REGULAR)
+                throw new MailError.INVALID_ACCOUNT ("Choose a regular .mobileconfig file");
+            if ((int64) info.get_size () > MobileConfigImporter.MAX_PROFILE_BYTES)
+                throw new MailError.INVALID_ACCOUNT ("Configuration profiles are limited to 5 MB");
+            uint8[] contents; string etag;
+            yield file.load_contents_async (null, out contents, out etag);
+            var imported = MobileConfigImporter.parse (contents);
+            MobileConfigAccount? selected = yield choose_imported_account (imported);
+            if (selected == null) return;
+            var account_dialog = new AccountDialog (
+                account_provisioner, null, MailProvider.OTHER, selected);
+            account_dialog.account_saved.connect ((account) => {
+                reload ();
+                account_saved (account);
+            });
+            account_dialog.present (this);
+            status.visible = false;
+        } catch (Error error) {
+            if (!(error is IOError.CANCELLED)) show_profile_error (error);
+        }
+    }
+
+    private async MobileConfigAccount? choose_imported_account (
+        Gee.List<MobileConfigAccount> imported) {
+        if (imported.size == 1) return imported[0];
+        var choices = new Gtk.StringList (null);
+        foreach (var account in imported)
+            choices.append ("%s — %s".printf (
+                account.settings.display_name, account.settings.email));
+        var selection = new Adw.ComboRow ();
+        selection.title = "Mail account";
+        selection.model = choices;
+        var chooser = new Adw.AlertDialog ("Choose an account",
+            "This configuration profile contains more than one mail account.");
+        chooser.extra_child = selection;
+        chooser.add_response ("cancel", "Cancel");
+        chooser.add_response ("import", "Review Account");
+        chooser.default_response = "import";
+        chooser.close_response = "cancel";
+        if ((yield chooser.choose (this, null)) != "import") return null;
+        return imported[(int) selection.selected];
+    }
+
+    private void show_profile_error (Error error) {
+        status.title = "Could not import configuration profile";
+        status.subtitle = error.message;
+        status.visible = true;
     }
 
     private async void remove_account (AccountSettings account) {

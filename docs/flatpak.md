@@ -16,17 +16,17 @@ the repository.
 
 ## Install a release bundle
 
-Download `Mailficient-0.1.7-x86_64.flatpak` and its checksum from the GitHub
+Download `Mailficient-0.1.8-x86_64.flatpak` and its checksum from the GitHub
 release. Verify and install them from the download directory:
 
 ```sh
-sha256sum -c Mailficient-0.1.7-x86_64.flatpak.sha256
-flatpak install --user ./Mailficient-0.1.7-x86_64.flatpak
+sha256sum -c Mailficient-0.1.8-x86_64.flatpak.sha256
+flatpak install --user ./Mailficient-0.1.8-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
-The current release bundle targets x86-64. The runtime is downloaded from
-Flathub when it is not already installed.
+Release bundles target x86-64 and ARM64. The matching runtime is downloaded
+from Flathub when it is not already installed.
 
 ## Build from source
 
@@ -63,12 +63,12 @@ flatpak-builder --force-clean \
 flatpak build-bundle \
   --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
   flatpak-repo \
-  Mailficient-0.1.7-x86_64.flatpak \
+  Mailficient-0.1.8-x86_64.flatpak \
   com.local.Mailficient \
   master
 
-sha256sum Mailficient-0.1.7-x86_64.flatpak \
-  > Mailficient-0.1.7-x86_64.flatpak.sha256
+sha256sum Mailficient-0.1.8-x86_64.flatpak \
+  > Mailficient-0.1.8-x86_64.flatpak.sha256
 ```
 
 Build output, repositories, bundles, and local mail data are excluded from

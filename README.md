@@ -28,25 +28,25 @@ sandbox cannot own the application's `com.local.Mailficient` session-bus name.
 Ubuntu dependencies:
 
 ```sh
-sudo apt install valac meson ninja-build libgtk-4-dev libadwaita-1-dev libgee-0.8-dev libjson-glib-dev libwebkitgtk-6.0-dev libsecret-1-dev libcamel1.2-dev libebook1.2-dev libedataserver1.2-dev libsqlite3-dev libxml2-dev libcairo2-dev libpango1.0-dev
+sudo apt install valac meson ninja-build libgtk-4-dev libadwaita-1-dev libgee-0.8-dev libjson-glib-dev libwebkitgtk-6.0-dev libsecret-1-dev libcamel1.2-dev libebook1.2-dev libedataserver1.2-dev libsqlite3-dev libxml2-dev libssl-dev libcairo2-dev libpango1.0-dev
 meson setup build
 meson compile -C build
 meson test -C build --print-errorlogs
 build/src/mailficient
 ```
 
-Fedora equivalents include `vala`, `meson`, `ninja-build`, `gtk4-devel`, `libadwaita-devel`, `libgee-devel`, `json-glib-devel`, `webkitgtk6.0-devel`, `libsecret-devel`, `evolution-data-server-devel`, `sqlite-devel`, and `libxml2-devel`.
+Fedora equivalents include `vala`, `meson`, `ninja-build`, `gtk4-devel`, `libadwaita-devel`, `libgee-devel`, `json-glib-devel`, `webkitgtk6.0-devel`, `libsecret-devel`, `evolution-data-server-devel`, `sqlite-devel`, `libxml2-devel`, and `openssl-devel`.
 
 Without host development packages, use GNOME Builder or a GNOME SDK shell. The Flatpak manifest builds Evolution Data Server 3.60.2 from its checksum-pinned official source and enables the conditional Camel adapter.
 
 ## Flatpak package
 
-Download `Mailficient-0.1.7-x86_64.flatpak` from the
-[v0.1.7 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.7),
+Download the Flatpak for your architecture from the
+[v0.1.8 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.8),
 then install and run it with:
 
 ```sh
-flatpak install --user ./Mailficient-0.1.7-x86_64.flatpak
+flatpak install --user ./Mailficient-0.1.8-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -62,7 +62,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.1.7_arm64.snap
+sudo snap install --dangerous ./mailficient_0.1.8_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -80,7 +80,7 @@ Snap installations do not auto-connect that sensitive interface. The Snap has
 its own application data directory, so accounts and cached mail from a Flatpak
 installation are not imported automatically.
 
-## Debian package (Ubuntu 26.04 AMD64)
+## Debian packages (Ubuntu 26.04 AMD64 and ARM64)
 
 The Debian-package builder produces a native host package that does not require
 Flatpak after installation. It uses Ubuntu's GTK, Libadwaita, WebKitGTK, and
@@ -89,11 +89,11 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.7-4_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.1.8-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 
-The resulting package is intended for Ubuntu 26.04 on AMD64. Building it
+The resulting package is intended for Ubuntu 26.04 on AMD64 or ARM64. Building it
 requires the GNOME 49 SDK and the checked Camel-enabled build artifacts; these
 are already present in the documented Flatpak development environment.
 The builder also writes a matching `.deb.sha256` checksum for release uploads.

@@ -1,6 +1,7 @@
-# Mailficient 0.1.7
+# Mailficient 0.1.8
 
-Mailficient 0.1.7 fixes the main window's behavior at small desktop sizes.
+Mailficient 0.1.8 improves account setup, manual-account sending, and mailbox
+workflow clarity.
 
 Highlights:
 
@@ -11,8 +12,21 @@ Highlights:
   mailbox navigation, compose, Reply, Reply All, Forward, search, and sorting
   available
 - Keeps every compacted command accessible from the application menu
-- Debian revision 4 bundles the matching XML runtime on ARM64 so the native
-  package starts correctly on current Ubuntu releases
+- Imports plain and signed Apple `.mobileconfig` mail profiles through both
+  onboarding and Settings → Accounts, with review and connection testing
+- Explicitly authenticates password-based IMAP and SMTP sessions so manually
+  configured accounts can send mail reliably
+- Lets saved signatures be inserted manually even when automatic insertion is
+  disabled
+- Preserves each sidebar account's expanded or collapsed state across mail
+  checks and application restarts
+- Shows distinct Junk and Not Junk toolbar icons based on the current mailbox,
+  with matching tooltips and accessibility labels
+- Bundles the matching XML and Camel runtime libraries in Debian packages on
+  both AMD64 and ARM64
+
+This release provides Flatpak, Debian, and Snap packages for x86-64 and ARM64,
+with matching SHA-256 checksum files.
 
 # Mailficient 0.1.6
 
