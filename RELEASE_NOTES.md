@@ -11,6 +11,8 @@ Highlights:
   mailbox navigation, compose, Reply, Reply All, Forward, search, and sorting
   available
 - Keeps every compacted command accessible from the application menu
+- Debian revision 4 bundles the matching XML runtime on ARM64 so the native
+  package starts correctly on current Ubuntu releases
 
 # Mailficient 0.1.6
 

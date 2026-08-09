@@ -89,7 +89,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.7-3_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.1.7-4_$(dpkg --print-architecture).deb
 mailficient
 ```
 

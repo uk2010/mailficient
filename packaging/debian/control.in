@@ -5,7 +5,7 @@ Maintainer: uk2010 <uk2010@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
 Section: mail
 Priority: optional
-Depends: gpg, libc6, libadwaita-1-0 (>= 1.5), libgee-0.8-2, libglib2.0-0t64 (>= 2.76), libgtk-4-1 (>= 4.12), libjson-glib-1.0-0, libsecret-1-0, libsqlite3-0, libwebkitgtk-6.0-4, libxml2-16
+Depends: gpg, libc6, libadwaita-1-0 (>= 1.5), libgee-0.8-2, libglib2.0-0t64 (>= 2.76), libgtk-4-1 (>= 4.12), libjson-glib-1.0-0, libnspr4, libnss3, libsecret-1-0, libsqlite3-0, libwebkitgtk-6.0-4, libxml2-16
 Recommends: gnome-keyring, gsettings-desktop-schemas
 Homepage: https://github.com/uk2010/mailficient
 Description: Native GTK email client
