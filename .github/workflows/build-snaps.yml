@@ -1,0 +1,42 @@
+name: Build release snaps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snap:
+    name: Snap (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            runner: ubuntu-24.04
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build snap
+        id: snapcraft
+        uses: snapcore/action-build@v1
+        with:
+          snapcraft-args: --platform=${{ matrix.platform }}
+
+      - name: Create checksum
+        shell: bash
+        run: sha256sum "${{ steps.snapcraft.outputs.snap }}" > "${{ steps.snapcraft.outputs.snap }}.sha256"
+
+      - name: Upload snap
+        uses: actions/upload-artifact@v4
+        with:
+          name: mailficient-0.1.8-${{ matrix.platform }}-snap
+          path: |
+            ${{ steps.snapcraft.outputs.snap }}
+            ${{ steps.snapcraft.outputs.snap }}.sha256
+          if-no-files-found: error
