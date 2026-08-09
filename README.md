@@ -41,12 +41,12 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Flatpak package
 
-Download `Mailficient-0.1.6-x86_64.flatpak` from the
-[v0.1.6 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.6),
+Download `Mailficient-0.1.7-x86_64.flatpak` from the
+[v0.1.7 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.7),
 then install and run it with:
 
 ```sh
-flatpak install --user ./Mailficient-0.1.6-x86_64.flatpak
+flatpak install --user ./Mailficient-0.1.7-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
