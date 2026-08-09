@@ -87,6 +87,9 @@ public class MailWindow : Adw.ApplicationWindow {
                 Environment.get_variable ("MAILFICIENT_QA_NARROW") == "1" ? 760 : settings.window_width, true),
             default_height: startup_dimension (
                 Environment.get_variable ("MAILFICIENT_QA") == "1" ? 820 : settings.window_height, false));
+        // Like Apple Mail, preserve the three-column workspace and stop at a
+        // usable desktop minimum instead of collapsing into a phone layout.
+        set_size_request (960, 560);
         this.repository = repository;
         this.cache = cache;
         this.attachment_service = attachment_service;
@@ -553,7 +556,33 @@ public class MailWindow : Adw.ApplicationWindow {
         customizable_toolbar.add_css_class ("apple-toolbar");
         header.append (customizable_toolbar);
 
-        var app_menu = new Menu (); app_menu.append ("Group Related Messages", "win.group-messages");
+        var app_menu = new Menu ();
+        app_menu.append ("New Message", "win.compose");
+        app_menu.append ("Search Mail", "win.search");
+        app_menu.append ("Get Mail", "win.refresh");
+        var message_menu = new Menu ();
+        message_menu.append ("Reply", "win.reply");
+        message_menu.append ("Reply All", "win.reply-all");
+        message_menu.append ("Forward", "win.forward");
+        message_menu.append ("Archive", "win.archive");
+        message_menu.append ("Move to Trash", "win.trash");
+        message_menu.append ("Junk or Not Junk", "win.junk");
+        message_menu.append ("Flag or Unflag", "win.flag");
+        message_menu.append ("Mark Read or Unread", "win.toggle-read");
+        message_menu.append ("Move or Copy…", "win.show-move");
+        message_menu.append ("Edit Labels…", "win.labels");
+        message_menu.append ("Snooze…", "win.snooze");
+        message_menu.append ("Print…", "win.print-message");
+        app_menu.append_submenu ("Message Actions", message_menu);
+        var sort_app_menu = new Menu ();
+        sort_app_menu.append ("Newest First", "win.sort::newest");
+        sort_app_menu.append ("Oldest First", "win.sort::oldest");
+        sort_app_menu.append ("Sender", "win.sort::sender");
+        sort_app_menu.append ("Subject", "win.sort::subject");
+        sort_app_menu.append ("Unread First", "win.sort::unread");
+        sort_app_menu.append ("Flagged First", "win.sort::flagged");
+        app_menu.append_submenu ("Sort Messages", sort_app_menu);
+        app_menu.append ("Group Related Messages", "win.group-messages");
         app_menu.append ("Always Show Images", "win.always-show-images");
         app_menu.append ("Display Full HTML", "win.full-html-formatting");
         app_menu.append ("Customize Toolbar…", "win.customize-toolbar");
@@ -598,14 +627,11 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private bool overflows_in_compact_toolbar (string id) {
         switch (id) {
-        case "reply-group":
         case "mail-actions":
-        case "reply":
-        case "reply-all":
-        case "forward":
         case "archive":
         case "trash":
         case "junk":
+        case "move":
         case "flag":
         case "toggle-read":
         case "labels":
@@ -649,9 +675,15 @@ public class MailWindow : Adw.ApplicationWindow {
 
         var layout = ToolbarLayout.parse (settings.toolbar_layout);
         if (layout.size == 0) layout = ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT);
+        if (compact_toolbar) {
+            var compact_sidebar = toolbar_widget_for ("sidebar");
+            if (compact_sidebar != null) customizable_toolbar.append (compact_sidebar);
+        }
         bool added_overflow = false;
         Gtk.Box? action_cluster = null;
         foreach (var id in layout) {
+            // The adaptive layout always supplies its own mailbox control.
+            if (compact_toolbar && id == "sidebar") continue;
             if (compact_toolbar && overflows_in_compact_toolbar (id)) {
                 action_cluster = null;
                 if (!added_overflow) {
@@ -676,6 +708,7 @@ public class MailWindow : Adw.ApplicationWindow {
                 customizable_toolbar.append (item);
             }
         }
+        search.hexpand = false;
         search.set_size_request (compact_toolbar ? 150 : 280, -1);
         update_action_sensitivity ();
     }
@@ -814,22 +847,31 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void install_adaptive_layout () {
         var breakpoint = new Adw.Breakpoint (
-            new Adw.BreakpointCondition.length (Adw.BreakpointConditionLengthType.MAX_WIDTH, 900, Adw.LengthUnit.PX));
+            new Adw.BreakpointCondition.length (
+                Adw.BreakpointConditionLengthType.MAX_WIDTH, 1100, Adw.LengthUnit.PX));
         breakpoint.apply.connect (() => {
-            mailbox_split.collapsed = true; mailbox_split.show_sidebar = false;
-            message_split.collapsed = true; message_split.show_content = false;
-            message_back.visible = true;
-            compact_toolbar = true;
-            rebuild_toolbar ();
+            apply_compact_layout ();
         });
         breakpoint.unapply.connect (() => {
-            mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
-            message_split.collapsed = false; message_split.show_content = true;
-            message_back.visible = false;
-            compact_toolbar = false;
-            rebuild_toolbar ();
+            apply_wide_layout ();
         });
         add_breakpoint (breakpoint);
+    }
+
+    private void apply_compact_layout () {
+        mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
+        message_split.collapsed = false; message_split.show_content = true;
+        message_back.visible = false;
+        compact_toolbar = true;
+        rebuild_toolbar ();
+    }
+
+    private void apply_wide_layout () {
+        mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
+        message_split.collapsed = false; message_split.show_content = true;
+        message_back.visible = false;
+        compact_toolbar = false;
+        rebuild_toolbar ();
     }
 
     private void set_mailbox_sidebar_visible (bool visible) {
@@ -1164,7 +1206,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.6"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.7"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

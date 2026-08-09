@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.1.6', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.1.7', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 gnome = import('gnome')
 i18n = import('i18n')

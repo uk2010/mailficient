@@ -62,7 +62,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.1.6_arm64.snap
+sudo snap install --dangerous ./mailficient_0.1.7_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -89,7 +89,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.6-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.1.7-3_$(dpkg --print-architecture).deb
 mailficient
 ```
 

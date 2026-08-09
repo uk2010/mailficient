@@ -1,3 +1,17 @@
+# Mailficient 0.1.7
+
+Mailficient 0.1.7 fixes the main window's behavior at small desktop sizes.
+
+Highlights:
+
+- Preserves the mailbox, message list, and reader as three visible columns when
+  the window is scaled down, matching Apple Mail's desktop behavior
+- Enforces a practical minimum width so panes and controls cannot be clipped
+- Compacts the toolbar and moves excess actions into overflow while keeping
+  mailbox navigation, compose, Reply, Reply All, Forward, search, and sorting
+  available
+- Keeps every compacted command accessible from the application menu
+
 # Mailficient 0.1.6
 
 Mailficient 0.1.6 refines the customizable toolbar, unread-message workflow,
