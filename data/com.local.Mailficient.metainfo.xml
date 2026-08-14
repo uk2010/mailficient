@@ -11,6 +11,7 @@
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
+    <release version="0.1.11" date="2026-08-14"/>
     <release version="0.1.10" date="2026-08-14"/>
     <release version="0.1.9" date="2026-08-14"/>
     <release version="0.1.8" date="2026-08-09"/>

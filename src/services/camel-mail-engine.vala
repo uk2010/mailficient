@@ -108,10 +108,9 @@ public class CamelMailEngine : Object, MailEngine {
     private const int64 MAX_RECEIVED_MESSAGE_ATTACHMENT_BYTES = 100 * 1024 * 1024;
     private const int64 MAX_EXPLICIT_ATTACHMENT_DOWNLOAD_BYTES = (int64) 2 * 1024 * 1024 * 1024;
     internal const int64 MAX_RECEIVED_TEXT_PART_BYTES = 10 * 1024 * 1024;
-    // Keep Get Mail bounded. Older history is picked up by later checks,
-    // rather than making a first refresh download hundreds of full MIME
-    // messages before the user can use the mailbox.
-    internal const int MAX_MESSAGE_DOWNLOADS_PER_SYNC = 50;
+    // Message bodies are streamed in small batches and the main context is
+    // yielded between downloads, so a large mailbox does not monopolize GTK
+    // or require building one giant in-memory result.
     internal const int SYNC_BATCH_SIZE = 5;
     internal const int UID_SCAN_YIELD_INTERVAL = 50;
     private signal void account_connection_finished (string account_id);
@@ -408,7 +407,7 @@ public class CamelMailEngine : Object, MailEngine {
 
             // Inventory every subscribed folder before retrieving any MIME
             // content. This gives the UI a real total before the first message
-            // download and keeps folder scanning separate from bounded MIME work.
+            // download and keeps folder scanning separate from MIME work.
             foreach (var mailbox in result.mailboxes) {
                 if (cancellable != null) cancellable.set_error_if_cancelled ();
                 state.detail = "Checking messages…";
@@ -467,21 +466,17 @@ public class CamelMailEngine : Object, MailEngine {
             result.messages_to_download = total_unseen;
             state.messages_to_download = total_unseen;
             state.messages_downloaded = 0;
-            result.more_messages_available = total_unseen > MAX_MESSAGE_DOWNLOADS_PER_SYNC;
             state.detail = total_unseen == 0 ? "Mail is up to date" :
                 "Downloaded 0 of %d messages".printf (total_unseen);
             state.progress = total_unseen == 0 ? 0.95 : 0.20;
 
-            int remaining_downloads = MAX_MESSAGE_DOWNLOADS_PER_SYNC;
-            int download_target = bounded_download_count (total_unseen, remaining_downloads);
+            int download_target = total_unseen;
             int processed = 0;
             int downloaded = 0;
             if (result.terminal_error == null) foreach (var plan in plans) {
-                int folder_downloads = bounded_download_count (plan.unseen_uids.size, remaining_downloads);
-                int first = plan.unseen_uids.size - folder_downloads;
                 var batch = new MailSyncResult (account_id);
                 batch.mailboxes.add (plan.mailbox);
-                for (int index = first; index < plan.unseen_uids.size; index++) {
+                for (int index = 0; index < plan.unseen_uids.size; index++) {
                     if (cancellable != null) cancellable.set_error_if_cancelled ();
                     string uid = plan.unseen_uids[index];
                     var info = plan.folder.get_message_info (uid);
@@ -512,12 +507,11 @@ public class CamelMailEngine : Object, MailEngine {
                         warning ("Could not cache message metadata for %s/%s: %s",
                             plan.mailbox.remote_name, uid, message_error.message);
                     }
-                    processed++; remaining_downloads--;
+                    processed++;
                     state.progress = 0.20 + (0.75 * processed / (double) int.max (1, download_target));
                     yield yield_to_main_context (cancellable);
                 }
                 if (batch.messages.size > 0) sync_batch_ready (batch);
-                if (remaining_downloads <= 0) break;
             }
             if (result.terminal_error == null) {
                 state.detail = "Finishing mail update…"; state.progress = 0.98;
@@ -757,10 +751,6 @@ public class CamelMailEngine : Object, MailEngine {
         var content = ((Camel.Medium) current).get_content ();
         if (content == null) return new DecodedMimeContent (current, status);
         return new DecodedMimeContent (content, status);
-    }
-
-    internal static int bounded_download_count (int unseen_count, int remaining_downloads) {
-        return int.min (int.max (0, unseen_count), int.max (0, remaining_downloads));
     }
 
     private void extract_content (Camel.DataWrapper wrapper, ref string plain, ref string html, ref bool attachment,

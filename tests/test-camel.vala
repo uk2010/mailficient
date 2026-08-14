@@ -48,17 +48,9 @@ private class MisreportedOversizedAttachmentData : Camel.DataWrapper {
 }
 
 private void test_sync_memory_bounds () {
-    int remaining = CamelMailEngine.MAX_MESSAGE_DOWNLOADS_PER_SYNC;
-    int selected = 0;
-    for (int folder = 0; folder < 100; folder++) {
-        int count = CamelMailEngine.bounded_download_count (1000, remaining);
-        selected += count;
-        remaining -= count;
-    }
-    assert (selected == CamelMailEngine.MAX_MESSAGE_DOWNLOADS_PER_SYNC);
-    assert (remaining == 0);
-    assert (CamelMailEngine.bounded_download_count (1000, remaining) == 0);
-    assert (CamelMailEngine.SYNC_BATCH_SIZE < CamelMailEngine.MAX_MESSAGE_DOWNLOADS_PER_SYNC);
+    // There is deliberately no per-sync message cap. Memory remains bounded by
+    // the small committed batches and the MIME/attachment safety limits.
+    assert (CamelMailEngine.SYNC_BATCH_SIZE > 0);
     assert (CamelMailEngine.UID_SCAN_YIELD_INTERVAL > CamelMailEngine.SYNC_BATCH_SIZE);
 
     Error? failure = null;

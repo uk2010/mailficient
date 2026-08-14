@@ -1,3 +1,18 @@
+# Mailficient 0.1.11
+
+Mailficient 0.1.11 completes full mailbox downloads without an artificial
+per-check message limit.
+
+Highlights:
+
+- Downloads every discovered uncached message during synchronization
+- Streams messages in small database batches and yields between downloads so
+  large mailboxes remain responsive without truncating the check
+- Keeps the faster persistent incoming IMAP and lazy SMTP connection behavior
+
+This release provides Debian packages for x86-64 and ARM64 with matching
+SHA-256 checksum files.
+
 # Mailficient 0.1.10
 
 Mailficient 0.1.10 makes Get Mail substantially faster and more predictable.

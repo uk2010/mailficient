@@ -54,8 +54,8 @@ jobs:
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
-          name: mailficient-0.1.10-${{ matrix.arch }}-deb
+          name: mailficient-0.1.11-${{ matrix.arch }}-deb
           path: |
-            dist/mailficient_0.1.10-1_${{ matrix.arch }}.deb
-            dist/mailficient_0.1.10-1_${{ matrix.arch }}.deb.sha256
+            dist/mailficient_0.1.11-1_${{ matrix.arch }}.deb
+            dist/mailficient_0.1.11-1_${{ matrix.arch }}.deb.sha256
           if-no-files-found: error

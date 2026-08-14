@@ -2223,27 +2223,32 @@ private void test_automatic_history_backfill () {
         var service = new AccountSyncService (cache, engine,
             new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
         int completed = 0; int checkpoints = 0; int notifications = 0; int failures = 0;
-        bool saw_initial_total = false; bool saw_deferred_total = false;
+        bool saw_initial_total = false; bool saw_background_total = false;
         service.synchronized.connect ((id) => completed++);
         service.pass_completed.connect ((id) => checkpoints++);
         service.new_message.connect ((message) => notifications++);
         service.failed.connect ((id, error) => failures++);
         service.progress_changed.connect ((id, fraction, detail) => {
             if (detail == "Downloaded 0 of 3 messages") saw_initial_total = true;
-            if (detail == "Downloaded 1 of 3 messages — older history will continue later") saw_deferred_total = true;
+            if (detail == "Downloaded 1 of 3 messages — continuing in background") saw_background_total = true;
         });
         var loop = new MainLoop ();
         service.sync_account.begin (account, null, (object, result) => {
-            service.sync_account.end (result); loop.quit ();
+            service.sync_account.end (result);
+        });
+        uint timeout_source = Timeout.add_seconds (8, () => { loop.quit (); return Source.REMOVE; });
+        service.synchronized.connect ((id) => {
+            if (completed >= 3) loop.quit ();
         });
         loop.run ();
-        assert (failures == 0); assert (completed == 1); assert (checkpoints == 1);
-        assert (engine.synchronize_calls == 1); assert (engine.disconnect_calls == 0);
-        assert (cache.cached_message_count (account.id) == 2);
-        assert (saw_initial_total); assert (saw_deferred_total);
-        // Only the bounded pass can announce new mail. Older history is
-        // deliberately deferred so a refresh does not take minutes.
-        assert (notifications == 1);
+        if (timeout_source != 0) Source.remove (timeout_source);
+        assert (failures == 0); assert (completed == 3); assert (checkpoints == 2);
+        assert (engine.synchronize_calls == 3); assert (engine.disconnect_calls == 0);
+        assert (cache.cached_message_count (account.id) == 4);
+        assert (saw_initial_total); assert (saw_background_total);
+        // Each streamed pass announces newly cached mail while the remaining
+        // history continues automatically in the background.
+        assert (notifications == 3);
     } catch (Error error) { GLib.error ("automatic backfill test failed: %s", error.message); }
 }
 

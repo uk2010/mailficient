@@ -37,6 +37,7 @@ public class AccountSyncService : Object {
     private Gee.HashMap<string, Cancellable> sync_cancellables = new Gee.HashMap<string, Cancellable> ();
     private Gee.HashSet<string> sync_again = new Gee.HashSet<string> ();
     private Gee.HashMap<string, uint> queued_flush_sources = new Gee.HashMap<string, uint> ();
+    private Gee.HashMap<string, uint> queued_history_sources = new Gee.HashMap<string, uint> ();
 
     public AccountSyncService (CacheDatabase cache, MailEngine engine, OutboundService outbound,
                                JunkFilterService junk_filter) {
@@ -84,15 +85,16 @@ public class AccountSyncService : Object {
                 progress_context, last_outcome);
             progress_context.messages_completed += last_outcome.messages_downloaded;
             if (last_outcome.more_messages_available) {
-                // A bounded pass keeps Get Mail responsive. Older history is
-                // picked up by a later scheduled or manual check instead of
-                // chaining dozens of MIME-download passes into one operation.
+                // A bounded pass keeps Get Mail responsive. Continue older
+                // history in the background so a single check still drains
+                // every message instead of stopping at the per-pass limit.
                 pass_completed (account.id);
                 double fraction = progress_context.messages_total > 0 ?
                     progress_context.messages_completed / (double) progress_context.messages_total : 0;
                 progress_changed (account.id, fraction,
-                    "Downloaded %d of %d messages — older history will continue later".printf (
+                    "Downloaded %d of %d messages — continuing in background".printf (
                         progress_context.messages_completed, progress_context.messages_total));
+                schedule_history_continuation (account);
             }
         } while (!suppressed_accounts.contains (account.id) && sync_again.contains (account.id));
         if (!suppressed_accounts.contains (account.id) && last_outcome != null && last_outcome.completed) {
@@ -244,16 +246,32 @@ public class AccountSyncService : Object {
     public void cancel () {
         if (active != null) active.cancel ();
         foreach (var cancellable in sync_cancellables.values) cancellable.cancel ();
+        foreach (var source in queued_history_sources.values)
+            if (source != 0) Source.remove (source);
+        queued_history_sources.clear ();
     }
 
     public void suppress_account (string account_id) {
         suppressed_accounts.add (account_id);
+        uint history_source = queued_history_sources.has_key (account_id) ?
+            queued_history_sources[account_id] : 0;
+        if (history_source != 0) Source.remove (history_source);
+        queued_history_sources.unset (account_id);
         var cancellable = sync_cancellables[account_id];
         if (cancellable != null) cancellable.cancel ();
     }
 
     public void resume_account (string account_id) {
         suppressed_accounts.remove (account_id);
+    }
+
+    private void schedule_history_continuation (AccountSettings account) {
+        if (suppressed_accounts.contains (account.id) || queued_history_sources.has_key (account.id)) return;
+        queued_history_sources[account.id] = Timeout.add (250, () => {
+            queued_history_sources.unset (account.id);
+            if (!suppressed_accounts.contains (account.id)) sync_account.begin (account);
+            return Source.REMOVE;
+        });
     }
 
     private async void flush_pending (string account_id, Cancellable? cancellable = null) {
