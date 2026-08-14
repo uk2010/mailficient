@@ -2,6 +2,7 @@ namespace Mailficient {
 public interface MailEngine : Object {
     public signal void sync_batch_ready (MailSyncResult batch);
     public abstract async void connect_account (AccountSettings settings, Cancellable? cancellable = null) throws Error;
+    public abstract async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error;
     public abstract async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error;
     public abstract async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
                                                        Cancellable? cancellable = null) throws Error;

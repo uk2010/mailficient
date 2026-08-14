@@ -76,7 +76,6 @@ public class AccountSyncService : Object {
         sync_cancellables[account.id] = effective_cancellable;
         SyncPassOutcome? last_outcome = null;
         var progress_context = new SyncProgressContext ();
-        bool automatic_continuation = false;
         bool allow_notifications = true;
         do {
             sync_again.remove (account.id);
@@ -84,20 +83,18 @@ public class AccountSyncService : Object {
             yield perform_sync (account, effective_cancellable, allow_notifications,
                 progress_context, last_outcome);
             progress_context.messages_completed += last_outcome.messages_downloaded;
-            automatic_continuation = last_outcome.more_messages_available;
-            if (automatic_continuation) {
-                // Let the visible cache advance between bounded backend
-                // sessions without claiming the account is already complete.
+            if (last_outcome.more_messages_available) {
+                // A bounded pass keeps Get Mail responsive. Older history is
+                // picked up by a later scheduled or manual check instead of
+                // chaining dozens of MIME-download passes into one operation.
                 pass_completed (account.id);
                 double fraction = progress_context.messages_total > 0 ?
                     progress_context.messages_completed / (double) progress_context.messages_total : 0;
                 progress_changed (account.id, fraction,
-                    "Downloaded %d of %d messages — continuing…".printf (
+                    "Downloaded %d of %d messages — older history will continue later".printf (
                         progress_context.messages_completed, progress_context.messages_total));
-                allow_notifications = false;
-            } else allow_notifications = true;
-        } while (!suppressed_accounts.contains (account.id) &&
-                 (automatic_continuation || sync_again.contains (account.id)));
+            }
+        } while (!suppressed_accounts.contains (account.id) && sync_again.contains (account.id));
         if (!suppressed_accounts.contains (account.id) && last_outcome != null && last_outcome.completed) {
             synchronized (account.id);
             if (last_outcome.warning != null) failed (account.id, last_outcome.warning);
@@ -176,7 +173,9 @@ public class AccountSyncService : Object {
             // Confirmed SMTP deliveries only need local cleanup and must not
             // wait for a network connection to return.
             outbound.finalize_confirmed (account.id, cancellable);
-            yield engine.connect_account (account, cancellable);
+            // Mail checks only need the incoming IMAP service. SMTP is opened
+            // lazily by outbound delivery instead of delaying every refresh.
+            yield engine.connect_incoming_account (account, cancellable);
             yield outbound.retry_pending (account.id, true, cancellable);
             yield flush_pending (account.id, cancellable);
             int cached_before = cache.cached_message_count (account.id);
@@ -227,14 +226,6 @@ public class AccountSyncService : Object {
         } finally {
             engine.disconnect (batch_handler);
             progress_state.disconnect (progress_handler);
-            // IMAPX retains folder summaries and MIME caches for the lifetime
-            // of its services. A bounded pass is a complete transaction, so
-            // remove those services before another pass can accumulate them.
-            try { yield engine.disconnect_account (account.id); }
-            catch (Error disconnect_error) {
-                warning ("Could not release the mail connection after sync: %s",
-                    disconnect_error.message);
-            }
         }
     }
 

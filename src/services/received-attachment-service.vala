@@ -27,7 +27,7 @@ public class ReceivedAttachmentService : Object {
         var account = cache.find_account (message.account_id);
         if (account == null)
             throw new MailError.ATTACHMENT ("The attachment's mail account is no longer configured");
-        yield engine.connect_account (account, cancellable);
+        yield engine.connect_incoming_account (account, cancellable);
         yield engine.save_remote_attachment (message.account_id, mailbox_name,
             message.remote_uid, attachment.remote_part_index, destination,
             MAX_USER_DOWNLOAD_BYTES, cancellable);
@@ -54,7 +54,7 @@ public class ReceivedAttachmentService : Object {
         var temporary = File.new_tmp ("mailficient-forward-XXXXXX", out temporary_stream);
         try {
             temporary_stream.close (cancellable);
-            yield engine.connect_account (account, cancellable);
+            yield engine.connect_incoming_account (account, cancellable);
             yield engine.save_remote_attachment (message.account_id, mailbox_name,
                 message.remote_uid, attachment.remote_part_index, temporary,
                 AttachmentService.MAX_ATTACHMENT_SIZE, cancellable);
@@ -101,7 +101,7 @@ public class ReceivedAttachmentService : Object {
                 if (account == null)
                     throw new MailError.ATTACHMENT (
                         "The calendar invitation's mail account is no longer configured");
-                yield engine.connect_account (account, cancellable);
+                yield engine.connect_incoming_account (account, cancellable);
                 yield engine.save_remote_attachment (message.account_id, mailbox_name,
                     message.remote_uid, attachment.remote_part_index, temporary,
                     MAX_CALENDAR_INVITATION_BYTES, cancellable);

@@ -62,6 +62,9 @@ private class ProvisioningMailEngine : Object, MailEngine {
         if (fail_candidate && settings.id.has_prefix ("candidate-"))
             throw new MailError.CONNECTION ("Candidate server rejected the connection");
     }
+    public async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
+        yield connect_account (settings, cancellable);
+    }
     public async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         disconnections.add (account_id);
@@ -94,6 +97,9 @@ private class ProvisioningMailEngine : Object, MailEngine {
 
 private class FailingMailEngine : Object, MailEngine {
     public async void connect_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
+        throw new MailError.CONNECTION ("Test server is unreachable");
+    }
+    public async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
         throw new MailError.CONNECTION ("Test server is unreachable");
     }
     public async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error { }
@@ -178,6 +184,9 @@ private class RecordingMailEngine : Object, MailEngine {
         }
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         connect_calls++;
+    }
+    public async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
+        yield connect_account (settings, cancellable);
     }
     public async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error {
         disconnect_calls++;
@@ -2169,7 +2178,7 @@ private void test_long_running_streamed_sync_is_bounded () {
         assert (failures == 40); assert (successes == 200);
         assert (notifications == 1000);
         assert (cache.cached_message_count (account.id) == 20001);
-        assert (engine.disconnect_calls == 240);
+        assert (engine.disconnect_calls == 0);
         assert (engine.maximum_active_synchronizations == 1);
         var summaries = cache.list_cached_messages (inbox.id);
         assert (summaries.size == CacheDatabase.MESSAGE_LIST_LIMIT);
@@ -2214,26 +2223,26 @@ private void test_automatic_history_backfill () {
         var service = new AccountSyncService (cache, engine,
             new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
         int completed = 0; int checkpoints = 0; int notifications = 0; int failures = 0;
-        bool saw_initial_total = false; bool saw_continuing_total = false;
+        bool saw_initial_total = false; bool saw_deferred_total = false;
         service.synchronized.connect ((id) => completed++);
         service.pass_completed.connect ((id) => checkpoints++);
         service.new_message.connect ((message) => notifications++);
         service.failed.connect ((id, error) => failures++);
         service.progress_changed.connect ((id, fraction, detail) => {
             if (detail == "Downloaded 0 of 3 messages") saw_initial_total = true;
-            if (detail == "Downloaded 2 of 3 messages — continuing…") saw_continuing_total = true;
+            if (detail == "Downloaded 1 of 3 messages — older history will continue later") saw_deferred_total = true;
         });
         var loop = new MainLoop ();
         service.sync_account.begin (account, null, (object, result) => {
             service.sync_account.end (result); loop.quit ();
         });
         loop.run ();
-        assert (failures == 0); assert (completed == 1); assert (checkpoints == 2);
-        assert (engine.synchronize_calls == 3); assert (engine.disconnect_calls == 3);
-        assert (cache.cached_message_count (account.id) == 4);
-        assert (saw_initial_total); assert (saw_continuing_total);
-        // Only the first bounded pass can announce new mail. Older continuation
-        // chunks must not produce a notification storm.
+        assert (failures == 0); assert (completed == 1); assert (checkpoints == 1);
+        assert (engine.synchronize_calls == 1); assert (engine.disconnect_calls == 0);
+        assert (cache.cached_message_count (account.id) == 2);
+        assert (saw_initial_total); assert (saw_deferred_total);
+        // Only the bounded pass can announce new mail. Older history is
+        // deliberately deferred so a refresh does not take minutes.
         assert (notifications == 1);
     } catch (Error error) { GLib.error ("automatic backfill test failed: %s", error.message); }
 }
@@ -2263,7 +2272,7 @@ private void test_active_sync_can_be_cancelled () {
         Timeout.add (2, () => { service.cancel (); return Source.REMOVE; });
         loop.run ();
         assert (cancellations == 1); assert (failures == 0); assert (completions == 0);
-        assert (engine.disconnect_calls == 1);
+        assert (engine.disconnect_calls == 0);
     } catch (Error error) { GLib.error ("sync cancellation test failed: %s", error.message); }
 }
 

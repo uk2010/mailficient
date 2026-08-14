@@ -10,11 +10,11 @@ internal class DecodedMimeContent : Object {
 internal class FolderDownloadPlan : Object {
     public Mailbox mailbox;
     public Camel.Folder folder;
+    public bool refresh_remote;
     public Gee.ArrayList<string> unseen_uids = new Gee.ArrayList<string> ();
 
-    public FolderDownloadPlan (Mailbox mailbox, Camel.Folder folder) {
-        this.mailbox = mailbox;
-        this.folder = folder;
+    public FolderDownloadPlan (Mailbox mailbox, Camel.Folder folder, bool refresh_remote) {
+        this.mailbox = mailbox; this.folder = folder; this.refresh_remote = refresh_remote;
     }
 }
 
@@ -108,7 +108,10 @@ public class CamelMailEngine : Object, MailEngine {
     private const int64 MAX_RECEIVED_MESSAGE_ATTACHMENT_BYTES = 100 * 1024 * 1024;
     private const int64 MAX_EXPLICIT_ATTACHMENT_DOWNLOAD_BYTES = (int64) 2 * 1024 * 1024 * 1024;
     internal const int64 MAX_RECEIVED_TEXT_PART_BYTES = 10 * 1024 * 1024;
-    internal const int MAX_MESSAGE_DOWNLOADS_PER_SYNC = 250;
+    // Keep Get Mail bounded. Older history is picked up by later checks,
+    // rather than making a first refresh download hundreds of full MIME
+    // messages before the user can use the mailbox.
+    internal const int MAX_MESSAGE_DOWNLOADS_PER_SYNC = 50;
     internal const int SYNC_BATCH_SIZE = 5;
     internal const int UID_SCAN_YIELD_INTERVAL = 50;
     private signal void account_connection_finished (string account_id);
@@ -122,6 +125,7 @@ public class CamelMailEngine : Object, MailEngine {
     private Gee.HashMap<string, SyncState> states = new Gee.HashMap<string, SyncState> ();
     private Gee.HashSet<string> connecting_accounts = new Gee.HashSet<string> ();
     private Gee.HashMap<string, Cancellable> connection_cancellables = new Gee.HashMap<string, Cancellable> ();
+    private Gee.HashMap<string, bool> connection_requirements = new Gee.HashMap<string, bool> ();
     private ReceivedAttachmentStore received_attachments;
 
     public CamelMailEngine (CredentialStore credentials, string data_dir, string cache_dir,
@@ -149,67 +153,83 @@ public class CamelMailEngine : Object, MailEngine {
     }
 
     public async void connect_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
+        yield ensure_account_connection (settings, true, cancellable);
+    }
+
+    public async void connect_incoming_account (AccountSettings settings,
+                                                 Cancellable? cancellable = null) throws Error {
+        yield ensure_account_connection (settings, false, cancellable);
+    }
+
+    private async void ensure_account_connection (AccountSettings settings, bool require_transport,
+                                                   Cancellable? cancellable) throws Error {
         settings.validate ();
-        if (services_are_connected (settings.id)) return;
+        if (connection_satisfies (settings.id, require_transport)) return;
         if (connecting_accounts.contains (settings.id)) {
+            bool owner_requires_transport = connection_requirements.has_key (settings.id) &&
+                connection_requirements[settings.id];
             ulong handler_id = 0;
             handler_id = account_connection_finished.connect ((finished_id) => {
                 if (finished_id != settings.id) return;
-                disconnect (handler_id); connect_account.callback ();
+                disconnect (handler_id); ensure_account_connection.callback ();
             });
             yield;
             if (cancellable != null) cancellable.set_error_if_cancelled ();
-            if (services_are_connected (settings.id)) return;
-            throw new MailError.CONNECTION (state_for (settings.id).detail);
+            if (connection_satisfies (settings.id, require_transport)) return;
+            // An incoming-only caller may have won the connection race while
+            // this caller still needs SMTP. Continue with the missing half.
+            if (!require_transport || owner_requires_transport)
+                throw new MailError.CONNECTION (state_for (settings.id).detail);
+            yield ensure_account_connection (settings, require_transport, cancellable);
+            return;
         }
         connecting_accounts.add (settings.id);
         var attempt_cancellable = new Cancellable ();
         connection_cancellables[settings.id] = attempt_cancellable;
+        connection_requirements[settings.id] = require_transport;
         ulong cancellation_handler = 0;
         if (cancellable != null) {
             cancellation_handler = cancellable.cancelled.connect (() => attempt_cancellable.cancel ());
             if (cancellable.is_cancelled ()) attempt_cancellable.cancel ();
         }
         try {
-            yield establish_account_connection (settings, attempt_cancellable);
+            yield establish_account_connection (settings, attempt_cancellable, require_transport);
         } finally {
             if (cancellable != null && cancellation_handler != 0)
                 cancellable.disconnect (cancellation_handler);
             connection_cancellables.unset (settings.id);
             connecting_accounts.remove (settings.id);
             account_connection_finished (settings.id);
+            connection_requirements.unset (settings.id);
         }
     }
 
-    private bool services_are_connected (string account_id) {
+    private bool incoming_service_is_connected (string account_id) {
         var store = stores[account_id];
+        return store != null && store.get_connection_status () == Camel.ServiceConnectionStatus.CONNECTED;
+    }
+
+    private bool connection_satisfies (string account_id, bool require_transport) {
+        if (!incoming_service_is_connected (account_id)) return false;
+        if (!require_transport) return true;
         var transport = transports[account_id];
-        return store != null && transport != null &&
-            store.get_connection_status () == Camel.ServiceConnectionStatus.CONNECTED &&
+        return transport != null &&
             transport.get_connection_status () == Camel.ServiceConnectionStatus.CONNECTED;
     }
 
     private async void establish_account_connection (AccountSettings settings,
-                                                      Cancellable? cancellable) throws Error {
+                                                      Cancellable? cancellable,
+                                                      bool require_transport) throws Error {
         var state = state_for (settings.id); state.phase = SyncPhase.CONNECTING;
         state.detail = "Connecting securely…"; state.progress = 0;
         Camel.Store? store = stores[settings.id];
         Camel.Transport? transport = transports[settings.id];
         try {
-            // A previous network drop can leave one half of the account alive.
-            // Reuse only a complete pair; otherwise remove both and rebuild.
-            if (store == null || transport == null) {
-                if (transport != null) {
-                    try { yield transport.disconnect (false, Priority.DEFAULT, null); } catch (Error ignored) { }
-                    session.remove_service (transport);
-                }
-                if (store != null) {
-                    try { yield store.disconnect (false, Priority.DEFAULT, null); } catch (Error ignored) { }
-                    session.remove_service (store);
-                }
-                stores.unset (settings.id); transports.unset (settings.id); accounts.unset (settings.id);
+            // Keep the IMAP service and its summaries alive between checks. A
+            // missing service is the only case that requires a new Camel
+            // object; a disconnected service can reconnect in place.
+            if (store == null) {
                 store = (Camel.Store) session.add_service (settings.id + "-imap", "imapx", Camel.ProviderType.STORE);
-                transport = (Camel.Transport) session.add_service (settings.id + "-smtp", "smtp", Camel.ProviderType.TRANSPORT);
             }
             configure_network (store, settings.incoming_host, settings.incoming_port,
                 settings.incoming_username, settings.incoming_encryption, settings.authentication);
@@ -239,25 +259,31 @@ public class CamelMailEngine : Object, MailEngine {
                 if (!connected) throw new MailError.CONNECTION ("The incoming-mail server rejected the connection");
             }
 
-            configure_network (transport, settings.outgoing_host, settings.outgoing_port,
-                settings.outgoing_username, settings.outgoing_encryption, settings.authentication);
-            session.clear_rejected_certificate (transport.get_uid ());
-            string? outgoing_password;
-            if (settings.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS)
-                outgoing_password = incoming_password;
-            else {
-                outgoing_password = yield credentials.lookup_password (settings.id, "smtp", cancellable);
-                if (outgoing_password == null) outgoing_password = incoming_password;
-            }
-            transport.set_password (outgoing_password);
-            if (settings.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS)
-                session.cache_oauth_token (transport, incoming_oauth);
-            if (transport.get_connection_status () != Camel.ServiceConnectionStatus.CONNECTED) {
-                bool connected = yield transport.connect (Priority.DEFAULT, cancellable);
-                if (!connected) throw new MailError.CONNECTION ("The outgoing-mail server rejected the connection");
+            if (require_transport) {
+                if (transport == null)
+                    transport = (Camel.Transport) session.add_service (settings.id + "-smtp", "smtp", Camel.ProviderType.TRANSPORT);
+                configure_network (transport, settings.outgoing_host, settings.outgoing_port,
+                    settings.outgoing_username, settings.outgoing_encryption, settings.authentication);
+                session.clear_rejected_certificate (transport.get_uid ());
+                string? outgoing_password;
+                if (settings.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS)
+                    outgoing_password = incoming_password;
+                else {
+                    outgoing_password = yield credentials.lookup_password (settings.id, "smtp", cancellable);
+                    if (outgoing_password == null) outgoing_password = incoming_password;
+                }
+                transport.set_password (outgoing_password);
+                if (settings.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS)
+                    session.cache_oauth_token (transport, incoming_oauth);
+                if (transport.get_connection_status () != Camel.ServiceConnectionStatus.CONNECTED) {
+                    bool connected = yield transport.connect (Priority.DEFAULT, cancellable);
+                    if (!connected) throw new MailError.CONNECTION ("The outgoing-mail server rejected the connection");
+                }
             }
 
-            stores[settings.id] = store; transports[settings.id] = transport; accounts[settings.id] = settings;
+            stores[settings.id] = store;
+            if (transport != null) transports[settings.id] = transport;
+            accounts[settings.id] = settings;
             state.phase = SyncPhase.IDLE; state.detail = "Connected"; state.progress = 1;
         } catch (Error error) {
             // Camel registers services with the session before connecting them. A
@@ -366,7 +392,8 @@ public class CamelMailEngine : Object, MailEngine {
             var root = yield store.get_folder_info (null,
                 Camel.StoreGetFolderInfoFlags.RECURSIVE | Camel.StoreGetFolderInfoFlags.SUBSCRIBED | Camel.StoreGetFolderInfoFlags.REFRESH,
                 Priority.DEFAULT, cancellable);
-            collect_mailboxes (root, account_id, result.mailboxes);
+            var refreshable_folders = new Gee.HashMap<string, bool> ();
+            collect_mailboxes (root, account_id, result.mailboxes, refreshable_folders, store);
             result.folder_inventory_complete = true;
             // Publish the folder tree immediately. Message batches below then
             // become visible without waiting for every subscribed folder.
@@ -391,13 +418,16 @@ public class CamelMailEngine : Object, MailEngine {
                         Camel.StoreGetFolderFlags.NONE, Priority.DEFAULT, cancellable);
                     if (folder == null)
                         throw new MailError.CONNECTION ("The folder is not currently available");
-                    yield folder.refresh_info (Priority.DEFAULT, cancellable);
+                    bool refresh_remote = refreshable_folders.has_key (mailbox.remote_name) &&
+                        refreshable_folders[mailbox.remote_name];
+                    if (refresh_remote)
+                        yield folder.refresh_info (Priority.DEFAULT, cancellable);
 #if EDS_LEGACY
                     var uids = folder.get_uids ();
 #else
                     var uids = folder.dup_uids ();
 #endif
-                    var plan = new FolderDownloadPlan (mailbox, folder);
+                    var plan = new FolderDownloadPlan (mailbox, folder, refresh_remote);
                     for (int index = 0; index < (int) uids.length; index++) {
                         string uid = uids[index];
                         result.record_remote_uid (mailbox.id, uid);
@@ -530,7 +560,10 @@ public class CamelMailEngine : Object, MailEngine {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
     }
 
-    private static void collect_mailboxes (Camel.FolderInfo? node, string account_id, Gee.ArrayList<Mailbox> output) {
+    private static void collect_mailboxes (Camel.FolderInfo? node, string account_id,
+                                           Gee.ArrayList<Mailbox> output,
+                                           Gee.HashMap<string, bool> refreshable_folders,
+                                           Camel.Store store) throws Error {
         for (var current = node; current != null; current = current.next) {
             // Evolution exposes local search/vfolder aliases such as
             // .#evolution/Junk alongside the provider's real server folder.
@@ -539,10 +572,13 @@ public class CamelMailEngine : Object, MailEngine {
                 current.full_name.has_prefix (".#evolution/");
             if (!local_virtual && (current.flags & Camel.FolderInfoFlags.NOSELECT) == 0) {
                 var role = role_for_folder (current.flags, current.display_name, current.full_name);
-                output.add (new Mailbox (mailbox_id (account_id, current.full_name), current.display_name,
-                    icon_for_role (role), role, (uint) int.max (0, current.unread), account_id, current.full_name));
+                var mailbox = new Mailbox (mailbox_id (account_id, current.full_name), current.display_name,
+                    icon_for_role (role), role, (uint) int.max (0, current.unread), account_id, current.full_name);
+                output.add (mailbox);
+                refreshable_folders[mailbox.remote_name] = store.can_refresh_folder (current);
             }
-            if (current.child != null) collect_mailboxes (current.child, account_id, output);
+            if (current.child != null)
+                collect_mailboxes (current.child, account_id, output, refreshable_folders, store);
         }
     }
 

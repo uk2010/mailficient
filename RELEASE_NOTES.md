@@ -1,3 +1,22 @@
+# Mailficient 0.1.10
+
+Mailficient 0.1.10 makes Get Mail substantially faster and more predictable.
+
+Highlights:
+
+- Keeps incoming IMAP connections available between mail checks instead of
+  reconnecting for every sync
+- Opens SMTP lazily for sending and account validation, so checking mail does
+  not wait for the outgoing server
+- Refreshes only folders that support remote refresh and bounds each sync's
+  message-download work
+- Defers older message history to later checks instead of chaining many slow
+  download passes into one Get Mail action
+- Publishes matching Debian packages for AMD64 and ARM64
+
+This release provides Debian packages for x86-64 and ARM64 with matching
+SHA-256 checksum files.
+
 # Mailficient 0.1.9
 
 Mailficient 0.1.9 improves message triage, keyboard navigation, and local
