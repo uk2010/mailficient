@@ -7,6 +7,23 @@ public class DemoMailRepository : Object, MailRepository {
     private Gee.ArrayList<MailLabel> mail_labels = new Gee.ArrayList<MailLabel> ();
     private Gee.HashMap<string, Gee.HashSet<int64?>> message_label_ids = new Gee.HashMap<string, Gee.HashSet<int64?>> ();
     private Gee.HashMap<string, int64?> snoozed = new Gee.HashMap<string, int64?> ();
+    private int batch_depth;
+    private bool batch_changed;
+
+    private void notify_changed () {
+        if (batch_depth > 0) { batch_changed = true; return; }
+        changed ();
+    }
+
+    public void begin_batch () { batch_depth++; }
+    public void end_batch () {
+        if (batch_depth == 0) return;
+        batch_depth--;
+        if (batch_depth == 0 && batch_changed) {
+            batch_changed = false;
+            changed ();
+        }
+    }
 
     public DemoMailRepository () {
         vip_senders.add ("maya@example.net");
@@ -118,13 +135,13 @@ public class DemoMailRepository : Object, MailRepository {
     public void mark_read (string id, bool read) {
         var message = find_message (id);
         if (message != null && message.unread == read) {
-            message.unread = !read; changed ();
+            message.unread = !read; notify_changed ();
         }
     }
     public void set_flagged (string id, bool flagged) {
         var message = find_message (id);
         if (message != null && message.flagged != flagged) {
-            message.flagged = flagged; changed ();
+            message.flagged = flagged; notify_changed ();
         }
     }
     public void set_flag_color (string id, string color) {
@@ -132,15 +149,15 @@ public class DemoMailRepository : Object, MailRepository {
         if (message != null) {
             message.flag_color = color;
             message.flagged = true;
-            changed ();
+            notify_changed ();
         }
     }
     public bool sender_is_vip (Message message) { return vip_senders.contains (message.sender_address.down ()); }
     public void set_sender_vip (Message message, bool vip) throws MailError {
         if (vip) vip_senders.add (message.sender_address.down ()); else vip_senders.remove (message.sender_address.down ());
-        changed ();
+        notify_changed ();
     }
-    public void reload () { changed (); }
+    public void reload () { notify_changed (); }
     public void move_to_role (string id, MailboxRole role) throws MailError {
         foreach (var mailbox in mailboxes)
             if (mailbox.role == role) { transfer_to_mailbox (id, mailbox.id, false); return; }
@@ -154,18 +171,18 @@ public class DemoMailRepository : Object, MailRepository {
         if (source == null) throw new MailError.STORAGE ("The demo message is no longer available");
         if (copy) messages.add (copy_message (source, mailbox_id));
         else source.mailbox_id = mailbox_id;
-        changed ();
+        notify_changed ();
     }
     public void undo_transfer (string id, string original_mailbox_id) throws MailError {
         var message = find_message (id);
         if (message == null) throw new MailError.STORAGE ("The demo message is no longer available");
-        message.mailbox_id = original_mailbox_id; changed ();
+        message.mailbox_id = original_mailbox_id; notify_changed ();
     }
     public void permanently_delete (string id) throws MailError {
         var message = find_message (id);
         if (message == null || !messages.remove (message))
             throw new MailError.STORAGE ("The demo message is no longer available");
-        changed ();
+        notify_changed ();
     }
     public void empty_role (MailboxRole role) throws MailError {
         string mailbox_id = "";
@@ -173,23 +190,23 @@ public class DemoMailRepository : Object, MailRepository {
         if (mailbox_id == "") throw new MailError.STORAGE ("That demo mailbox is unavailable");
         for (int index = messages.size - 1; index >= 0; index--)
             if (messages[index].mailbox_id == mailbox_id) messages.remove_at (index);
-        changed ();
+        notify_changed ();
     }
     public void empty_mailbox (Mailbox mailbox) throws MailError {
         if (mailbox.role != MailboxRole.TRASH && mailbox.role != MailboxRole.JUNK)
             throw new MailError.STORAGE ("Only Trash or Junk can be emptied");
         for (int index = messages.size - 1; index >= 0; index--)
             if (messages[index].mailbox_id == mailbox.id) messages.remove_at (index);
-        changed ();
+        notify_changed ();
     }
     public Gee.List<MailLabel> list_labels () throws MailError { return mail_labels; }
     public MailLabel create_label (string name, string color = "#3584e4") throws MailError {
-        var label = new MailLabel (mail_labels.size + 1, name.strip (), color); mail_labels.add (label); changed (); return label;
+        var label = new MailLabel (mail_labels.size + 1, name.strip (), color); mail_labels.add (label); notify_changed (); return label;
     }
     public void delete_label (int64 id) throws MailError {
         for (int index = mail_labels.size - 1; index >= 0; index--)
             if (mail_labels[index].id == id) mail_labels.remove_at (index);
-        foreach (var ids in message_label_ids.values) ids.remove (id); changed ();
+        foreach (var ids in message_label_ids.values) ids.remove (id); notify_changed ();
     }
     public Gee.List<MailLabel> labels_for (string message_id) throws MailError {
         var result = new Gee.ArrayList<MailLabel> (); var ids = message_label_ids[message_id];
@@ -199,10 +216,10 @@ public class DemoMailRepository : Object, MailRepository {
     public void set_label (string message_id, int64 label_id, bool enabled) throws MailError {
         if (!message_label_ids.has_key (message_id)) message_label_ids[message_id] = new Gee.HashSet<int64?> ();
         if (enabled) message_label_ids[message_id].add (label_id); else message_label_ids[message_id].remove (label_id);
-        changed ();
+        notify_changed ();
     }
-    public void snooze (string message_id, int64 until_unix) throws MailError { snoozed[message_id] = until_unix; changed (); }
-    public void unsnooze (string message_id) throws MailError { snoozed.unset (message_id); changed (); }
+    public void snooze (string message_id, int64 until_unix) throws MailError { snoozed[message_id] = until_unix; notify_changed (); }
+    public void unsnooze (string message_id) throws MailError { snoozed.unset (message_id); notify_changed (); }
     public bool is_snoozed (string message_id) throws MailError { return is_snoozed_local (message_id); }
     private bool is_snoozed_local (string message_id) {
         return snoozed.has_key (message_id) && snoozed[message_id] > new DateTime.now_utc ().to_unix ();

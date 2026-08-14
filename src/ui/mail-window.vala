@@ -920,6 +920,12 @@ public class MailWindow : Adw.ApplicationWindow {
         var focus_search = new SimpleAction ("search", null); focus_search.activate.connect (() => search.grab_focus ()); add_action (focus_search);
         application.set_accels_for_action ("win.compose", { "<Control>n" });
         application.set_accels_for_action ("win.search", { "<Control>f" });
+        var select_all = new SimpleAction ("select-all", null);
+        select_all.activate.connect (() => message_list.select_all ()); add_action (select_all);
+        application.set_accels_for_action ("win.select-all", { "<Control>a" });
+        var clear_selection = new SimpleAction ("clear-selection", null);
+        clear_selection.activate.connect (() => message_list.clear_selection ()); add_action (clear_selection);
+        application.set_accels_for_action ("win.clear-selection", { "Escape" });
         var refresh = new SimpleAction ("refresh", null); refresh.activate.connect (() => synchronize.begin ()); add_action (refresh);
         application.set_accels_for_action ("win.refresh", { "F9" });
         var archive = new SimpleAction ("archive", null); archive.activate.connect (() => move_selected (MailboxRole.ARCHIVE)); add_action (archive);
@@ -961,15 +967,16 @@ public class MailWindow : Adw.ApplicationWindow {
             Accessibility.label (sort_button, sort_button.tooltip_text);
         });
         add_action (sort);
-        application.set_accels_for_action ("win.reply", { "<Control>r" });
+        application.set_accels_for_action ("win.reply", { "<Control>r", "r" });
         application.set_accels_for_action ("win.reply-all", { "<Control><Shift>r" });
-        application.set_accels_for_action ("win.forward", { "<Control>l" });
+        application.set_accels_for_action ("win.forward", { "<Control>l", "f" });
         application.set_accels_for_action ("win.trash", { "Delete" });
-        application.set_accels_for_action ("win.archive", { "<Control><Shift>a" });
+        application.set_accels_for_action ("win.archive", { "<Control><Shift>a", "e" });
         application.set_accels_for_action ("win.flag", { "<Control><Shift>l" });
-        application.set_accels_for_action ("win.toggle-read", { "<Control><Shift>u" });
-        application.set_accels_for_action ("win.next-message", { "<Alt>Down" });
-        application.set_accels_for_action ("win.previous-message", { "<Alt>Up" });
+        application.set_accels_for_action ("win.toggle-read", { "<Control><Shift>u", "i" });
+        application.set_accels_for_action ("win.next-message", { "<Alt>Down", "j" });
+        application.set_accels_for_action ("win.previous-message", { "<Alt>Up", "k" });
+        application.set_accels_for_action ("win.snooze", { "s" });
     }
 
     private static MessageSortMode sort_mode_for (string value) {
@@ -1149,13 +1156,16 @@ public class MailWindow : Adw.ApplicationWindow {
     private void transfer_selected_to (string mailbox_id, bool copy) {
         var messages = action_messages (); if (messages.size == 0) return;
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
-        foreach (var message in messages) {
-            try {
-                repository.transfer_to_mailbox (message.id, mailbox_id, copy);
-                if (!copy) undo[message.id] = message.mailbox_id;
-                completed++;
-            } catch (Error error) { show_operation_error (error); }
-        }
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) {
+                try {
+                    repository.transfer_to_mailbox (message.id, mailbox_id, copy);
+                    if (!copy) undo[message.id] = message.mailbox_id;
+                    completed++;
+                } catch (Error error) { show_operation_error (error); }
+            }
+        } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
         if (copy) toast_overlay.add_toast (new Adw.Toast (completed == 1 ?
             "Message copy queued" : "%d message copies queued".printf (completed)));
@@ -1221,7 +1231,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.8"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.9"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -1287,30 +1297,36 @@ public class MailWindow : Adw.ApplicationWindow {
     private void toggle_selected_flag () {
         var messages = action_messages (); if (messages.size == 0) return;
         bool flag = false; foreach (var message in messages) if (!message.flagged) flag = true;
-        foreach (var message in messages) { message.flagged = flag; repository.set_flagged (message.id, flag); }
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) { message.flagged = flag; repository.set_flagged (message.id, flag); }
+        } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
-        message_list.refresh ();
     }
 
     private void clear_selected_flags () {
         var messages = action_messages (); if (messages.size == 0) return;
-        foreach (var message in messages) {
-            message.flagged = false;
-            repository.set_flagged (message.id, false);
-        }
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) {
+                message.flagged = false;
+                repository.set_flagged (message.id, false);
+            }
+        } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
-        message_list.refresh ();
     }
 
     private void set_selected_flag_color (string color) {
         var messages = action_messages (); if (messages.size == 0) return;
-        foreach (var message in messages) {
-            message.flag_color = color;
-            message.flagged = true;
-            repository.set_flag_color (message.id, color);
-        }
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) {
+                message.flag_color = color;
+                message.flagged = true;
+                repository.set_flag_color (message.id, color);
+            }
+        } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
-        message_list.refresh ();
     }
 
     private void update_flag_button_color () {
@@ -1327,9 +1343,11 @@ public class MailWindow : Adw.ApplicationWindow {
     private void toggle_selected_read () {
         var messages = action_messages (); if (messages.size == 0) return;
         bool read = false; foreach (var message in messages) if (message.unread) read = true;
-        foreach (var message in messages) { message.unread = !read; repository.mark_read (message.id, read); }
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) { message.unread = !read; repository.mark_read (message.id, read); }
+        } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
-        message_list.refresh ();
     }
 
     private void move_selected (MailboxRole role) {
@@ -1348,16 +1366,19 @@ public class MailWindow : Adw.ApplicationWindow {
             prompt_permanent_delete.begin (next_message_id); return;
         }
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
-        foreach (var message in messages) {
-            try {
-                string original = message.mailbox_id;
-                repository.move_to_role (message.id, role);
-                undo[message.id] = original; completed++;
-            } catch (Error error) {
-                var friendly = UserFacingError.from_error (error);
-                toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (friendly.title, friendly.suggestion)));
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) {
+                try {
+                    string original = message.mailbox_id;
+                    repository.move_to_role (message.id, role);
+                    undo[message.id] = original; completed++;
+                } catch (Error error) {
+                    var friendly = UserFacingError.from_error (error);
+                    toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (friendly.title, friendly.suggestion)));
+                }
             }
-        }
+        } finally { repository.end_batch (); }
         select_after_removal (next_message_id, completed);
         string action = role == MailboxRole.TRASH ? "moved to Trash" : "archived";
         show_transfer_undo (completed == 1 ? "Message %s".printf (action) :
@@ -1422,16 +1443,19 @@ public class MailWindow : Adw.ApplicationWindow {
         string next_message_id = message_list.adjacent_message_id_after_selection ();
         bool mark_junk = !selected_is_junk ();
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
-        foreach (var message in messages) {
-            try {
-                string original = message.mailbox_id;
-                repository.classify_junk (message.id, mark_junk);
-                undo[message.id] = original; completed++;
-            } catch (Error error) {
-                var friendly = UserFacingError.from_error (error);
-                toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (friendly.title, friendly.suggestion)));
+        repository.begin_batch ();
+        try {
+            foreach (var message in messages) {
+                try {
+                    string original = message.mailbox_id;
+                    repository.classify_junk (message.id, mark_junk);
+                    undo[message.id] = original; completed++;
+                } catch (Error error) {
+                    var friendly = UserFacingError.from_error (error);
+                    toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (friendly.title, friendly.suggestion)));
+                }
             }
-        }
+        } finally { repository.end_batch (); }
         select_after_removal (next_message_id, completed);
         show_transfer_undo (completed == 1 ? (mark_junk ? "Marked as junk" : "Returned to Inbox") :
             (mark_junk ? "%d messages marked as junk".printf (completed) :
@@ -1459,10 +1483,13 @@ public class MailWindow : Adw.ApplicationWindow {
         if (moves.size == 0) return;
         var toast = new Adw.Toast (title); toast.button_label = "Undo";
         toast.button_clicked.connect (() => {
-            foreach (var entry in moves.entries) {
-                try { repository.undo_transfer (entry.key, entry.value); }
-                catch (Error error) { show_operation_error (error); }
-            }
+            repository.begin_batch ();
+            try {
+                foreach (var entry in moves.entries) {
+                    try { repository.undo_transfer (entry.key, entry.value); }
+                    catch (Error error) { show_operation_error (error); }
+                }
+            } finally { repository.end_batch (); }
             toast_overlay.add_toast (new Adw.Toast (moves.size == 1 ?
                 "Move undone" : "%d moves undone".printf (moves.size)));
         });
@@ -1493,12 +1520,15 @@ public class MailWindow : Adw.ApplicationWindow {
         dialog.default_response = "apply"; dialog.close_response = "cancel";
         if ((yield dialog.choose (this, null)) != "apply") return;
         try {
-            foreach (var entry in checks.entries)
-                foreach (var message in messages) repository.set_label (message.id, entry.key, entry.value.active);
-            if (new_name.text.strip () != "") {
-                var label = repository.create_label (new_name.text);
-                foreach (var message in messages) repository.set_label (message.id, label.id, true);
-            }
+            repository.begin_batch ();
+            try {
+                foreach (var entry in checks.entries)
+                    foreach (var message in messages) repository.set_label (message.id, entry.key, entry.value.active);
+                if (new_name.text.strip () != "") {
+                    var label = repository.create_label (new_name.text);
+                    foreach (var message in messages) repository.set_label (message.id, label.id, true);
+                }
+            } finally { repository.end_batch (); }
             toast_overlay.add_toast (new Adw.Toast ("Labels updated"));
         } catch (Error error) { show_operation_error (error); }
     }
@@ -1509,7 +1539,11 @@ public class MailWindow : Adw.ApplicationWindow {
         try { foreach (var message in messages) if (!repository.is_snoozed (message.id)) all_snoozed = false; }
         catch (Error error) { show_operation_error (error); return; }
         if (all_snoozed) {
-            try { foreach (var message in messages) repository.unsnooze (message.id); }
+            try {
+                repository.begin_batch ();
+                try { foreach (var message in messages) repository.unsnooze (message.id); }
+                finally { repository.end_batch (); }
+            }
             catch (Error error) { show_operation_error (error); }
             toast_overlay.add_toast (new Adw.Toast ("Message restored")); return;
         }
@@ -1523,7 +1557,11 @@ public class MailWindow : Adw.ApplicationWindow {
         if ((yield dialog.choose (this, null)) != "snooze") return;
         int hours = when.selected == 0 ? 1 : when.selected == 1 ? 4 : when.selected == 2 ? 24 : 24 * 7;
         int64 until = new DateTime.now_utc ().add_hours (hours).to_unix ();
-        try { foreach (var message in messages) repository.snooze (message.id, until); }
+        try {
+            repository.begin_batch ();
+            try { foreach (var message in messages) repository.snooze (message.id, until); }
+            finally { repository.end_batch (); }
+        }
         catch (Error error) { show_operation_error (error); return; }
         message_list.finish_bulk_action (); selected_message = null; reader.show_empty ();
         toast_overlay.add_toast (new Adw.Toast (messages.size == 1 ? "Message snoozed" :

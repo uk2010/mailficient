@@ -1,3 +1,21 @@
+# Mailficient 0.1.9
+
+Mailficient 0.1.9 improves message triage, keyboard navigation, and local
+cache efficiency.
+
+Highlights:
+
+- Adds Shift-click range selection, Ctrl-click toggling, Ctrl+A select-all,
+  and Escape selection clearing
+- Adds J/K navigation plus E archive, I read-state, R reply, F forward, and S
+  snooze shortcuts
+- Coalesces bulk-action refreshes so large selections update once
+- Speeds up Drafts, Outbox scheduling, and conversation loading with lighter
+  summary queries and new cache indexes
+- Publishes Debian packages for AMD64 and ARM64 with matching checksums
+
+This release provides Flatpak, Debian, and Snap packages for x86-64 and ARM64.
+
 # Mailficient 0.1.8
 
 Mailficient 0.1.8 improves account setup, manual-account sending, and mailbox

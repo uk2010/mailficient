@@ -76,6 +76,9 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE TABLE IF NOT EXISTS message_attachments(" +
             "message_id TEXT NOT NULL, id TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, content_type TEXT NOT NULL, content_id TEXT NOT NULL DEFAULT ''," +
             "PRIMARY KEY(message_id,id), FOREIGN KEY(message_id) REFERENCES cached_messages(id) ON DELETE CASCADE);" +
+            "CREATE TABLE IF NOT EXISTS message_header_index(" +
+            "message_id TEXT NOT NULL, account_id TEXT NOT NULL, header_id TEXT NOT NULL," +
+            "PRIMARY KEY(message_id,header_id), FOREIGN KEY(message_id) REFERENCES cached_messages(id) ON DELETE CASCADE);" +
             "CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(id UNINDEXED, sender, recipients, subject, body, tokenize='unicode61 remove_diacritics 2');");
         ensure_column ("cached_messages", "account_id", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("cached_messages", "remote_uid", "TEXT NOT NULL DEFAULT ''");
@@ -106,7 +109,14 @@ public class CacheDatabase : Object, AccountStore {
         execute ("CREATE INDEX IF NOT EXISTS cached_messages_mailbox_date ON cached_messages(mailbox_id,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_unread_date ON cached_messages(mailbox_id,unread DESC,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_flagged_date ON cached_messages(mailbox_id,flagged DESC,date_unix DESC);" +
-            "CREATE INDEX IF NOT EXISTS cached_mailboxes_role_id ON cached_mailboxes(role,id);");
+            "CREATE INDEX IF NOT EXISTS cached_messages_account_date ON cached_messages(account_id,date_unix DESC);" +
+            "CREATE INDEX IF NOT EXISTS cached_messages_account_message_id ON cached_messages(account_id,internet_message_id);" +
+            "CREATE INDEX IF NOT EXISTS cached_messages_account_reply ON cached_messages(account_id,in_reply_to);" +
+            "CREATE INDEX IF NOT EXISTS cached_mailboxes_role_id ON cached_mailboxes(role,id);" +
+            "CREATE INDEX IF NOT EXISTS cached_mailboxes_account_role ON cached_mailboxes(account_id,role);" +
+            "CREATE INDEX IF NOT EXISTS message_labels_label_message ON message_labels(label_id,message_id);" +
+            "CREATE INDEX IF NOT EXISTS snoozed_messages_until ON snoozed_messages(until_unix);" +
+            "CREATE INDEX IF NOT EXISTS message_header_index_lookup ON message_header_index(account_id,header_id);");
     }
 
     public string preference (string key, string fallback = "") throws MailError {
@@ -567,11 +577,66 @@ public class CacheDatabase : Object, AccountStore {
         return statement.column_int (0);
     }
 
+    public Gee.ArrayList<Message> list_saved_draft_messages () throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "SELECT d.id,d.account_id,d.recipients_to,d.subject,d.body_text,d.modified_at,EXISTS(SELECT 1 FROM draft_attachments a WHERE a.draft_id=d.id) FROM drafts d WHERE NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id) ORDER BY d.modified_at DESC";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare draft summary loading");
+        var result = new Gee.ArrayList<Message> (); int row;
+        while ((row = statement.step ()) == Sqlite.ROW) {
+            string preview = statement.column_text (4).replace ("\n", " ").strip ();
+            var date = new DateTime.from_unix_local (statement.column_int64 (5));
+            string timestamp = date == null ? "Draft" : date.format ("%b %e").strip ();
+            result.add (new Message ("local-draft:" + statement.column_text (0), "local-drafts", "Draft", "",
+                statement.column_text (2), statement.column_text (3).strip () == "" ? "(No Subject)" : statement.column_text (3),
+                preview, "", timestamp, false, false, statement.column_int (6) != 0, 1, false,
+                statement.column_text (1)));
+        }
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load draft summaries");
+        return result;
+    }
+
     public int outbox_count () throws MailError {
         Sqlite.Statement statement;
         if (database.prepare_v2 ("SELECT COUNT(*) FROM outbox", -1, out statement) != Sqlite.OK || statement.step () != Sqlite.ROW)
             throw new MailError.STORAGE ("Could not count queued messages");
         return statement.column_int (0);
+    }
+
+    public Gee.ArrayList<Message> list_outbox_messages () throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "SELECT d.id,d.account_id,d.recipients_to,d.subject,d.body_text,o.attempts,o.delivery_state,EXISTS(SELECT 1 FROM draft_attachments a WHERE a.draft_id=d.id) FROM outbox o JOIN drafts d ON d.id=o.draft_id ORDER BY o.rowid DESC";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Outbox summary loading");
+        var result = new Gee.ArrayList<Message> (); int row;
+        while ((row = statement.step ()) == Sqlite.ROW) {
+            int state = statement.column_int (6); string preview;
+            if (state == (int) OutboxDeliveryState.SENDING)
+                preview = "Delivery status uncertain — this message will not resend automatically";
+            else if (state == (int) OutboxDeliveryState.ACCEPTED)
+                preview = "Sent — waiting for local Outbox cleanup";
+            else if (state == (int) OutboxDeliveryState.REJECTED)
+                preview = "Rejected by the mail server — review and correct before trying again";
+            else
+                preview = statement.column_int (5) > 0 ? "Send failed — Mailficient will retry automatically" : "Waiting to send";
+            result.add (new Message ("local-outbox:" + statement.column_text (0), "local-outbox", "Outbox", "",
+                statement.column_text (2), statement.column_text (3).strip () == "" ? "(No Subject)" : statement.column_text (3),
+                preview, statement.column_text (4), "Queued", false, false, statement.column_int (7) != 0, 1, false,
+                statement.column_text (1)));
+        }
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Outbox summaries");
+        return result;
+    }
+
+    public int64? next_outbox_attempt (string account_id) throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "SELECT MIN(o.next_attempt_at) FROM outbox o JOIN drafts d ON d.id=o.draft_id WHERE d.account_id=? AND o.delivery_state=0";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Outbox scheduling");
+        statement.bind_text (1, account_id);
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not inspect Outbox scheduling");
+        if (statement.column_type (0) == Sqlite.NULL) return null;
+        return statement.column_int64 (0);
     }
 
     public Gee.ArrayList<OutboxItem> list_outbox_items () throws MailError {
@@ -772,6 +837,19 @@ public class CacheDatabase : Object, AccountStore {
         if (database.prepare_v2 ("INSERT INTO message_fts(id,sender,recipients,subject,body) VALUES(?,?,?,?,?)", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare the search index");
         statement.bind_text (1, message.id); statement.bind_text (2, message.sender_name + " " + message.sender_address); statement.bind_text (3, message.recipients + " " + message.cc_recipients); statement.bind_text (4, message.subject); statement.bind_text (5, message.body + " " + message.body_html);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not index the message");
+        if (database.prepare_v2 ("DELETE FROM message_header_index WHERE message_id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not update conversation indexing");
+        statement.bind_text (1, message.id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update conversation indexing");
+        var header_ids = new Gee.HashSet<string> ();
+        foreach (var header in new string[] { message.internet_message_id, message.in_reply_to, message.references })
+            foreach (var header_id in ConversationBuilder.header_ids (header)) header_ids.add (header_id);
+        foreach (var header_id in header_ids) {
+            if (database.prepare_v2 ("INSERT OR IGNORE INTO message_header_index(message_id,account_id,header_id) VALUES(?,?,?)", -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare conversation indexing");
+            statement.bind_text (1, message.id); statement.bind_text (2, message.account_id); statement.bind_text (3, header_id);
+            if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not index conversation headers");
+        }
         if (database.prepare_v2 ("DELETE FROM message_attachments WHERE message_id=?", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not update cached attachments");
         statement.bind_text (1, message.id); if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update cached attachments");
         foreach (var attachment in message.attachments) {
@@ -1153,15 +1231,61 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public Gee.List<Message> conversation_for (Message selected) throws MailError {
+        var candidates = new Gee.ArrayList<Message> ();
+        // Conversation membership is a graph over Message-ID, In-Reply-To,
+        // and References.  Walk that graph through the small header index
+        // instead of scanning every cached message in the account.
+        bool indexed = false;
         Sqlite.Statement statement;
-        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,flag_color FROM cached_messages WHERE account_id=? ORDER BY rowid";
-        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
-            throw new MailError.STORAGE ("Could not prepare conversation loading");
-        statement.bind_text (1, selected.account_id); var candidates = new Gee.ArrayList<Message> (); int row;
-        while ((row = statement.step ()) == Sqlite.ROW) {
-            candidates.add (message_summary_from_row (statement));
+        if (database.prepare_v2 ("SELECT 1 FROM message_header_index WHERE account_id=? LIMIT 1", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare conversation indexing lookup");
+        statement.bind_text (1, selected.account_id);
+        indexed = statement.step () == Sqlite.ROW;
+        bool selected_indexed = false;
+        if (database.prepare_v2 ("SELECT 1 FROM message_header_index WHERE message_id=? LIMIT 1", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare selected conversation lookup");
+        statement.bind_text (1, selected.id);
+        selected_indexed = statement.step () == Sqlite.ROW;
+        var candidate_ids = new Gee.HashSet<string> ();
+        var frontier = new Gee.HashSet<string> ();
+        foreach (var header in new string[] { selected.internet_message_id, selected.in_reply_to, selected.references })
+            foreach (var header_id in ConversationBuilder.header_ids (header)) frontier.add (header_id);
+        if (indexed) {
+            while (frontier.size > 0 && candidate_ids.size < MAX_CONVERSATION_MESSAGES * 4) {
+                var placeholders = new StringBuilder ();
+                for (int index = 0; index < frontier.size; index++) {
+                    if (placeholders.len > 0) placeholders.append (",");
+                    placeholders.append ("?");
+                }
+                string sql = "SELECT DISTINCT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color FROM cached_messages m JOIN message_header_index h ON h.message_id=m.id WHERE m.account_id=? AND h.header_id IN (" + placeholders.str + ")";
+                if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare conversation loading");
+                int bind = 1; statement.bind_text (bind++, selected.account_id);
+                foreach (var header_id in frontier) statement.bind_text (bind++, header_id);
+                var next_frontier = new Gee.HashSet<string> (); int row;
+                while ((row = statement.step ()) == Sqlite.ROW) {
+                    var candidate = message_summary_from_row (statement);
+                    if (!candidate_ids.contains (candidate.id) && candidate.id != selected.id) {
+                        candidate_ids.add (candidate.id); candidates.add (candidate);
+                        foreach (var header in new string[] { candidate.internet_message_id, candidate.in_reply_to, candidate.references })
+                            foreach (var header_id in ConversationBuilder.header_ids (header))
+                                if (!frontier.contains (header_id)) next_frontier.add (header_id);
+                    }
+                }
+                if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load conversation messages");
+                frontier = next_frontier;
+            }
+        } else if (frontier.size > 0 || (indexed && !selected_indexed)) {
+            // Caches created before the conversation index are still valid.
+            // Use the old bounded fallback once; subsequent sync writes repair
+            // the index for those messages.
+            const string fallback_sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,flag_color FROM cached_messages WHERE account_id=? ORDER BY rowid";
+            if (database.prepare_v2 (fallback_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare conversation fallback");
+            statement.bind_text (1, selected.account_id); int row;
+            while ((row = statement.step ()) == Sqlite.ROW) candidates.add (message_summary_from_row (statement));
+            if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load conversation fallback");
         }
-        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load conversation messages");
         var related = new ConversationBuilder ().build (candidates, selected);
         var result = new Gee.ArrayList<Message> ();
         foreach (var summary in related) {

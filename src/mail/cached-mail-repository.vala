@@ -7,14 +7,32 @@ public class CachedMailRepository : Object, MailRepository {
     private CacheDatabase cache;
     private DemoMailRepository demo;
     private bool demo_mode;
+    private int batch_depth;
+    private bool batch_changed;
 
     public CachedMailRepository (CacheDatabase cache, DemoMailRepository demo, bool demo_mode = false) {
         this.cache = cache;
         this.demo = demo;
         this.demo_mode = demo_mode;
         demo.changed.connect (() => {
-            if (is_demo_mode ()) changed ();
+            if (is_demo_mode ()) notify_changed ();
         });
+    }
+
+    private void notify_changed () {
+        if (batch_depth > 0) { batch_changed = true; return; }
+        changed ();
+    }
+
+    public void begin_batch () { batch_depth++; }
+
+    public void end_batch () {
+        if (batch_depth == 0) return;
+        batch_depth--;
+        if (batch_depth == 0 && batch_changed) {
+            batch_changed = false;
+            changed ();
+        }
     }
 
     private bool is_demo_mode () {
@@ -111,7 +129,7 @@ public class CachedMailRepository : Object, MailRepository {
             // loop.  Treat an idempotent read request as the no-op it is.
             var message = cache.find_cached_message (id);
             if (message == null || message.unread == !read) return;
-            cache.set_cached_read (id, read); changed ();
+            cache.set_cached_read (id, read); notify_changed ();
         }
         catch (Error error) { warning ("Could not update read state: %s", error.message); }
     }
@@ -119,13 +137,13 @@ public class CachedMailRepository : Object, MailRepository {
     public void set_flagged (string id, bool flagged) {
         if (id.has_prefix (DRAFT_PREFIX) || id.has_prefix (OUTBOX_PREFIX)) return;
         if (is_demo_mode ()) { demo.set_flagged (id, flagged); return; }
-        try { cache.set_cached_flagged (id, flagged); changed (); }
+        try { cache.set_cached_flagged (id, flagged); notify_changed (); }
         catch (Error error) { warning ("Could not update flag state: %s", error.message); }
     }
     public void set_flag_color (string id, string color) {
         if (id.has_prefix (DRAFT_PREFIX) || id.has_prefix (OUTBOX_PREFIX)) return;
         if (is_demo_mode ()) { demo.set_flag_color (id, color); return; }
-        try { cache.set_cached_flag_color (id, color); changed (); }
+        try { cache.set_cached_flag_color (id, color); notify_changed (); }
         catch (Error error) { warning ("Could not update flag color: %s", error.message); }
     }
     public bool sender_is_vip (Message message) {
@@ -135,60 +153,59 @@ public class CachedMailRepository : Object, MailRepository {
     }
     public void set_sender_vip (Message message, bool vip) throws MailError {
         if (is_demo_mode ()) demo.set_sender_vip (message, vip);
-        else { cache.set_vip_sender (message.sender_address, vip); changed (); }
+        else { cache.set_vip_sender (message.sender_address, vip); notify_changed (); }
     }
 
-    public void reload () { changed (); }
+    public void reload () { notify_changed (); }
     public void move_to_role (string id, MailboxRole role) throws MailError {
         if (is_demo_mode ()) { demo.move_to_role (id, role); return; }
-        cache.queue_message_transfer (id, role, false); changed ();
+        cache.queue_message_transfer (id, role, false); notify_changed ();
     }
     public void classify_junk (string id, bool junk) throws MailError {
         if (is_demo_mode ()) { demo.classify_junk (id, junk); return; }
-        cache.queue_junk_classification (id, junk); changed ();
+        cache.queue_junk_classification (id, junk); notify_changed ();
     }
     public void transfer_to_mailbox (string id, string mailbox_id, bool copy) throws MailError {
         if (is_demo_mode ()) { demo.transfer_to_mailbox (id, mailbox_id, copy); return; }
-        cache.queue_message_transfer_to (id, mailbox_id, copy); changed ();
+        cache.queue_message_transfer_to (id, mailbox_id, copy); notify_changed ();
     }
     public void undo_transfer (string id, string original_mailbox_id) throws MailError {
         if (is_demo_mode ()) { demo.undo_transfer (id, original_mailbox_id); return; }
-        cache.undo_queued_transfer (id, original_mailbox_id); changed ();
+        cache.undo_queued_transfer (id, original_mailbox_id); notify_changed ();
     }
     public void permanently_delete (string id) throws MailError {
         if (is_demo_mode ()) { demo.permanently_delete (id); return; }
-        cache.queue_permanent_delete (id); changed ();
+        cache.queue_permanent_delete (id); notify_changed ();
     }
     public void empty_role (MailboxRole role) throws MailError {
         if (is_demo_mode ()) { demo.empty_role (role); return; }
-        cache.queue_role_purge (role); changed ();
+        cache.queue_role_purge (role); notify_changed ();
     }
     public void empty_mailbox (Mailbox mailbox) throws MailError {
         if (is_demo_mode ()) { demo.empty_mailbox (mailbox); return; }
-        cache.queue_mailbox_purge (mailbox.id); changed ();
+        cache.queue_mailbox_purge (mailbox.id); notify_changed ();
     }
     public Gee.List<MailLabel> list_labels () throws MailError { return cache.list_mail_labels (); }
     public MailLabel create_label (string name, string color = "#3584e4") throws MailError {
-        var label = cache.create_mail_label (name, color); changed (); return label;
+        var label = cache.create_mail_label (name, color); notify_changed (); return label;
     }
-    public void delete_label (int64 id) throws MailError { cache.delete_mail_label (id); changed (); }
+    public void delete_label (int64 id) throws MailError { cache.delete_mail_label (id); notify_changed (); }
     public Gee.List<MailLabel> labels_for (string message_id) throws MailError {
         return cache.labels_for_message (message_id);
     }
     public void set_label (string message_id, int64 label_id, bool enabled) throws MailError {
-        cache.set_message_label (message_id, label_id, enabled); changed ();
+        cache.set_message_label (message_id, label_id, enabled); notify_changed ();
     }
     public void snooze (string message_id, int64 until_unix) throws MailError {
-        cache.snooze_message (message_id, until_unix); changed ();
+        cache.snooze_message (message_id, until_unix); notify_changed ();
     }
-    public void unsnooze (string message_id) throws MailError { cache.unsnooze_message (message_id); changed (); }
+    public void unsnooze (string message_id) throws MailError { cache.unsnooze_message (message_id); notify_changed (); }
     public bool is_snoozed (string message_id) throws MailError { return cache.message_is_snoozed (message_id); }
 
     private Gee.ArrayList<Message> draft_messages () {
-        var result = new Gee.ArrayList<Message> ();
-        try { foreach (var draft in cache.list_saved_drafts ()) result.add (draft_message (draft)); }
+        try { return cache.list_saved_draft_messages (); }
         catch (Error error) { warning ("Could not load saved drafts: %s", error.message); }
-        return result;
+        return new Gee.ArrayList<Message> ();
     }
 
     private static Message draft_message (Draft draft) {
@@ -202,10 +219,9 @@ public class CachedMailRepository : Object, MailRepository {
     }
 
     private Gee.ArrayList<Message> outbox_messages () {
-        var result = new Gee.ArrayList<Message> ();
-        try { foreach (var item in cache.list_outbox_items ()) result.add (outbox_message (item)); }
+        try { return cache.list_outbox_messages (); }
         catch (Error error) { warning ("Could not load Outbox: %s", error.message); }
-        return result;
+        return new Gee.ArrayList<Message> ();
     }
 
     private static Message outbox_message (OutboxItem item) {

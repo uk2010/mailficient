@@ -1,0 +1,61 @@
+name: Build Debian packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    name: Debian (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            flatpak_arch: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            flatpak_arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder dpkg-dev
+
+      - name: Install GNOME 49 SDK and runtime
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --assumeyes flathub \
+            org.gnome.Platform//49 org.gnome.Sdk//49
+
+      - name: Build Camel-enabled application tree
+        run: |
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            --arch=${{ matrix.flatpak_arch }} \
+            "flatpak-build-${{ matrix.arch }}" \
+            packaging/com.local.Mailficient.Devel.json
+
+      - name: Build Debian package
+        env:
+          MAILFICIENT_FLATPAK_APP_TREE: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files
+          MAILFICIENT_NATIVE_BINARY: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files/bin/mailficient
+          MAILFICIENT_PROBE_BINARY: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files/bin/mailficient-addressbook-probe
+          MAILFICIENT_DEB_ARCHITECTURE: ${{ matrix.arch }}
+        run: tools/build-deb.sh
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mailficient-0.1.9-${{ matrix.arch }}-deb
+          path: |
+            dist/mailficient_0.1.9-1_${{ matrix.arch }}.deb
+            dist/mailficient_0.1.9-1_${{ matrix.arch }}.deb.sha256
+          if-no-files-found: error

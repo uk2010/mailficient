@@ -4,6 +4,8 @@
 
 Mailboxes and search results load 100 lightweight summaries at a time. Use **Older** and **Newer** below the message list; opening one message loads only that message's body and attachments. This keeps browsing bounded even when an account contains tens of thousands of messages.
 
+The message list follows normal desktop selection behavior: hold **Shift** while clicking to select a contiguous range, hold **Ctrl** to add or remove individual messages, use **Ctrl+A** to select every message in the current view, and press **Escape** to clear the selection. **J/K** navigate messages, while **E**, **I**, **R**, **F**, and **S** provide quick archive, read-state, reply, forward, and snooze actions.
+
 Use the selection control above the list to enter multi-select mode, select the required rows, then apply Read/Unread, Flag, Archive, Junk, Move, or Delete once. Moving mail to Trash offers an **Undo** toast before the durable server operation is flushed. Deleting from Trash/Junk is permanent and requires confirmation. Right-click Trash or Junk in the sidebar to empty the complete server folder, also with confirmation.
 
 ## Composition

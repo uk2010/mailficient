@@ -42,11 +42,11 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 ## Flatpak package
 
 Download the Flatpak for your architecture from the
-[v0.1.8 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.8),
+[v0.1.9 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.1.9),
 then install and run it with:
 
 ```sh
-flatpak install --user ./Mailficient-0.1.8-x86_64.flatpak
+flatpak install --user ./Mailficient-0.1.9-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -62,7 +62,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.1.8_arm64.snap
+sudo snap install --dangerous ./mailficient_0.1.9_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -89,7 +89,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.1.8-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.1.9-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 
@@ -137,7 +137,7 @@ See [`docs/remaining-work.md`](docs/remaining-work.md) for the exact remaining q
 
 Credentialed qualification helpers are also included. `tools/real-account-memory-profile.sh` records and conservatively analyzes a controlled-mailbox RSS/PSS trajectory, while `tools/goa-provider-qa.sh` checks Google and Microsoft GOA connections independently without printing account addresses.
 
-Useful shortcuts include **Ctrl+N** to compose, **Ctrl+F** to search, **F9** to refresh, **Ctrl+,** for Preferences, **Ctrl+Enter** to send, **Ctrl+S** to save a draft, **Ctrl+Shift+A** to attach files, and **Ctrl+B**, **Ctrl+I**, or **Ctrl+U** to format selected compose text.
+Useful shortcuts include **Ctrl+N** to compose, **Ctrl+F** to search, **F9** to refresh, **Ctrl+,** for Preferences, **Ctrl+A** to select all messages, **Escape** to clear selection, **Shift-click** to select a range, **J/K** to move between messages, **E** to archive, **I** to toggle read state, **R** to reply, **F** to forward, and **S** to snooze. **Ctrl+Enter** sends, **Ctrl+S** saves a draft, **Ctrl+Shift+A** attaches files, and **Ctrl+B**, **Ctrl+I**, or **Ctrl+U** formats selected compose text.
 
 Search accepts ordinary words and the filters `from:`, `to:`, `mailbox:`, `label:`,
 `is:unread`, `is:read`, `is:flagged`, `has:attachment`, and

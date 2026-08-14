@@ -39,7 +39,7 @@ public class MessageList : Gtk.Box {
         Accessibility.label (unread_filter, "Show unread messages only");
         unread_filter.toggled.connect (() => reload ()); header.append (unread_filter);
         select_multiple.icon_name = "object-select-symbolic";
-        select_multiple.tooltip_text = "Select multiple messages";
+        select_multiple.tooltip_text = "Select multiple messages (Shift-click for a range, Ctrl+A for all)";
         Accessibility.label (select_multiple, "Select multiple messages");
         // Multi-selection is always available through the standard Shift-click
         // and Ctrl-click gestures. This button only reveals checkboxes.
@@ -192,6 +192,21 @@ public class MessageList : Gtk.Box {
             } while (iterator.next (out position));
         }
         return result;
+    }
+
+    public void select_all () {
+        if (selection == null || model == null || model.get_n_items () == 0) return;
+        select_multiple.active = true;
+        var all = new Gtk.Bitset.range (0, model.get_n_items ());
+        selection.set_selection (all, all);
+    }
+
+    public void clear_selection () {
+        if (selection == null) return;
+        var selected = selection.get_selection ();
+        if (selected.is_empty ()) return;
+        select_multiple.active = false;
+        selection.unselect_all ();
     }
 
     public void finish_bulk_action () { select_multiple.active = false; }

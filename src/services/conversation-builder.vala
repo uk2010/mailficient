@@ -45,7 +45,7 @@ public class ConversationBuilder : Object {
         foreach (var id in header_ids (header)) ids.add (id);
     }
 
-    private static Gee.ArrayList<string> header_ids (string header) {
+    public static Gee.ArrayList<string> header_ids (string header) {
         var result = new Gee.ArrayList<string> ();
         foreach (var token in header.replace ("\t", " ").split (" ")) {
             string value = token.strip ().replace (",", "");

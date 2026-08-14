@@ -31,5 +31,10 @@ public interface MailRepository : Object {
     public abstract void snooze (string message_id, int64 until_unix) throws MailError;
     public abstract void unsnooze (string message_id) throws MailError;
     public abstract bool is_snoozed (string message_id) throws MailError;
+    // Coalesce the repository's changed signal while a user action updates
+    // several messages.  The cache remains durable after each operation, but
+    // the GTK views only need one rebuild at the end of the batch.
+    public abstract void begin_batch ();
+    public abstract void end_batch ();
 }
 }

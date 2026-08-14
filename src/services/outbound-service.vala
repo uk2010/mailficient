@@ -194,13 +194,9 @@ public class OutboundService : Object {
         scheduled_sources.unset (account_id);
         try {
             int64 now = new DateTime.now_utc ().to_unix ();
-            int64 earliest = int64.MAX;
-            foreach (var item in cache.list_outbox_items ()) {
-                if (item.draft.account_id != account_id ||
-                    item.delivery_state != OutboxDeliveryState.QUEUED) continue;
-                earliest = int64.min (earliest, item.next_attempt_at);
-            }
-            if (earliest == int64.MAX) return;
+            int64? next = cache.next_outbox_attempt (account_id);
+            if (next == null) return;
+            int64 earliest = (int64) next;
             uint delay = (uint) int64.max (1, int64.min (86400, earliest - now));
             scheduled_sources[account_id] = Timeout.add_seconds (delay, () => {
                 scheduled_sources.unset (account_id);
