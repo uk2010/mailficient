@@ -10,11 +10,10 @@ internal class DecodedMimeContent : Object {
 internal class FolderDownloadPlan : Object {
     public Mailbox mailbox;
     public Camel.Folder folder;
-    public bool refresh_remote;
     public Gee.ArrayList<string> unseen_uids = new Gee.ArrayList<string> ();
 
-    public FolderDownloadPlan (Mailbox mailbox, Camel.Folder folder, bool refresh_remote) {
-        this.mailbox = mailbox; this.folder = folder; this.refresh_remote = refresh_remote;
+    public FolderDownloadPlan (Mailbox mailbox, Camel.Folder folder) {
+        this.mailbox = mailbox; this.folder = folder;
     }
 }
 
@@ -391,8 +390,7 @@ public class CamelMailEngine : Object, MailEngine {
             var root = yield store.get_folder_info (null,
                 Camel.StoreGetFolderInfoFlags.RECURSIVE | Camel.StoreGetFolderInfoFlags.SUBSCRIBED | Camel.StoreGetFolderInfoFlags.REFRESH,
                 Priority.DEFAULT, cancellable);
-            var refreshable_folders = new Gee.HashMap<string, bool> ();
-            collect_mailboxes (root, account_id, result.mailboxes, refreshable_folders, store);
+            collect_mailboxes (root, account_id, result.mailboxes);
             result.folder_inventory_complete = true;
             // Publish the folder tree immediately. Message batches below then
             // become visible without waiting for every subscribed folder.
@@ -417,16 +415,18 @@ public class CamelMailEngine : Object, MailEngine {
                         Camel.StoreGetFolderFlags.NONE, Priority.DEFAULT, cancellable);
                     if (folder == null)
                         throw new MailError.CONNECTION ("The folder is not currently available");
-                    bool refresh_remote = refreshable_folders.has_key (mailbox.remote_name) &&
-                        refreshable_folders[mailbox.remote_name];
-                    if (refresh_remote)
-                        yield folder.refresh_info (Priority.DEFAULT, cancellable);
+                    // can_refresh_folder() answers whether a folder should be
+                    // polled for new-mail notifications; Camel's default is
+                    // Inbox-only. A full sync must refresh every selectable
+                    // folder so Junk, Trash, and custom folders expose their
+                    // current UID lists too.
+                    yield folder.refresh_info (Priority.DEFAULT, cancellable);
 #if EDS_LEGACY
                     var uids = folder.get_uids ();
 #else
                     var uids = folder.dup_uids ();
 #endif
-                    var plan = new FolderDownloadPlan (mailbox, folder, refresh_remote);
+                    var plan = new FolderDownloadPlan (mailbox, folder);
                     for (int index = 0; index < (int) uids.length; index++) {
                         string uid = uids[index];
                         result.record_remote_uid (mailbox.id, uid);
@@ -555,9 +555,7 @@ public class CamelMailEngine : Object, MailEngine {
     }
 
     private static void collect_mailboxes (Camel.FolderInfo? node, string account_id,
-                                           Gee.ArrayList<Mailbox> output,
-                                           Gee.HashMap<string, bool> refreshable_folders,
-                                           Camel.Store store) throws Error {
+                                           Gee.ArrayList<Mailbox> output) {
         for (var current = node; current != null; current = current.next) {
             // Evolution exposes local search/vfolder aliases such as
             // .#evolution/Junk alongside the provider's real server folder.
@@ -569,10 +567,9 @@ public class CamelMailEngine : Object, MailEngine {
                 var mailbox = new Mailbox (mailbox_id (account_id, current.full_name), current.display_name,
                     icon_for_role (role), role, (uint) int.max (0, current.unread), account_id, current.full_name);
                 output.add (mailbox);
-                refreshable_folders[mailbox.remote_name] = store.can_refresh_folder (current);
             }
             if (current.child != null)
-                collect_mailboxes (current.child, account_id, output, refreshable_folders, store);
+                collect_mailboxes (current.child, account_id, output);
         }
     }
 
