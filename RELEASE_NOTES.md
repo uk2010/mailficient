@@ -1,3 +1,13 @@
+# Mailficient 0.1.13
+
+Mailficient 0.1.13 refreshes every selectable mailbox during synchronization.
+
+Highlights:
+
+- Refreshes Junk, Trash, and custom folders so their current remote messages
+  are visible after Get Mail
+- Keeps the existing full-download behavior for uncached messages
+
 # Mailficient 0.1.12
 
 Mailficient 0.1.12 fixes message selection stability and improves toolbar
