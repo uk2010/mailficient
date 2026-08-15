@@ -1,3 +1,16 @@
+# Mailficient 0.1.12
+
+Mailficient 0.1.12 fixes message selection stability and improves toolbar
+customization.
+
+Highlights:
+
+- Keeps a clicked unread message selected while it is marked read
+- Organizes the application menu into clear Mail, View, Accounts, Settings,
+  and Help sections
+- Adds an extensible right-click toolbar popup with “Customize Toolbar…”
+- Provides matching Debian packages for x86-64 and ARM64 with SHA-256 checksums
+
 # Mailficient 0.1.11
 
 Mailficient 0.1.11 completes full mailbox downloads without an artificial

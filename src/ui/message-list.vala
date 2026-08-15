@@ -98,25 +98,23 @@ public class MessageList : Gtk.Box {
     }
 
     public void refresh () { reload (); }
-    public void refresh_preserving_selection () {
+    public void refresh_preserving_selection (string preferred_id = "") {
         // An unread-only list is a reading queue. Repository changes caused by
         // opening its selected message must not immediately remove that row
         // from under the reader. Keep the snapshot until the filter is toggled.
         if (unread_filter.active) {
-            refresh_row_widgets ();
             return;
         }
-        reload (true, true);
+        reload (true, true, preferred_id);
     }
     public void set_sort (MessageSortMode mode) { sort_mode = mode; reload (); }
 
     public void mark_read_in_place (string id) {
-        if (!unread_filter.active || model == null) return;
+        if (model == null) return;
         for (uint position = 0; position < model.get_n_items (); position++) {
             var message = model.get_item (position) as Message;
             if (message != null && message.id == id) {
                 message.unread = false;
-                refresh_row_widgets ();
                 return;
             }
         }
@@ -211,9 +209,12 @@ public class MessageList : Gtk.Box {
 
     public void finish_bulk_action () { select_multiple.active = false; }
 
-    private void reload (bool notify_selection = true, bool preserve_selection = false) {
-        string preserve_id = "";
-        if (preserve_selection && !select_multiple.active) {
+    private void reload (bool notify_selection = true, bool preserve_selection = false,
+                         string preferred_id = "") {
+        // A bulk selection owns the selection model; preserving the reader's
+        // single-message id must not collapse that range.
+        string preserve_id = select_multiple.active ? "" : preferred_id;
+        if (preserve_id == "" && preserve_selection && !select_multiple.active) {
             var previously_selected = selected_messages ();
             if (previously_selected.size == 1) preserve_id = previously_selected[0].id;
         }

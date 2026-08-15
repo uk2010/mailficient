@@ -11,7 +11,8 @@ public class MessageRow : Gtk.Box {
         this.context_selection = context_selection;
         this.model_position = model_position;
         add_css_class ("message-row");
-        if (message.unread) add_css_class ("unread");
+        message.notify["unread"].connect (update_unread_style);
+        update_unread_style ();
         accessible_role = Gtk.AccessibleRole.LIST_ITEM;
 
         var outer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
@@ -108,6 +109,11 @@ public class MessageRow : Gtk.Box {
             context_selection.disconnect (selection_handler);
         selection_handler = 0;
         context_selection = null;
+    }
+
+    private void update_unread_style () {
+        if (message.unread) add_css_class ("unread");
+        else remove_css_class ("unread");
     }
 
     private static string flag_color_label (string color) {

@@ -60,6 +60,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private SimpleAction? full_html_formatting_action;
     private Gtk.MenuButton sort_button = new Gtk.MenuButton ();
     private Gtk.Box customizable_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+    private Gtk.PopoverMenu? toolbar_context_menu;
     private bool compact_toolbar;
     private Message? selected_message;
     private Mailbox? active_mailbox;
@@ -73,6 +74,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private double resize_start_pointer_x;
     private bool qa_layout;
     private MailboxSidebar sidebar;
+    private bool marking_selected_message_read;
 
     public MailWindow (Gtk.Application app, MailRepository repository, MailSearchService search_service,
                        CacheDatabase cache, AttachmentService attachment_service,
@@ -251,8 +253,14 @@ public class MailWindow : Adw.ApplicationWindow {
         // allowed a simultaneous startup sync to monopolize the main thread first.
         if (!qa_layout && settings.window_maximized) maximize ();
         repository.changed.connect (() => {
+            // Marking the selected unread message read emits repository.changed
+            // while the click is still settling. Preserve the displayed id
+            // explicitly; the selection model may already be rebuilding and
+            // no longer be reliable as the source of the id.
+            string selected_id = selected_message == null ? "" : selected_message.id;
             sidebar.reload (false);
-            message_list.refresh_preserving_selection ();
+            if (!marking_selected_message_read)
+                message_list.refresh_preserving_selection (selected_id);
             if (selected_message != null) {
                 var refreshed = repository.find_message (selected_message.id);
                 if (refreshed != null) selected_message = refreshed;
@@ -559,23 +567,12 @@ public class MailWindow : Adw.ApplicationWindow {
         header.append (customizable_toolbar);
 
         var app_menu = new Menu ();
-        app_menu.append ("New Message", "win.compose");
-        app_menu.append ("Search Mail", "win.search");
-        app_menu.append ("Get Mail", "win.refresh");
-        var message_menu = new Menu ();
-        message_menu.append ("Reply", "win.reply");
-        message_menu.append ("Reply All", "win.reply-all");
-        message_menu.append ("Forward", "win.forward");
-        message_menu.append ("Archive", "win.archive");
-        message_menu.append ("Move to Trash", "win.trash");
-        message_menu.append ("Junk or Not Junk", "win.junk");
-        message_menu.append ("Flag or Unflag", "win.flag");
-        message_menu.append ("Mark Read or Unread", "win.toggle-read");
-        message_menu.append ("Move or Copy…", "win.show-move");
-        message_menu.append ("Edit Labels…", "win.labels");
-        message_menu.append ("Snooze…", "win.snooze");
-        message_menu.append ("Print…", "win.print-message");
-        app_menu.append_submenu ("Message Actions", message_menu);
+        var mail_menu = new Menu ();
+        mail_menu.append ("New Message", "win.compose");
+        mail_menu.append ("Get Mail", "win.refresh");
+        app_menu.append_section ("Mail", mail_menu);
+
+        var view_menu = new Menu ();
         var sort_app_menu = new Menu ();
         sort_app_menu.append ("Newest First", "win.sort::newest");
         sort_app_menu.append ("Oldest First", "win.sort::oldest");
@@ -583,13 +580,27 @@ public class MailWindow : Adw.ApplicationWindow {
         sort_app_menu.append ("Subject", "win.sort::subject");
         sort_app_menu.append ("Unread First", "win.sort::unread");
         sort_app_menu.append ("Flagged First", "win.sort::flagged");
-        app_menu.append_submenu ("Sort Messages", sort_app_menu);
-        app_menu.append ("Group Related Messages", "win.group-messages");
-        app_menu.append ("Always Show Images", "win.always-show-images");
-        app_menu.append ("Display Full HTML", "win.full-html-formatting");
-        app_menu.append ("Customize Toolbar…", "win.customize-toolbar");
-        app_menu.append ("Settings", "win.preferences");
-        app_menu.append ("Keyboard Shortcuts", "win.shortcuts"); app_menu.append ("About Mailficient", "win.about");
+        view_menu.append_submenu ("Sort Messages", sort_app_menu);
+        view_menu.append ("Group Related Messages", "win.group-messages");
+        var display_menu = new Menu ();
+        display_menu.append ("Always Show Images", "win.always-show-images");
+        display_menu.append ("Display Full HTML", "win.full-html-formatting");
+        view_menu.append_submenu ("Message Display", display_menu);
+        app_menu.append_section ("View", view_menu);
+
+        var accounts_menu = new Menu ();
+        accounts_menu.append ("Manage Accounts…", "win.accounts");
+        app_menu.append_section ("Accounts", accounts_menu);
+
+        var settings_menu = new Menu ();
+        settings_menu.append ("Preferences…", "win.preferences");
+        settings_menu.append ("Customize Toolbar…", "win.customize-toolbar");
+        app_menu.append_section ("Settings", settings_menu);
+
+        var help_menu = new Menu ();
+        help_menu.append ("Keyboard Shortcuts", "win.shortcuts");
+        help_menu.append ("About Mailficient", "win.about");
+        app_menu.append_section ("Help", help_menu);
         var app_menu_button = new Gtk.MenuButton (); app_menu_button.icon_name = "open-menu-symbolic";
         app_menu_button.add_css_class ("app-menu-button");
         app_menu_button.valign = Gtk.Align.CENTER;
@@ -598,10 +609,24 @@ public class MailWindow : Adw.ApplicationWindow {
         var window_controls = new Gtk.WindowControls (Gtk.PackType.END);
         header.append (window_controls);
 
+        var toolbar_menu = new Menu ();
+        toolbar_menu.append ("Customize Toolbar…", "win.customize-toolbar");
+        toolbar_context_menu = new Gtk.PopoverMenu.from_model (toolbar_menu);
+        toolbar_context_menu.set_parent (customizable_toolbar);
+        toolbar_context_menu.has_arrow = false;
+
         var secondary_click = new Gtk.GestureClick ();
         secondary_click.button = Gdk.BUTTON_SECONDARY;
-        secondary_click.released.connect ((presses, x, y) => show_toolbar_customization ());
-        header.add_controller (secondary_click);
+        // Toolbar buttons have their own event controllers. Capture the
+        // secondary click before a child can consume it so right-clicking a
+        // button works just like right-clicking empty toolbar space.
+        secondary_click.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        secondary_click.pressed.connect ((presses, x, y) => {
+            secondary_click.set_state (Gtk.EventSequenceState.CLAIMED);
+            toolbar_context_menu.pointing_to = { (int) x, (int) y, 1, 1 };
+            toolbar_context_menu.popup ();
+        });
+        customizable_toolbar.add_controller (secondary_click);
         rebuild_toolbar ();
         var window_handle = new Gtk.WindowHandle ();
         window_handle.child = header;
@@ -683,7 +708,8 @@ public class MailWindow : Adw.ApplicationWindow {
         Gtk.Widget? child = customizable_toolbar.get_first_child ();
         while (child != null) {
             Gtk.Widget? next = child.get_next_sibling ();
-            customizable_toolbar.remove (child);
+            if (child != toolbar_context_menu)
+                customizable_toolbar.remove (child);
             child = next;
         }
 
@@ -1183,8 +1209,10 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void mark_read_after_selection (string message_id) {
         Idle.add (() => {
+            marking_selected_message_read = true;
             message_list.mark_read_in_place (message_id);
             repository.mark_read (message_id, true);
+            marking_selected_message_read = false;
             return Source.REMOVE;
         });
     }
@@ -1231,7 +1259,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.11"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.12"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
