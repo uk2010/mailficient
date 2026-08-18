@@ -11,6 +11,7 @@ public class ShortcutsDialog : Adw.PreferencesDialog {
         add_shortcut_row (mail, "Reply / Forward", "Ctrl+R / R, Ctrl+L / F");
         add_shortcut_row (mail, "Select All / Clear Selection", "Ctrl+A / Escape");
         add_shortcut_row (mail, "Select a Range", "Shift-click");
+        add_shortcut_row (mail, "Zoom Email Preview", "Ctrl++ / Ctrl+-");
         var navigation = new Adw.PreferencesGroup (); navigation.title = "Navigation";
         add_shortcut_row (navigation, "Search Mail", "Ctrl+F"); add_shortcut_row (navigation, "Get Mail", "F9");
         add_shortcut_row (navigation, "Next Message", "Alt+Down / J"); add_shortcut_row (navigation, "Previous Message", "Alt+Up / K");

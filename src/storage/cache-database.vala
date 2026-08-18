@@ -8,6 +8,8 @@ public class CacheDatabase : Object, AccountStore {
     public const int RECIPIENT_CANDIDATE_MESSAGE_LIMIT = 500;
     public signal void mutation_queued (string account_id);
     private Sqlite.Database database;
+    private Sqlite.Statement? bulk_message_statement;
+    private bool bulk_sync_mode;
 
     public CacheDatabase (string path) throws MailError {
         if (Sqlite.Database.open (path, out database) != Sqlite.OK)
@@ -40,6 +42,9 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE TABLE IF NOT EXISTS mail_labels(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,color TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS mail_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,account_id TEXT NOT NULL," +
             "field INTEGER NOT NULL,pattern TEXT NOT NULL,action INTEGER NOT NULL,value TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);" +
+            "CREATE TABLE IF NOT EXISTS smart_mailboxes(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,query TEXT NOT NULL);" +
+            "CREATE TABLE IF NOT EXISTS calendar_events(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,location TEXT NOT NULL,notes TEXT NOT NULL);" +
+            "CREATE TABLE IF NOT EXISTS mail_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,due_at TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0,notes TEXT NOT NULL,message_id TEXT NOT NULL DEFAULT '');" +
             "CREATE TABLE IF NOT EXISTS mail_templates(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE," +
             "subject TEXT NOT NULL,body_text TEXT NOT NULL,body_html TEXT NOT NULL,body_format TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS message_labels(message_id TEXT NOT NULL,label_id INTEGER NOT NULL," +
@@ -110,6 +115,7 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_unread_date ON cached_messages(mailbox_id,unread DESC,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_flagged_date ON cached_messages(mailbox_id,flagged DESC,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_date ON cached_messages(account_id,date_unix DESC);" +
+            "CREATE INDEX IF NOT EXISTS cached_messages_account_mailbox_remote_uid ON cached_messages(account_id,mailbox_id,remote_uid);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_message_id ON cached_messages(account_id,internet_message_id);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_reply ON cached_messages(account_id,in_reply_to);" +
             "CREATE INDEX IF NOT EXISTS cached_mailboxes_role_id ON cached_mailboxes(role,id);" +
@@ -233,7 +239,7 @@ public class CacheDatabase : Object, AccountStore {
                                MailRuleAction action, string value = "") throws MailError {
         string clean_name = name.strip (); string clean_pattern = pattern.strip ();
         if (clean_name == "" || clean_pattern == "") throw new MailError.STORAGE ("Rule name and match text are required");
-        if (action == MailRuleAction.LABEL && value.strip () == "") throw new MailError.STORAGE ("Enter a label for this rule");
+        if ((action == MailRuleAction.LABEL || action == MailRuleAction.MOVE) && value.strip () == "") throw new MailError.STORAGE ("Enter a value for this rule");
         Sqlite.Statement statement;
         if (database.prepare_v2 ("INSERT INTO mail_rules(name,account_id,field,pattern,action,value,enabled) VALUES(?,?,?,?,?,?,1)", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare mail-rule storage");
@@ -249,6 +255,104 @@ public class CacheDatabase : Object, AccountStore {
             throw new MailError.STORAGE ("Could not prepare mail-rule deletion");
         statement.bind_int64 (1, id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete the mail rule");
+    }
+
+    public Gee.ArrayList<SmartMailbox> list_smart_mailboxes () throws MailError {
+        var result = new Gee.ArrayList<SmartMailbox> (); Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT id,name,query FROM smart_mailboxes ORDER BY name COLLATE NOCASE", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Smart Mailbox loading");
+        int row; while ((row = statement.step ()) == Sqlite.ROW)
+            result.add (new SmartMailbox (statement.column_int64 (0), statement.column_text (1), statement.column_text (2)));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Smart Mailboxes");
+        return result;
+    }
+
+    public SmartMailbox? find_smart_mailbox (int64 id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT id,name,query FROM smart_mailboxes WHERE id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Smart Mailbox lookup");
+        statement.bind_int64 (1, id);
+        int row = statement.step ();
+        if (row == Sqlite.DONE) return null;
+        if (row != Sqlite.ROW) throw new MailError.STORAGE ("Could not find Smart Mailbox");
+        return new SmartMailbox (statement.column_int64 (0), statement.column_text (1), statement.column_text (2));
+    }
+
+    public SmartMailbox add_smart_mailbox (string name, string query) throws MailError {
+        var clean_name = name.strip (); var clean_query = query.strip ();
+        if (clean_name == "" || clean_query == "") throw new MailError.STORAGE ("Smart Mailbox name and search are required");
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("INSERT INTO smart_mailboxes(name,query) VALUES(?,?) RETURNING id", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Smart Mailbox storage");
+        statement.bind_text (1, clean_name); statement.bind_text (2, clean_query);
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not save Smart Mailbox");
+        return new SmartMailbox (statement.column_int64 (0), clean_name, clean_query);
+    }
+
+    public void remove_smart_mailbox (int64 id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("DELETE FROM smart_mailboxes WHERE id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Smart Mailbox deletion");
+        statement.bind_int64 (1, id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete Smart Mailbox");
+    }
+
+    public Gee.ArrayList<CalendarEvent> list_calendar_events () throws MailError {
+        var result = new Gee.ArrayList<CalendarEvent> (); Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT id,title,starts_at,ends_at,location,notes FROM calendar_events ORDER BY starts_at", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare calendar loading");
+        int row; while ((row = statement.step ()) == Sqlite.ROW)
+            result.add (new CalendarEvent (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
+                statement.column_text (3), statement.column_text (4), statement.column_text (5)));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load calendar events");
+        return result;
+    }
+
+    public void add_calendar_event (string title, string starts_at, string ends_at,
+                                    string location = "", string notes = "") throws MailError {
+        if (title.strip () == "" || starts_at.strip () == "") throw new MailError.STORAGE ("Event title and start are required");
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("INSERT INTO calendar_events(title,starts_at,ends_at,location,notes) VALUES(?,?,?,?,?)", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare calendar event storage");
+        statement.bind_text (1, title.strip ()); statement.bind_text (2, starts_at.strip ()); statement.bind_text (3, ends_at.strip ());
+        statement.bind_text (4, location.strip ()); statement.bind_text (5, notes.strip ());
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save calendar event");
+    }
+
+    public void remove_calendar_event (int64 id) throws MailError {
+        delete_bound_int64 ("DELETE FROM calendar_events WHERE id=?", id);
+    }
+
+    public Gee.ArrayList<MailTask> list_mail_tasks () throws MailError {
+        var result = new Gee.ArrayList<MailTask> (); Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT id,title,due_at,completed,notes,message_id FROM mail_tasks ORDER BY completed,due_at", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task loading");
+        int row; while ((row = statement.step ()) == Sqlite.ROW)
+            result.add (new MailTask (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
+                statement.column_int (3) != 0, statement.column_text (4), statement.column_text (5)));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load tasks");
+        return result;
+    }
+
+    public void add_mail_task (string title, string due_at, string notes = "", string message_id = "") throws MailError {
+        if (title.strip () == "") throw new MailError.STORAGE ("Task title is required");
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("INSERT INTO mail_tasks(title,due_at,completed,notes,message_id) VALUES(?,?,0,?,?)", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task storage");
+        statement.bind_text (1, title.strip ()); statement.bind_text (2, due_at.strip ()); statement.bind_text (3, notes.strip ()); statement.bind_text (4, message_id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save task");
+    }
+
+    public void set_mail_task_completed (int64 id, bool completed) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("UPDATE mail_tasks SET completed=? WHERE id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task update");
+        statement.bind_int (1, completed ? 1 : 0); statement.bind_int64 (2, id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update task");
+    }
+
+    public void remove_mail_task (int64 id) throws MailError {
+        delete_bound_int64 ("DELETE FROM mail_tasks WHERE id=?", id);
     }
 
     public void snooze_message (string message_id, int64 until_unix) throws MailError {
@@ -807,6 +911,15 @@ public class CacheDatabase : Object, AccountStore {
             throw new MailError.STORAGE ("Could not remove account data");
     }
 
+    private void delete_bound_int64 (string sql, int64 value) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare account data removal");
+        statement.bind_int64 (1, value);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not remove account data");
+    }
+
     public void cache_message (Message message) throws MailError {
         execute ("BEGIN IMMEDIATE");
         try {
@@ -817,21 +930,28 @@ public class CacheDatabase : Object, AccountStore {
 
     private void cache_message_row (Message message) throws MailError {
         reconcile_moved_message_identity (message);
+        unowned Sqlite.Statement message_statement;
+        Sqlite.Statement? owned_message_statement = null;
+        if (bulk_sync_mode && bulk_message_statement != null)
+            message_statement = bulk_message_statement;
+        else {
+            owned_message_statement = prepare_message_statement ();
+            message_statement = owned_message_statement;
+        }
+        message_statement.bind_text (1, message.id); message_statement.bind_text (2, message.mailbox_id); message_statement.bind_text (3, message.sender_name); message_statement.bind_text (4, message.sender_address);
+        message_statement.bind_text (5, message.recipients); message_statement.bind_text (6, message.subject); message_statement.bind_text (7, message.preview); message_statement.bind_text (8, message.body); message_statement.bind_text (9, message.timestamp);
+        message_statement.bind_int (10, message.unread ? 1 : 0); message_statement.bind_int (11, message.flagged ? 1 : 0); message_statement.bind_int (12, message.has_attachment ? 1 : 0);
+        message_statement.bind_int (13, (int) message.conversation_count); message_statement.bind_int (14, message.has_remote_content ? 1 : 0); message_statement.bind_text (15, message.body_html);
+        message_statement.bind_text (16, message.account_id); message_statement.bind_text (17, message.remote_uid);
+        message_statement.bind_text (18, message.internet_message_id);
+        message_statement.bind_text (19, message.in_reply_to); message_statement.bind_text (20, message.references);
+        message_statement.bind_int64 (21, message.date_unix);
+        message_statement.bind_text (22, message.cc_recipients);
+        message_statement.bind_text (23, message.security_status);
+        message_statement.bind_text (24, message.flag_color);
+        if (message_statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not cache the message");
+        if (bulk_sync_mode) { message_statement.reset (); message_statement.clear_bindings (); }
         Sqlite.Statement statement;
-        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,content_extracted=1";
-        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare message caching");
-        statement.bind_text (1, message.id); statement.bind_text (2, message.mailbox_id); statement.bind_text (3, message.sender_name); statement.bind_text (4, message.sender_address);
-        statement.bind_text (5, message.recipients); statement.bind_text (6, message.subject); statement.bind_text (7, message.preview); statement.bind_text (8, message.body); statement.bind_text (9, message.timestamp);
-        statement.bind_int (10, message.unread ? 1 : 0); statement.bind_int (11, message.flagged ? 1 : 0); statement.bind_int (12, message.has_attachment ? 1 : 0);
-        statement.bind_int (13, (int) message.conversation_count); statement.bind_int (14, message.has_remote_content ? 1 : 0); statement.bind_text (15, message.body_html);
-        statement.bind_text (16, message.account_id); statement.bind_text (17, message.remote_uid);
-        statement.bind_text (18, message.internet_message_id);
-        statement.bind_text (19, message.in_reply_to); statement.bind_text (20, message.references);
-        statement.bind_int64 (21, message.date_unix);
-        statement.bind_text (22, message.cc_recipients);
-        statement.bind_text (23, message.security_status);
-        statement.bind_text (24, message.flag_color);
-        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not cache the message");
         if (database.prepare_v2 ("DELETE FROM message_fts WHERE id=?", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not update the search index");
         statement.bind_text (1, message.id); if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update the search index");
         if (database.prepare_v2 ("INSERT INTO message_fts(id,sender,recipients,subject,body) VALUES(?,?,?,?,?)", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare the search index");
@@ -863,6 +983,13 @@ public class CacheDatabase : Object, AccountStore {
         }
     }
 
+    private Sqlite.Statement prepare_message_statement () throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,content_extracted=1";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare message caching");
+        return statement;
+    }
+
     private void reconcile_moved_message_identity (Message incoming) throws MailError {
         if (incoming.account_id == "" || incoming.remote_uid == "") return;
         Sqlite.Statement statement;
@@ -886,6 +1013,8 @@ public class CacheDatabase : Object, AccountStore {
     public void store_sync_result (MailSyncResult snapshot) throws MailError {
         execute ("BEGIN IMMEDIATE");
         try {
+            bulk_sync_mode = true;
+            bulk_message_statement = prepare_message_statement ();
             if (snapshot.folder_inventory_complete) prune_missing_mailboxes (snapshot);
             foreach (var mailbox in snapshot.mailboxes) cache_mailbox_row (mailbox);
             foreach (var mailbox in snapshot.mailboxes) {
@@ -895,8 +1024,13 @@ public class CacheDatabase : Object, AccountStore {
             foreach (var message in snapshot.messages) cache_message_row (message);
             foreach (var state in snapshot.states) update_remote_message_state (state);
             reapply_pending_state (snapshot.account_id);
+            bulk_message_statement = null; bulk_sync_mode = false;
             execute ("COMMIT");
-        } catch (MailError error) { try { execute ("ROLLBACK"); } catch (MailError ignored) { } throw error; }
+        } catch (MailError error) {
+            bulk_message_statement = null; bulk_sync_mode = false;
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
     }
 
     private void prune_missing_mailboxes (MailSyncResult snapshot) throws MailError {

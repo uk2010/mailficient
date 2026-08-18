@@ -18,6 +18,8 @@ public class MessageList : Gtk.Box {
     private MessageSortMode sort_mode = MessageSortMode.NEWEST;
     private bool suppress_selection;
     private bool local_queue;
+    private bool mailbox_loaded;
+    private bool suspended_for_calendar;
     private Gtk.Label mailbox_title = new Gtk.Label ("Inbox");
     private Gtk.Label message_count = new Gtk.Label ("");
     private Gtk.ToggleButton unread_filter = new Gtk.ToggleButton ();
@@ -27,6 +29,9 @@ public class MessageList : Gtk.Box {
     public MessageList (MailRepository repository, MailSearchService search_service) {
         Object (orientation: Gtk.Orientation.VERTICAL);
         this.repository = repository; this.search_service = search_service;
+        hexpand = true; vexpand = true;
+        halign = Gtk.Align.FILL; valign = Gtk.Align.FILL;
+        set_size_request (0, -1);
         add_css_class ("message-list");
         var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
         header.add_css_class ("message-list-header");
@@ -85,8 +90,20 @@ public class MessageList : Gtk.Box {
     }
 
     public void show_mailbox (Mailbox mailbox) {
+        int64 started = DebugTrace.mark ();
+        bool already_loaded = mailbox_loaded && mailbox_id == mailbox.id && query == "" && !unread_filter.active;
+        DebugTrace.log ("message-list", "show_mailbox begin mailbox=%s old=%s already_loaded=%s".printf (
+            mailbox.id, mailbox_id, already_loaded.to_string ()));
         mailbox_id = mailbox.id; mailbox_name = mailbox.name; mailbox_title.label = mailbox.name;
-        query = ""; unread_filter.active = false; reload (false);
+        query = "";
+        if (unread_filter.active) unread_filter.active = false;
+        if (already_loaded) {
+            content_stack.visible_child_name = model != null && model.get_n_items () > 0 ? "messages" : "empty";
+            DebugTrace.duration ("message-list", "show_mailbox cached_complete", started);
+            return;
+        }
+        reload (false);
+        DebugTrace.duration ("message-list", "show_mailbox complete", started);
     }
 
     public void search (string value) {
@@ -98,6 +115,22 @@ public class MessageList : Gtk.Box {
     }
 
     public void refresh () { reload (); }
+
+    // Keep the mailbox model and selection alive, but let Gtk.ListView release
+    // its recycled row widgets while another full-page view is active. This
+    // avoids making calendar navigation pay for inbox layout work that is not
+    // visible, especially for large mailboxes.
+    public void suspend_for_calendar () {
+        if (suspended_for_calendar) return;
+        suspended_for_calendar = true;
+        list.model = null;
+    }
+
+    public void resume_after_calendar () {
+        if (!suspended_for_calendar) return;
+        suspended_for_calendar = false;
+        list.model = selection;
+    }
     public void refresh_preserving_selection (string preferred_id = "") {
         // An unread-only list is a reading queue. Repository changes caused by
         // opening its selected message must not immediately remove that row
@@ -211,6 +244,9 @@ public class MessageList : Gtk.Box {
 
     private void reload (bool notify_selection = true, bool preserve_selection = false,
                          string preferred_id = "") {
+        int64 started = DebugTrace.mark ();
+        DebugTrace.log ("message-list", "reload begin mailbox=%s query=%s notify=%s preserve=%s preferred=%s".printf (
+            mailbox_id, query, notify_selection.to_string (), preserve_selection.to_string (), preferred_id));
         // A bulk selection owns the selection model; preserving the reader's
         // single-message id must not collapse that range.
         string preserve_id = select_multiple.active ? "" : preferred_id;
@@ -228,6 +264,7 @@ public class MessageList : Gtk.Box {
                 "dialog-warning-symbolic");
             warning ("Cached-mail search failed: %s", error.message); return;
         }
+        DebugTrace.log ("message-list", "reload count=%d mailbox=%s".printf (total, mailbox_id));
         bool unread_only = unread_filter.active;
         string current_query = query;
         string current_mailbox = mailbox_id;
@@ -242,6 +279,7 @@ public class MessageList : Gtk.Box {
                 return new Gee.ArrayList<Message> ();
             }
         });
+        mailbox_loaded = true;
         mailbox_title.label = query == "" ? mailbox_name : "Search Results";
         message_count.label = total == 1 ? "1 message" : "%d messages".printf (total);
         local_queue = mailbox_id == CachedMailRepository.LOCAL_DRAFTS_ID ||
@@ -269,6 +307,7 @@ public class MessageList : Gtk.Box {
             no_messages ();
         }
         suppress_selection = false;
+        DebugTrace.duration ("message-list", "reload complete", started);
     }
 
     private void configure_selection (bool select_first = false) {

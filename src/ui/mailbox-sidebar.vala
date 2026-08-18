@@ -82,11 +82,87 @@ public class MailboxSidebar : Gtk.Box {
 
     private void append_mailbox (Gtk.ListBox owner, Mailbox mailbox) {
         var row = create_row (mailbox); owner.append (row);
+        if (owner == list) add_favorite_drag_and_drop (row, mailbox.id);
         // Demo mode also mirrors its folders below Favorites. Prefer the first
         // visible occurrence so restoring Inbox selects the favorite row.
         if (!mailbox_rows.has_key (mailbox.id)) {
             mailbox_rows[mailbox.id] = row; mailbox_owners[mailbox.id] = owner;
         }
+    }
+
+    private void add_favorite_drag_and_drop (Gtk.ListBoxRow row, string mailbox_id) {
+        var source = new Gtk.DragSource ();
+        source.actions = Gdk.DragAction.MOVE;
+        source.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        source.prepare.connect ((x, y) => {
+            Value value = Value (typeof (string));
+            value.set_string (mailbox_id);
+            return new Gdk.ContentProvider.for_value (value);
+        });
+        row.add_controller (source);
+
+        var target = new Gtk.DropTarget (typeof (string), Gdk.DragAction.MOVE);
+        target.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        target.drop.connect ((value, x, y) => {
+            string? dragged_id = value.get_string ();
+            if (dragged_id == null || dragged_id == mailbox_id) return false;
+            reorder_favorite (dragged_id, mailbox_id, y > row.get_height () / 2.0);
+            return true;
+        });
+        row.add_controller (target);
+    }
+
+    private Gee.ArrayList<string> favorite_order () {
+        var result = new Gee.ArrayList<string> ();
+        try {
+            foreach (var id in cache.preference ("favorite-mailbox-order", "").split ("\n")) {
+                var cleaned = id.strip ();
+                if (cleaned != "" && !result.contains (cleaned)) result.add (cleaned);
+            }
+        } catch (Error error) {
+            warning ("Could not load favorite mailbox order: %s", error.message);
+        }
+        return result;
+    }
+
+    private void save_favorite_order (Gee.List<string> order) {
+        var serialized = new StringBuilder ();
+        foreach (var id in order) {
+            if (serialized.len > 0) serialized.append_c ('\n');
+            serialized.append (id);
+        }
+        try { cache.set_preference ("favorite-mailbox-order", serialized.str); }
+        catch (Error error) { warning ("Could not save favorite mailbox order: %s", error.message); }
+    }
+
+    private Gee.ArrayList<string> visible_favorite_ids () {
+        var result = new Gee.ArrayList<string> ();
+        for (int index = 0; ; index++) {
+            var row = list.get_row_at_index (index);
+            if (row == null) break;
+            var mailbox = row.get_data<Mailbox> ("mailbox");
+            if (mailbox != null) result.add (mailbox.id);
+        }
+        return result;
+    }
+
+    private void reorder_favorite (string dragged_id, string target_id, bool after_target) {
+        var ids = visible_favorite_ids ();
+        int dragged_index = -1;
+        int target_index = -1;
+        for (int index = 0; index < ids.size; index++) {
+            if (ids[index] == dragged_id) dragged_index = index;
+            if (ids[index] == target_id) target_index = index;
+        }
+        if (dragged_index < 0 || target_index < 0 || dragged_index == target_index) return;
+
+        var value = ids.remove_at (dragged_index);
+        if (dragged_index < target_index) target_index--;
+        int insertion_index = target_index + (after_target ? 1 : 0);
+        insertion_index = int.max (0, int.min (insertion_index, ids.size));
+        ids.insert (insertion_index, value);
+        save_favorite_order (ids);
+        reload (false);
     }
 
     private void announce_selection (Mailbox mailbox) {
@@ -193,8 +269,35 @@ public class MailboxSidebar : Gtk.Box {
             if (serialized.len > 0) serialized.append_c ('\n');
             serialized.append (value);
         }
-        try { cache.set_preference ("favorite-mailboxes", serialized.str); reload (false); }
+        var order = favorite_order ();
+        if (favorite && !order.contains (id)) order.add (id);
+        if (!favorite) order.remove (id);
+        try {
+            cache.set_preference ("favorite-mailboxes", serialized.str);
+            save_favorite_order (order);
+            reload (false);
+        }
         catch (Error error) { warning ("Could not save favorite mailboxes: %s", error.message); }
+    }
+
+    private void append_favorites (Gee.List<Mailbox> mailboxes, Gee.HashSet<string> favorites, bool demo) {
+        var eligible = new Gee.HashMap<string, Mailbox> ();
+        foreach (var mailbox in mailboxes)
+            if (demo || mailbox.account_id == "" || favorites.contains (mailbox.id))
+                eligible[mailbox.id] = mailbox;
+
+        var appended = new Gee.HashSet<string> ();
+        foreach (var id in favorite_order ()) {
+            var mailbox = eligible[id];
+            if (mailbox != null) {
+                append_mailbox (list, mailbox);
+                appended.add (id);
+            }
+        }
+        foreach (var mailbox in mailboxes) {
+            if (eligible.has_key (mailbox.id) && !appended.contains (mailbox.id))
+                append_mailbox (list, mailbox);
+        }
     }
 
     private void add_account_group (string account_id, string display_name, string email,
@@ -264,22 +367,21 @@ public class MailboxSidebar : Gtk.Box {
     }
 
     public void reload (bool announce = true) {
+        int64 started = DebugTrace.mark ();
+        DebugTrace.log ("sidebar", "reload begin announce=%s selected=%s".printf (announce.to_string (), selected_mailbox_id));
         suppress_announcement = !announce;
         string restore_id = selected_mailbox_id;
         Gtk.ListBoxRow? existing;
         while ((existing = list.get_row_at_index (0)) != null) list.remove (existing);
         mailbox_rows.clear (); mailbox_owners.clear (); account_lists.clear ();
         var mailboxes = repository.list_mailboxes ();
+        DebugTrace.log ("sidebar", "repository.list_mailboxes returned count=%d".printf (mailboxes.size));
         try {
             var accounts = cache.list_accounts ();
             var favorites = favorite_ids ();
             bool demo = accounts.size == 0 && Environment.get_variable ("MAILFICIENT_QA") == "1" &&
                 Environment.get_variable ("MAILFICIENT_QA_NO_DEMO") != "1";
-            foreach (var mailbox in mailboxes)
-                if (demo || mailbox.account_id == "") append_mailbox (list, mailbox);
-            if (!demo) foreach (var mailbox in mailboxes)
-                if (mailbox.account_id != "" && favorites.contains (mailbox.id))
-                    append_mailbox (list, mailbox);
+            append_favorites (mailboxes, favorites, demo);
             if (demo) add_account_group (DemoMailRepository.ACCOUNT_ID, "Demo Account", "alex@example.com", mailboxes, false);
             else foreach (var account in accounts)
                 add_account_group (account.id, account.display_name, account.email, mailboxes, true);
@@ -288,10 +390,12 @@ public class MailboxSidebar : Gtk.Box {
         }
         if (restore_id != "" && select_mailbox (restore_id)) {
             suppress_announcement = false;
+            DebugTrace.duration ("sidebar", "reload restored complete", started);
             return;
         }
         var first = list.get_row_at_index (0); if (first != null) list.select_row (first);
         suppress_announcement = false;
+        DebugTrace.duration ("sidebar", "reload complete", started);
     }
 
     public bool select_mailbox (string id) {

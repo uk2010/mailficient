@@ -1,6 +1,43 @@
 .mail-sidebar { background: color-mix(in srgb, var(--window-bg-color) 94%, var(--accent-bg-color)); }
+.mail-header-bar, .apple-toolbar, .apple-toolbar-search, .message-pane, .message-list, .message-list-header,
+.calendar-workspace, .calendar-month-column, .calendar-detail-rail, .calendar-detail-card,
+.responsive-preview, .responsive-preview > widget {
+  min-width: 0;
+}
+.mail-header-bar, .apple-toolbar, .message-pane, .message-list, .reading-pane,
+.responsive-preview { min-height: 0; }
 .mail-sidebar row { border-radius: 8px; margin: 1px 8px; padding: 2px; }
 .mail-sidebar row:selected { background: color-mix(in srgb, var(--accent-bg-color) 22%, transparent); color: inherit; }
+button.calendar-selected-day,
+button.calendar-selected-day:hover,
+button.calendar-selected-day:active {
+  background: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+button.calendar-selected-day label { color: var(--accent-fg-color); }
+.calendar-day-number.calendar-selected-day { min-width: 30px; padding: 5px 8px; border-radius: 999px; background: var(--accent-bg-color); color: var(--accent-fg-color); }
+.calendar-panel-reopen-controls { padding: 0 0 4px; }
+.calendar-workspace { background: var(--view-bg-color); }
+.calendar-month-column { min-width: 0; }
+.calendar-detail-rail { min-width: 280px; padding-left: 0; border-left: 1px solid alpha(currentColor, .12); }
+.calendar-detail-card { min-height: 0; margin-right: 18px; padding: 12px 0 0; border: 1px solid alpha(currentColor, .14); border-left-width: 3px; border-radius: 10px; background: alpha(currentColor, .025); }
+.calendar-event-card { border-left-color: #32a8ff; }
+.calendar-task-card { border-left-color: #63d86d; }
+.calendar-detail-card > box:first-child { padding: 0 12px; }
+.calendar-detail-card scrolledwindow { border-top: 1px solid alpha(currentColor, .10); }
+.calendar-detail-card .boxed-list { background: transparent; }
+.calendar-detail-card .boxed-list > row { background: transparent; border-bottom: 1px solid alpha(currentColor, .08); }
+.calendar-event-row { min-height: 54px; }
+.calendar-event-dot { min-width: 8px; min-height: 8px; margin-top: 7px; border-radius: 999px; background: #32a8ff; }
+.calendar-task-card checkbutton { margin-left: 3px; }
+.calendar-month-grid { border: 1px solid alpha(currentColor, .14); border-radius: 10px; background: alpha(currentColor, .025); }
+.calendar-month-grid > widget { border: 1px solid alpha(currentColor, .10); }
+.calendar-month-grid .calendar-day-cell { min-height: 76px; padding: 12px 14px; border: 1px solid alpha(currentColor, .10); background: alpha(currentColor, .018); }
+.calendar-month-grid .calendar-day-cell:hover { background: alpha(var(--accent-bg-color), .10); }
+.calendar-month-grid .calendar-day-cell-outside { background: alpha(currentColor, .008); opacity: .42; }
+.calendar-month-grid .calendar-day-number { min-height: 26px; min-width: 30px; padding: 3px 7px; border-radius: 999px; }
+.calendar-month-grid .calendar-event-chip { padding: 2px 5px; border-radius: 5px; background: alpha(var(--accent-bg-color), .18); color: var(--accent-fg-color); font-size: .82em; }
+.calendar-month-grid .heading { padding: 8px 4px; color: alpha(currentColor, .72); font-size: .86em; }
 .mail-sidebar .account-folders { margin: 5px 0 2px 10px; background: transparent; }
 .mail-sidebar expander > title { padding: 2px 0 4px; }
 .pane-resize-handle { background: transparent; transition: background 120ms ease; }
@@ -237,7 +274,7 @@ menubutton.app-menu-button > button:hover { background: alpha(currentColor, .12)
 .sender-avatar { background: color-mix(in srgb, var(--accent-bg-color) 70%, var(--window-bg-color)); color: var(--accent-fg-color); font-weight: 700; }
 .preview { color: alpha(currentColor, .62); }
 .timestamp { color: alpha(currentColor, .58); font-size: .86em; }
-.reading-pane { background: var(--view-bg-color); }
+.reading-pane { min-width: 0; background: var(--view-bg-color); }
 .message-header { padding: 24px 30px 14px; }
 .message-subject { font-size: 1.55em; font-weight: 700; }
 .message-body { padding: 8px 30px 40px; font-size: 1.04em; }

@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.1.13', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.1.14', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 cc = meson.get_compiler('c')
 
@@ -41,6 +41,9 @@ test_sources = files(
   'src/models/junk-rule.vala',
   'src/models/mail-label.vala',
   'src/models/mail-rule.vala',
+  'src/models/smart-mailbox.vala',
+  'src/models/calendar-event.vala',
+  'src/models/mail-task.vala',
   'src/models/mail-template.vala',
   'src/models/vacation-settings.vala',
   'src/mail/mail-repository.vala',
@@ -88,6 +91,7 @@ test_sources = files(
   'src/storage/account-store.vala',
   'src/storage/local-data-migration.vala',
   'src/storage/mail-settings-store.vala',
+  'src/utils/debug-trace.vala',
 )
 core_tests = executable('core-tests', test_sources,
   include_directories: include_directories('src'),

@@ -7,28 +7,38 @@ public class PaneResizeHandle : Gtk.Box {
 
     public PaneResizeHandle (string accessible_name) {
         Object (orientation: Gtk.Orientation.VERTICAL);
-        set_size_request (7, -1); add_css_class ("pane-resize-handle");
+        set_size_request (12, -1); add_css_class ("pane-resize-handle");
         tooltip_text = "Drag to resize panes"; Accessibility.label (this, accessible_name);
         accessible_role = Gtk.AccessibleRole.SEPARATOR; set_cursor_from_name ("col-resize");
         var separator = new Gtk.Separator (Gtk.Orientation.VERTICAL); separator.vexpand = true;
         separator.halign = Gtk.Align.CENTER; append (separator);
-        var drag = new Gtk.GestureDrag ();
-        drag.drag_begin.connect ((x, y) => {
-            fallback_start_x = x;
-            double surface_x = event_surface_x (drag, x);
-            drag_started (surface_x);
-        });
-        drag.drag_update.connect ((offset_x, offset_y) =>
-            dragged (event_surface_x (drag, fallback_start_x + offset_x)));
-        drag.drag_end.connect ((offset_x, offset_y) => drag_finished ());
-        add_controller (drag);
     }
 
-    private static double event_surface_x (Gtk.Gesture gesture, double fallback) {
-        var event = gesture.get_current_event ();
-        if (event == null) return fallback;
-        double x; double y;
-        return event.get_position (out x, out y) ? x : fallback;
+    public void bind_drag_to (Gtk.Widget coordinate_widget) {
+        var drag = new Gtk.GestureDrag ();
+        drag.propagation_phase = Gtk.PropagationPhase.BUBBLE;
+        bool active = false;
+        drag.drag_begin.connect ((x, y) => {
+            // The controller lives on the stable sidebar container, so its
+            // coordinates do not move when the divider is resized. Only claim
+            // drags that begin on the visible handle at the container edge.
+            if (coordinate_widget.get_width () <= 0 ||
+                x < coordinate_widget.get_width () - get_width () - 8) {
+                active = false;
+                drag.set_state (Gtk.EventSequenceState.DENIED);
+                return;
+            }
+            active = true;
+            fallback_start_x = x;
+            drag_started (fallback_start_x);
+        });
+        drag.drag_update.connect ((offset_x, offset_y) =>
+            { if (active) dragged (fallback_start_x + offset_x); });
+        drag.drag_end.connect ((offset_x, offset_y) => {
+            if (active) drag_finished ();
+            active = false;
+        });
+        coordinate_widget.add_controller (drag);
     }
 }
 }

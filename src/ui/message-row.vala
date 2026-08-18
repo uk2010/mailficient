@@ -4,6 +4,7 @@ public class MessageRow : Gtk.Box {
     private weak Gtk.SelectionModel? context_selection;
     private uint model_position;
     private ulong selection_handler;
+    private MenuItem? read_menu_item;
 
     public MessageRow (Message message, Gtk.SelectionModel? context_selection = null,
                        uint model_position = 0, bool multiple = false) {
@@ -75,7 +76,8 @@ public class MessageRow : Gtk.Box {
         var menu = new Menu (); menu.append ("Reply", "win.reply"); menu.append ("Reply All", "win.reply-all");
         menu.append ("Forward", "win.forward"); menu.append ("Archive", "win.archive");
         menu.append ("Move or Copy…", "win.show-move");
-        menu.append ("Move to Trash", "win.trash"); menu.append ("Mark Read or Unread", "win.toggle-read");
+        read_menu_item = new MenuItem (message.unread ? "Mark as Read" : "Mark as Unread", "win.toggle-read");
+        menu.append_item (read_menu_item);
         menu.append ("Flag or Unflag", "win.flag");
         var flag_colors = new Menu ();
         flag_colors.append ("Orange", "win.set-flag-color::orange");
@@ -114,6 +116,7 @@ public class MessageRow : Gtk.Box {
     private void update_unread_style () {
         if (message.unread) add_css_class ("unread");
         else remove_css_class ("unread");
+        if (read_menu_item != null) read_menu_item.set_label (message.unread ? "Mark as Read" : "Mark as Unread");
     }
 
     private static string flag_color_label (string color) {

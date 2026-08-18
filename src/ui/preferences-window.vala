@@ -2,6 +2,7 @@ namespace Mailficient {
 public class PreferencesWindow : Adw.PreferencesDialog {
     public signal void account_saved (AccountSettings account);
     public signal void accounts_changed ();
+    public signal void smart_mailboxes_changed ();
     private CacheDatabase cache;
     private MailSettingsStore settings;
     private RemoteContentPolicy remote_content_policy;
@@ -27,6 +28,10 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     private Adw.ComboRow rule_action_row;
     private Adw.PreferencesGroup rules_group;
     private Gee.ArrayList<Adw.ActionRow> rule_rows = new Gee.ArrayList<Adw.ActionRow> ();
+    private Adw.EntryRow smart_name_row;
+    private Adw.EntryRow smart_query_row;
+    private Adw.PreferencesGroup smart_group;
+    private Gee.ArrayList<Adw.ActionRow> smart_rows = new Gee.ArrayList<Adw.ActionRow> ();
 
     public PreferencesWindow (CacheDatabase cache, MailSettingsStore settings,
                               RemoteContentPolicy remote_content_policy,
@@ -45,6 +50,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         var composing_page = build_composing_page (); composing_page.name = "composing"; add (composing_page);
         var junk_page = build_junk_page (); junk_page.name = "junk"; add (junk_page);
         var rules_page = build_rules_page (); rules_page.name = "rules"; add (rules_page);
+        var smart_page = build_smart_mailboxes_page (); smart_page.name = "smart-mailboxes"; add (smart_page);
         var vacation_page = build_vacation_page (); vacation_page.name = "vacation"; add (vacation_page);
         var privacy_page = build_privacy_page (); privacy_page.name = "privacy"; add (privacy_page);
         load_identities ();
@@ -53,7 +59,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
             if (page_name != null && page_name != "") settings.preferences_page = page_name;
         });
         string? qa_page = Environment.get_variable ("MAILFICIENT_QA_PREFERENCES");
-        if (qa_page == "accounts" || qa_page == "composing" || qa_page == "junk" || qa_page == "rules" || qa_page == "vacation" || qa_page == "privacy")
+        if (qa_page == "accounts" || qa_page == "composing" || qa_page == "junk" || qa_page == "rules" || qa_page == "smart-mailboxes" || qa_page == "vacation" || qa_page == "privacy")
             set_visible_page_name (qa_page);
         else
             set_visible_page_name (settings.preferences_page);
@@ -260,12 +266,14 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         add.description = "Rules run locally as new messages are synchronized.";
         rule_name_row = new Adw.EntryRow (); rule_name_row.title = "Rule name"; add.add (rule_name_row);
         var fields = new Gtk.StringList (null); fields.append ("Sender contains"); fields.append ("Recipient contains"); fields.append ("Subject contains");
+        fields.append ("Message body contains"); fields.append ("Has attachment"); fields.append ("Is unread"); fields.append ("Is flagged");
         rule_field_row = new Adw.ComboRow (); rule_field_row.title = "Match"; rule_field_row.model = fields; add.add (rule_field_row);
         rule_pattern_row = new Adw.EntryRow (); rule_pattern_row.title = "Text to match"; add.add (rule_pattern_row);
         var actions = new Gtk.StringList (null); actions.append ("Mark as read"); actions.append ("Flag");
         actions.append ("Move to Archive"); actions.append ("Move to Trash"); actions.append ("Apply label");
+        actions.append ("Mark as unread"); actions.append ("Unflag"); actions.append ("Move to mailbox ID");
         rule_action_row = new Adw.ComboRow (); rule_action_row.title = "Action"; rule_action_row.model = actions; add.add (rule_action_row);
-        rule_value_row = new Adw.EntryRow (); rule_value_row.title = "Label name (for Apply label)"; add.add (rule_value_row);
+        rule_value_row = new Adw.EntryRow (); rule_value_row.title = "Label name or mailbox ID (when required)"; add.add (rule_value_row);
         var create = new Gtk.Button.with_label ("Add Rule"); create.halign = Gtk.Align.END;
         create.add_css_class ("suggested-action"); create.clicked.connect (add_mail_rule); add.add (create);
         page.add (add);
@@ -286,8 +294,8 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         try {
             foreach (var rule in cache.list_mail_rules ()) {
                 var row = new Adw.ActionRow (); row.title = rule.name;
-                string[] actions = { "Mark read", "Flag", "Archive", "Trash", "Label " + rule.value };
-                row.subtitle = "%s contains “%s” → %s".printf (rule.field.to_string ().replace ("MAIL_RULE_FIELD_", "").down (),
+                string[] actions = { "Mark read", "Flag", "Archive", "Trash", "Label " + rule.value, "Mark unread", "Unflag", "Move to " + rule.value };
+                row.subtitle = "%s matches “%s” → %s".printf (rule.field.to_string ().replace ("MAIL_RULE_FIELD_", "").down (),
                     rule.pattern, actions[(int) rule.action]);
                 var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic"); remove.valign = Gtk.Align.CENTER;
                 Accessibility.label (remove, "Delete rule " + rule.name);
@@ -296,6 +304,38 @@ public class PreferencesWindow : Adw.PreferencesDialog {
                 row.add_suffix (remove); rules_group.add (row); rule_rows.add (row);
             }
         } catch (Error error) { warning ("Could not load mail rules: %s", error.message); }
+    }
+
+    private Adw.PreferencesPage build_smart_mailboxes_page () {
+        var page = new Adw.PreferencesPage (); page.title = "Smart Mailboxes"; page.icon_name = "view-filter-symbolic";
+        var add = new Adw.PreferencesGroup (); add.title = "New Smart Mailbox";
+        add.description = "Saved searches appear in the left column and update as mail changes.";
+        smart_name_row = new Adw.EntryRow (); smart_name_row.title = "Name"; add.add (smart_name_row);
+        smart_query_row = new Adw.EntryRow (); smart_query_row.title = "Search";
+        smart_query_row.text = "is:unread"; add.add (smart_query_row);
+        var create = new Gtk.Button.with_label ("Add Smart Mailbox"); create.halign = Gtk.Align.END;
+        create.add_css_class ("suggested-action"); create.clicked.connect (() => {
+            try {
+                cache.add_smart_mailbox (smart_name_row.text, smart_query_row.text);
+                smart_name_row.text = ""; smart_query_row.text = "is:unread"; reload_smart_mailboxes (); smart_mailboxes_changed ();
+            } catch (Error error) { warning ("Could not add Smart Mailbox: %s", error.message); }
+        }); add.add (create); page.add (add);
+        smart_group = new Adw.PreferencesGroup (); smart_group.title = "Saved Smart Mailboxes"; page.add (smart_group);
+        reload_smart_mailboxes (); return page;
+    }
+
+    private void reload_smart_mailboxes () {
+        foreach (var row in smart_rows) smart_group.remove (row); smart_rows.clear ();
+        try {
+            foreach (var smart in cache.list_smart_mailboxes ()) {
+                var row = new Adw.ActionRow (); row.title = smart.name; row.subtitle = smart.query;
+                var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic"); remove.valign = Gtk.Align.CENTER;
+                Accessibility.label (remove, "Delete Smart Mailbox " + smart.name);
+                remove.clicked.connect (() => { try { cache.remove_smart_mailbox (smart.id); reload_smart_mailboxes (); smart_mailboxes_changed (); }
+                    catch (Error error) { warning ("Could not remove Smart Mailbox: %s", error.message); } });
+                row.add_suffix (remove); smart_group.add (row); smart_rows.add (row);
+            }
+        } catch (Error error) { warning ("Could not load Smart Mailboxes: %s", error.message); }
     }
 
     private Adw.PreferencesPage build_vacation_page () {

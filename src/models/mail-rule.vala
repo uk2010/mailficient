@@ -1,6 +1,6 @@
 namespace Mailficient {
-public enum MailRuleField { SENDER, RECIPIENT, SUBJECT }
-public enum MailRuleAction { MARK_READ, FLAG, ARCHIVE, TRASH, LABEL }
+public enum MailRuleField { SENDER, RECIPIENT, SUBJECT, BODY, HAS_ATTACHMENT, IS_UNREAD, IS_FLAGGED }
+public enum MailRuleAction { MARK_READ, FLAG, ARCHIVE, TRASH, LABEL, MARK_UNREAD, UNFLAG, MOVE }
 
 public class MailRule : Object {
     public int64 id { get; construct; }
@@ -19,13 +19,25 @@ public class MailRule : Object {
     }
     public bool matches (Message message) {
         if (!enabled || (account_id != "" && account_id != message.account_id)) return false;
+        if (field == MailRuleField.HAS_ATTACHMENT)
+            return message.has_attachment == matches_bool (pattern, "attachment");
+        if (field == MailRuleField.IS_UNREAD)
+            return message.unread == matches_bool (pattern, "unread");
+        if (field == MailRuleField.IS_FLAGGED)
+            return message.flagged == matches_bool (pattern, "flagged");
         string haystack;
         switch (field) {
         case MailRuleField.RECIPIENT: haystack = message.recipients + " " + message.cc_recipients; break;
         case MailRuleField.SUBJECT: haystack = message.subject; break;
+        case MailRuleField.BODY: haystack = message.body + " " + message.preview; break;
         default: haystack = message.sender_name + " " + message.sender_address; break;
         }
         return haystack.down ().contains (pattern.down ());
+    }
+
+    private static bool matches_bool (string value, string positive) {
+        var normalized = value.strip ().down ();
+        return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == positive;
     }
 }
 }

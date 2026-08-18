@@ -14,9 +14,19 @@ public class HtmlMessageView : Gtk.Box {
     private WebKit.PrintOperation? print_operation;
     private bool document_loaded;
     private uint active_resources;
+    private uint width_fit_source;
+    private int layout_width;
+    // The reader automatically fits each message to its available width.
+    // Keep the user's browser-style zoom as a multiplier on top of that fit
+    // so resizing the pane does not erase Ctrl +/- adjustments.
+    private double user_zoom = 1.0;
+    private const double MIN_USER_ZOOM = 0.5;
+    private const double MAX_USER_ZOOM = 3.0;
 
     public HtmlMessageView () {
         Object (orientation: Gtk.Orientation.VERTICAL);
+        set_size_request (0, -1);
+        overflow = Gtk.Overflow.HIDDEN;
         var settings = new WebKit.Settings ();
         // The document sanitizer and CSP still prohibit message scripts. The
         // engine is enabled only so the app can query the laid-out height.
@@ -30,9 +40,13 @@ public class HtmlMessageView : Gtk.Box {
         web_view = new WebKit.WebView ();
         web_view.set_settings (settings);
         web_view.focusable = false;
-        web_view.hexpand = true;
+        web_view.hexpand = true; web_view.halign = Gtk.Align.FILL;
         web_view.vexpand = true;
         web_view.set_size_request (0, 360);
+        web_view.notify["width"].connect (() => {
+            if (document_loaded) queue_fit_to_width ();
+        });
+        hexpand = true; halign = Gtk.Align.FILL;
         permission_handler = web_view.permission_request.connect ((request) => {
             request.deny ();
             return true;
@@ -77,6 +91,22 @@ public class HtmlMessageView : Gtk.Box {
         append (web_view);
     }
 
+    public void constrain_width (int width) {
+        if (width <= 0 || web_view == null) return;
+        layout_width = width;
+        if (document_loaded) queue_fit_to_width ();
+    }
+
+    public void zoom_in () {
+        user_zoom = double.min (MAX_USER_ZOOM, user_zoom * 1.1);
+        queue_fit_to_width ();
+    }
+
+    public void zoom_out () {
+        user_zoom = double.max (MIN_USER_ZOOM, user_zoom / 1.1);
+        queue_fit_to_width ();
+    }
+
     public void display (string untrusted_html, bool allow_remote_content = false,
                          Gee.Iterable<Attachment>? attachments = null,
                          bool full_html_formatting = false,
@@ -89,6 +119,7 @@ public class HtmlMessageView : Gtk.Box {
             display_generation++;
             document_loaded = false;
             active_resources = 0;
+            web_view.zoom_level = 1.0;
             if (height_measurement != null) height_measurement.cancel ();
             height_measurement = null;
             // Start compactly, then fit the WebView to the document's actual
@@ -179,6 +210,28 @@ public class HtmlMessageView : Gtk.Box {
         var cancellable = new Cancellable ();
         height_measurement = cancellable;
         try {
+            if (layout_width > 0) {
+                string viewport_script =
+                    "document.documentElement.style.width='%dpx';".printf (layout_width) +
+                    "if(document.body){document.body.style.width='100%';}";
+                yield view.evaluate_javascript (viewport_script, -1, null, null, cancellable);
+            }
+            var width_result = yield view.evaluate_javascript (
+                "Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0)",
+                -1, null, null, cancellable);
+            if (web_view != view || generation != display_generation) return;
+            if (width_result.is_number ()) {
+                double document_width = width_result.to_double ();
+                int viewport_width = view.get_width ();
+                double fit_zoom = 1.0;
+                if (document_width > 0 && viewport_width > 0) {
+                    fit_zoom = double.min (1.0, ((double) viewport_width) / document_width);
+                    fit_zoom = double.max (0.25, fit_zoom);
+                    double target_zoom = double.min (5.0, fit_zoom * user_zoom);
+                    if (Math.fabs (view.zoom_level - target_zoom) > 0.01)
+                        view.zoom_level = target_zoom;
+                }
+            }
             var result = yield view.evaluate_javascript (
                 "Math.ceil(Math.max(document.body.scrollHeight,document.documentElement.scrollHeight))",
                 -1, null, null, cancellable);
@@ -195,10 +248,21 @@ public class HtmlMessageView : Gtk.Box {
         }
     }
 
+    private void queue_fit_to_width () {
+        if (width_fit_source != 0) return;
+        width_fit_source = Idle.add (() => {
+            width_fit_source = 0;
+            measure_rendered_height.begin (display_generation);
+            return Source.REMOVE;
+        });
+    }
+
     public void shutdown () {
         var view = web_view;
         if (view == null) return;
         display_generation++;
+        if (width_fit_source != 0) Source.remove (width_fit_source);
+        width_fit_source = 0;
         if (height_measurement != null) height_measurement.cancel ();
         height_measurement = null;
         print_operation = null;

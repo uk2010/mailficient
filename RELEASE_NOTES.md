@@ -1,3 +1,17 @@
+# Mailficient 0.1.14
+
+Mailficient 0.1.14 improves large-mailbox navigation and responsive message
+reading.
+
+Highlights:
+
+- Keeps Inbox and other preview panes responsive when the window or pane is
+  resized, including fixed-width HTML marketing messages
+- Adds Ctrl++/Ctrl+= and Ctrl+- shortcuts for browser-style email preview zoom
+- Adds calendar and task data models with the calendar/tasks workspace
+- Improves adaptive toolbar and pane sizing for narrower windows
+- Adds AMD64 and ARM64 release package workflows
+
 # Mailficient 0.1.13
 
 Mailficient 0.1.13 refreshes every selectable mailbox during synchronization.

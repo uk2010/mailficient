@@ -23,6 +23,9 @@ sources = files(
   'models/junk-rule.vala',
   'models/mail-label.vala',
   'models/mail-rule.vala',
+  'models/smart-mailbox.vala',
+  'models/calendar-event.vala',
+  'models/mail-task.vala',
   'models/mail-template.vala',
   'models/vacation-settings.vala',
   'mail/mail-error.vala',
@@ -67,6 +70,7 @@ sources = files(
   'security/remote-content-policy.vala',
   'security/libsecret-credential-store.vala',
   'utils/accessibility.vala',
+  'utils/debug-trace.vala',
   'storage/cache-database.vala',
   'storage/account-store.vala',
   'storage/local-data-migration.vala',
@@ -94,6 +98,7 @@ sources = files(
   'ui/shortcuts-dialog.vala',
   'ui/recipient-completion-controller.vala',
   'ui/contact-picker-window.vala',
+  'ui/calendar-tasks-window.vala',
   'ui/html-message-view.vala',
 )
 

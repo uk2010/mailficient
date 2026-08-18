@@ -11,6 +11,12 @@ public class SearchQuery : Object {
     public int64? after_unix;
     public int64? before_unix;
 
+    public void append_text (string value) {
+        var clean = value.strip ();
+        if (clean == "") return;
+        text = text == "" ? clean : text + " " + clean;
+    }
+
     public static SearchQuery parse (string input) {
         var query = new SearchQuery ();
         var plain = new StringBuilder ();

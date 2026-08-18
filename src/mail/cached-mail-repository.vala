@@ -4,6 +4,8 @@ public class CachedMailRepository : Object, MailRepository {
     public const string DRAFT_PREFIX = "local-draft:";
     public const string LOCAL_OUTBOX_ID = "local-outbox";
     public const string OUTBOX_PREFIX = "local-outbox:";
+    public const string SMART_MAILBOX_PREFIX = "smart:";
+    public const string CALENDAR_ID = "local-calendar";
     private CacheDatabase cache;
     private DemoMailRepository demo;
     private bool demo_mode;
@@ -42,6 +44,8 @@ public class CachedMailRepository : Object, MailRepository {
     }
 
     public Gee.List<Mailbox> list_mailboxes () {
+        int64 started = DebugTrace.mark ();
+        DebugTrace.log ("repository", "list_mailboxes begin");
         if (is_demo_mode ()) {
             var result = new Gee.ArrayList<Mailbox> (); result.add_all (demo.list_mailboxes ());
             try {
@@ -51,11 +55,18 @@ public class CachedMailRepository : Object, MailRepository {
                 result.insert (4, new Mailbox (LOCAL_OUTBOX_ID, "Outbox", "mail-send-symbolic", MailboxRole.CUSTOM, (uint) cache.outbox_count ()));
             }
             catch (Error error) { warning ("Could not count queued messages: %s", error.message); }
+            append_smart_mailboxes (result);
+            result.insert (0, new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+            DebugTrace.duration ("repository", "list_mailboxes demo complete count=%d".printf (result.size), started);
             return result;
         }
         try {
             var result = new Gee.ArrayList<Mailbox> ();
-            if (cache.list_accounts ().size == 0) return result;
+            if (cache.list_accounts ().size == 0) {
+                result.add (new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+                DebugTrace.duration ("repository", "list_mailboxes no-accounts complete", started);
+                return result;
+            }
             result.add (new Mailbox ("unified-inbox", "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, cache.unified_unread_count ()));
             result.add (new Mailbox ("unified-vip", "VIP", "starred-symbolic", MailboxRole.VIP, cache.smart_unread_count ("unified-vip")));
             result.add (new Mailbox ("unified-flagged", "Flagged", "mailficient-flag-symbolic", MailboxRole.FLAGGED, cache.smart_unread_count ("unified-flagged")));
@@ -67,6 +78,9 @@ public class CachedMailRepository : Object, MailRepository {
             result.add (new Mailbox ("unified-trash", "Trash", "user-trash-symbolic", MailboxRole.TRASH));
             result.add (new Mailbox ("unified-snoozed", "Snoozed", "alarm-symbolic", MailboxRole.SNOOZED));
             result.add_all (cache.list_cached_mailboxes ());
+            append_smart_mailboxes (result);
+            result.insert (0, new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+            DebugTrace.duration ("repository", "list_mailboxes complete count=%d".printf (result.size), started);
             return result;
         } catch (Error error) {
             warning ("Could not load cached mailboxes: %s", error.message);
@@ -80,6 +94,14 @@ public class CachedMailRepository : Object, MailRepository {
                                             MessageSortMode sort_mode = MessageSortMode.NEWEST) {
         if (mailbox_id == LOCAL_DRAFTS_ID || (is_demo_mode () && mailbox_id == "drafts")) return draft_messages ();
         if (mailbox_id == LOCAL_OUTBOX_ID) return outbox_messages ();
+        var smart = smart_mailbox_for (mailbox_id);
+        if (smart != null && !is_demo_mode ()) {
+            try {
+                var smart_query = SearchQuery.parse (smart.query + " " + query);
+                if (unread_only) smart_query.unread = true;
+                return cache.search_messages (smart_query, limit, offset, sort_mode);
+            } catch (Error error) { warning ("Could not load Smart Mailbox: %s", error.message); }
+        }
         if (is_demo_mode ()) return demo.list_messages (mailbox_id, query, limit, offset,
             unread_only, sort_mode);
         try { return cache.list_cached_messages (mailbox_id, limit, offset, unread_only, sort_mode); }
@@ -87,11 +109,26 @@ public class CachedMailRepository : Object, MailRepository {
     }
 
     public int message_count (string mailbox_id, string query = "", bool unread_only = false) {
+        int64 started = DebugTrace.mark ();
+        DebugTrace.log ("repository", "message_count begin mailbox=%s unread=%s".printf (
+            mailbox_id, unread_only.to_string ()));
         if (mailbox_id == LOCAL_DRAFTS_ID || (is_demo_mode () && mailbox_id == "drafts"))
             return draft_messages ().size;
         if (mailbox_id == LOCAL_OUTBOX_ID) return outbox_messages ().size;
+        var smart = smart_mailbox_for (mailbox_id);
+        if (smart != null && !is_demo_mode ()) {
+            try {
+                var smart_query = SearchQuery.parse (smart.query + " " + query);
+                if (unread_only) smart_query.unread = true;
+                return cache.count_search_messages (smart_query);
+            } catch (Error error) { warning ("Could not count Smart Mailbox: %s", error.message); return 0; }
+        }
         if (is_demo_mode ()) return demo.message_count (mailbox_id, query, unread_only);
-        try { return cache.count_cached_messages (mailbox_id, unread_only); }
+        try {
+            int count = cache.count_cached_messages (mailbox_id, unread_only);
+            DebugTrace.duration ("repository", "message_count complete count=%d".printf (count), started);
+            return count;
+        }
         catch (Error error) { warning ("Could not count cached messages: %s", error.message); return 0; }
     }
 
@@ -107,6 +144,22 @@ public class CachedMailRepository : Object, MailRepository {
         if (is_demo_mode ()) return demo.find_message (id);
         try { return cache.find_cached_message (id); }
         catch (Error error) { warning ("Could not load cached message: %s", error.message); return null; }
+    }
+
+    private SmartMailbox? smart_mailbox_for (string mailbox_id) {
+        if (!mailbox_id.has_prefix (SMART_MAILBOX_PREFIX)) return null;
+        try { return cache.find_smart_mailbox (int64.parse (mailbox_id.substring (SMART_MAILBOX_PREFIX.length))); }
+        catch (Error error) { warning ("Could not resolve Smart Mailbox: %s", error.message); return null; }
+    }
+
+    private void append_smart_mailboxes (Gee.ArrayList<Mailbox> result) {
+        try {
+            foreach (var smart in cache.list_smart_mailboxes ()) {
+                var unread = SearchQuery.parse (smart.query); unread.unread = true;
+                result.add (new Mailbox (SMART_MAILBOX_PREFIX + smart.id.to_string (), smart.name,
+                    "view-filter-symbolic", MailboxRole.CUSTOM, (uint) cache.count_search_messages (unread)));
+            }
+        } catch (Error error) { warning ("Could not load Smart Mailboxes: %s", error.message); }
     }
 
     public Gee.List<Message> conversation_for (Message message) {

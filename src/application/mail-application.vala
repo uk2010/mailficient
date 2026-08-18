@@ -25,7 +25,11 @@ public class MailApplication : Adw.Application {
     private bool onboarding_presented;
 
     public MailApplication () {
-        Object (application_id: "com.local.Mailficient",
+        // Development builds can run beside the installed application. This
+        // prevents testing the source tree from silently activating an older
+        // /usr/lib/mailficient process with the production application ID.
+        Object (application_id: Environment.get_variable ("MAILFICIENT_DEV_INSTANCE") == "1" ?
+                "com.local.Mailficient.Dev" : "com.local.Mailficient",
             flags: Environment.get_variable ("MAILFICIENT_QA") == "1" ?
                 ApplicationFlags.NON_UNIQUE : ApplicationFlags.DEFAULT_FLAGS);
         credentials = new LibsecretCredentialStore ();

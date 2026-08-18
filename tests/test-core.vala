@@ -406,6 +406,30 @@ private void test_scheduling_snooze_and_templates () {
     FileUtils.unlink (path);
 }
 
+private void test_smart_mailboxes_and_planner () {
+    string path = Path.build_filename (Environment.get_tmp_dir (), "mailficient-smart-planner-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path); var account = AccountSettings.for_email ("Alex", "alex@example.net"); account.id = "planner-account";
+        account.incoming_host = "imap.example.net"; account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, 1, account.id, "INBOX");
+        var snapshot = new MailSyncResult (account.id); snapshot.mailboxes.add (inbox);
+        snapshot.messages.add (new Message (account.id + ":inbox:1", inbox.id, "Maya", "maya@example.net", account.email,
+            "Project files", "Attachment", "Please review", "Now", true, false, true, 1, false, account.id, "1"));
+        cache.store_sync_result (snapshot);
+        var smart = cache.add_smart_mailbox ("Unread Attachments", "is:unread has:attachment");
+        assert (cache.list_smart_mailboxes ().size == 1); assert (cache.count_search_messages (SearchQuery.parse (smart.query)) == 1);
+        var repository = new CachedMailRepository (cache, new DemoMailRepository (), false);
+        bool found = false; foreach (var mailbox in repository.list_mailboxes ()) if (mailbox.id == "smart:" + smart.id.to_string ()) found = true;
+        assert (found); assert (repository.list_messages ("smart:" + smart.id.to_string ()).size == 1);
+        cache.add_calendar_event ("Review", "2026-08-17 09:00", "2026-08-17 10:00", "Office");
+        assert (cache.list_calendar_events ().size == 1);
+        cache.add_mail_task ("Review attachment", "2026-08-18", "Follow up", snapshot.messages[0].id);
+        var tasks = cache.list_mail_tasks (); assert (tasks.size == 1); cache.set_mail_task_completed (tasks[0].id, true);
+        assert (cache.list_mail_tasks ()[0].completed); cache.remove_mail_task (tasks[0].id); cache.remove_calendar_event (cache.list_calendar_events ()[0].id);
+    } catch (Error error) { GLib.error ("Smart Mailbox/planner test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
 private async void exercise_vacation_responder () throws Error {
     string root = Path.build_filename (Environment.get_tmp_dir (), "mailficient-vacation-%s".printf (Uuid.string_random ())) ;
     DirUtils.create_with_parents (root, 0700); var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
@@ -1815,7 +1839,10 @@ private void test_synchronized_cache_repository () {
         repository.mark_read (loaded.id, true);
         assert (repository_changes == 0);
         assert (cache.pending_mutation_count () == 2);
-        assert (repository.list_mailboxes ()[0].id == "unified-inbox");
+        bool found_unified_inbox = false;
+        foreach (var mailbox in repository.list_mailboxes ())
+            if (mailbox.id == "unified-inbox") found_unified_inbox = true;
+        assert (found_unified_inbox);
         assert (repository.list_messages ("unified-inbox").size == 1);
         repository.transfer_to_mailbox (loaded.id, archive.id, true);
         assert (cache.pending_transfer_count () == 1);
@@ -2696,7 +2723,9 @@ private void test_demo_is_testing_only () {
     try {
         var cache = new CacheDatabase (path); var demo = new DemoMailRepository ();
         var normal = new CachedMailRepository (cache, demo);
-        assert (normal.list_mailboxes ().size == 0);
+        var normal_mailboxes = normal.list_mailboxes ();
+        assert (normal_mailboxes.size == 1);
+        assert (normal_mailboxes[0].id == CachedMailRepository.CALENDAR_ID);
         assert (normal.list_messages ("inbox").size == 0);
         assert (normal.find_message ("1") == null);
         var testing = new CachedMailRepository (cache, demo, true);
@@ -2955,6 +2984,7 @@ int main (string[] args) {
     Test.add_func ("/sync/junk-classification-is-durable", test_junk_classification_is_durable);
     Test.add_func ("/junk/rules-and-filter", test_junk_rules_and_filter);
     Test.add_func ("/mail/rules-and-labels", test_mail_rules_and_labels);
+    Test.add_func ("/mail/smart-mailboxes-and-planner", test_smart_mailboxes_and_planner);
     Test.add_func ("/mail/scheduling-snooze-and-templates", test_scheduling_snooze_and_templates);
     Test.add_func ("/mail/vacation-responder", test_vacation_responder);
     Test.add_func ("/mail/export-eml-and-pdf", test_message_export);

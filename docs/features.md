@@ -8,6 +8,8 @@ The message list follows normal desktop selection behavior: hold **Shift** while
 
 Use the selection control above the list to enter multi-select mode, select the required rows, then apply Read/Unread, Flag, Archive, Junk, Move, or Delete once. Moving mail to Trash offers an **Undo** toast before the durable server operation is flushed. Deleting from Trash/Junk is permanent and requires confirmation. Right-click Trash or Junk in the sidebar to empty the complete server folder, also with confirmation.
 
+The read-state action is context-aware: it says **Mark as Read** for unread selection and **Mark as Unread** for read selection. Marking a selected message unread keeps it unread until you move away and select it again.
+
 ## Composition
 
 The composer supports bold, italic, underline, strike-through, code, bulleted and numbered lists, links, normal attachments, and CID-backed inline images. Drafts preserve formatted HTML, the plain-text alternative, attachment metadata, and message-security choices. **Send later** offers one hour, four hours, tomorrow morning, or next week; due messages leave Outbox during a subsequent configured mail check.
@@ -18,7 +20,11 @@ Use the template buttons at the bottom of the composer to save the current subje
 
 ## Rules, labels, snooze, and vacation replies
 
-Open **Preferences → Rules** to match Sender, Recipient, or Subject and mark read, flag, archive, trash, or apply a label to newly synchronized messages. Rules are local and run in their displayed order. Labels can be created and applied to one or many selected messages; search with `label:Name`.
+Open **Preferences → Rules** to match Sender, Recipient, Subject, body text, attachment state, read state, or flag state and mark read/unread, flag/unflag, archive, trash, move, or apply a label to newly synchronized messages. Rules are local and run in their displayed order. Labels can be created and applied to one or many selected messages; search with `label:Name`.
+
+Open **Preferences → Smart Mailboxes** to save searches such as `is:unread has:attachment` or `from:alice@example.com after:2026-01-01`. Saved searches appear in the left column with live unread counts.
+
+**Calendar** and **Tasks** are available directly in the left-column Favorites. Selecting either opens the integrated workspace: a mini-calendar rail, full month grid with marked event days and selected-day details, plus a persistent task pane. Events support start/end times and locations; tasks support due dates, notes, completion, and an originating message ID. **Calendar & Tasks…** remains available from the Mailficient menu.
 
 Snooze removes selected mail from ordinary views until the chosen time and keeps it under the unified **Snoozed** mailbox meanwhile. Preferences contains per-account vacation-response dates, subject, and body. The responder skips no-reply senders and the account's own address, and records senders locally so each receives at most one response for the active period.
 

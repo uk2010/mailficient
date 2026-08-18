@@ -427,14 +427,17 @@ public class CamelMailEngine : Object, MailEngine {
                     var uids = folder.dup_uids ();
 #endif
                     var plan = new FolderDownloadPlan (mailbox, folder);
+                    int unread_count = 0;
                     for (int index = 0; index < (int) uids.length; index++) {
                         string uid = uids[index];
                         result.record_remote_uid (mailbox.id, uid);
                         string message_id = "%s:%s".printf (mailbox.id, uid);
                         var info = folder.get_message_info (uid);
                         if (info == null) continue;
+                        uint32 flags = info.get_flags ();
+                        if ((flags & Camel.MessageFlags.SEEN) == 0)
+                            unread_count++;
                         if (cached_message_ids != null && cached_message_ids.contains (message_id)) {
-                            uint32 flags = info.get_flags ();
                             result.states.add (new RemoteMessageState (message_id,
                                 (flags & Camel.MessageFlags.SEEN) == 0,
                                 (flags & Camel.MessageFlags.FLAGGED) != 0));
@@ -444,6 +447,12 @@ public class CamelMailEngine : Object, MailEngine {
                         if ((index + 1) % UID_SCAN_YIELD_INTERVAL == 0)
                             yield yield_to_main_context (cancellable);
                     }
+                    // FolderInfo is read before refresh_info() and can still
+                    // contain the previous unread total. We have just scanned
+                    // every refreshed message summary, so use that authoritative
+                    // count for this sync pass. Otherwise the sidebar catches
+                    // up only on the following mail check.
+                    mailbox.unread_count = (uint) unread_count;
                     total_unseen += plan.unseen_uids.size;
                     plans.add (plan);
                 } catch (Error folder_error) {

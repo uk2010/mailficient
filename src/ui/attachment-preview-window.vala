@@ -11,11 +11,17 @@ public class AttachmentPreviewWindow : Adw.Window {
         this.attachment = attachment;
 
         var toolbar = new Adw.ToolbarView ();
+        toolbar.overflow = Gtk.Overflow.HIDDEN;
         var header = new Adw.HeaderBar ();
+        header.hexpand = true; header.halign = Gtk.Align.FILL;
         header.title_widget = build_title ();
         toolbar.add_top_bar (header);
         preview_area.vexpand = true;
         preview_area.hexpand = true;
+        preview_area.halign = Gtk.Align.FILL;
+        preview_area.valign = Gtk.Align.FILL;
+        preview_area.set_size_request (0, -1);
+        preview_area.add_css_class ("responsive-preview");
         toolbar.content = preview_area;
         content = toolbar;
 
@@ -91,6 +97,9 @@ public class AttachmentPreviewWindow : Adw.Window {
         var picture = new Gtk.Picture.for_file (file);
         picture.content_fit = Gtk.ContentFit.CONTAIN;
         picture.can_shrink = true;
+        picture.hexpand = true; picture.vexpand = true;
+        picture.halign = Gtk.Align.FILL; picture.valign = Gtk.Align.FILL;
+        picture.set_size_request (0, -1);
         picture.set_margin_top (24);
         picture.set_margin_bottom (24);
         picture.set_margin_start (24);
@@ -110,6 +119,9 @@ public class AttachmentPreviewWindow : Adw.Window {
 
         clear ();
         var view = new Gtk.TextView ();
+        view.hexpand = true; view.vexpand = true;
+        view.halign = Gtk.Align.FILL; view.valign = Gtk.Align.FILL;
+        view.set_size_request (0, -1);
         view.editable = false;
         view.cursor_visible = false;
         view.monospace = attachment.content_type != "text/plain";
@@ -120,7 +132,10 @@ public class AttachmentPreviewWindow : Adw.Window {
         view.bottom_margin = 24;
         view.buffer.text = text;
         var scroller = new Gtk.ScrolledWindow ();
+        scroller.hexpand = true;
         scroller.vexpand = true;
+        scroller.hscrollbar_policy = Gtk.PolicyType.NEVER;
+        scroller.propagate_natural_width = false;
         scroller.child = view;
         preview_area.append (scroller);
     }
@@ -134,6 +149,9 @@ public class AttachmentPreviewWindow : Adw.Window {
         settings.enable_webgl = false;
         var view = new WebKit.WebView ();
         view.settings = settings;
+        view.hexpand = true; view.vexpand = true;
+        view.halign = Gtk.Align.FILL; view.valign = Gtk.Align.FILL;
+        view.set_size_request (0, 360);
         view.vexpand = true;
         view.permission_request.connect ((request) => { request.deny (); return true; });
         string allowed_uri = file.get_uri ();

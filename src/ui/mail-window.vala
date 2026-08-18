@@ -1,5 +1,6 @@
 namespace Mailficient {
 public class MailWindow : Adw.ApplicationWindow {
+    private const int READER_MIN_WIDTH = 280;
     private static int startup_dimension (int requested, bool horizontal) {
         var display = Gdk.Display.get_default ();
         if (display == null) return requested;
@@ -61,11 +62,25 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.MenuButton sort_button = new Gtk.MenuButton ();
     private Gtk.Box customizable_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
     private Gtk.PopoverMenu? toolbar_context_menu;
-    private bool compact_toolbar;
+    // Start compact until the first allocation tells the adaptive breakpoint
+    // that a wide toolbar is genuinely available. This prevents the wide
+    // toolbar's natural width from forcing the window wider during startup.
+    private bool compact_toolbar = true;
     private Message? selected_message;
     private Mailbox? active_mailbox;
     private Adw.OverlaySplitView mailbox_split = new Adw.OverlaySplitView ();
-    private Adw.NavigationSplitView message_split = new Adw.NavigationSplitView ();
+    // The mail list/reader divider is a native split pane. The previous
+    // NavigationSplitView plus custom drag widget could only move a few
+    // pixels on some GTK/Adwaita layouts.
+    private Gtk.Paned message_split = new Gtk.Paned (Gtk.Orientation.HORIZONTAL);
+    private Gtk.Stack content_stack = new Gtk.Stack ();
+    private Adw.NavigationPage content_page;
+    private CalendarTasksWindow? calendar_view;
+    private Gtk.Box? message_pane;
+    private bool calendar_view_active = false;
+    private bool calendar_message_sidebar_was_visible = true;
+    private bool calendar_sidebar_was_visible = true;
+    private string calendar_return_mailbox_id = "";
     private Gtk.Button mailbox_toggle = new Gtk.Button.from_icon_name ("sidebar-show-symbolic");
     private Gtk.Button message_back = new Gtk.Button.from_icon_name ("go-previous-symbolic");
     private double mailbox_pane_width = 240;
@@ -75,6 +90,12 @@ public class MailWindow : Adw.ApplicationWindow {
     private bool qa_layout;
     private MailboxSidebar sidebar;
     private bool marking_selected_message_read;
+    private bool repository_refresh_pending;
+    private uint repository_refresh_source;
+    private string last_selected_mailbox_id = "";
+    private string preserve_unread_selection_id = "";
+    private Gtk.Button? toggle_read_button;
+    private MenuItem? more_toggle_read_item;
 
     public MailWindow (Gtk.Application app, MailRepository repository, MailSearchService search_service,
                        CacheDatabase cache, AttachmentService attachment_service,
@@ -137,12 +158,37 @@ public class MailWindow : Adw.ApplicationWindow {
         this.folder_service = folder_service; this.online_accounts = online_accounts;
         message_list = new MessageList (repository, search_service);
         var toolbar = new Adw.ToolbarView ();
+        toolbar.overflow = Gtk.Overflow.HIDDEN;
         var header = build_header (); toolbar.add_top_bar (header);
+        header.hexpand = true; header.halign = Gtk.Align.FILL;
         sidebar = new MailboxSidebar (repository, cache); sidebar.set_size_request (220, -1);
         sidebar.mailbox_selected.connect ((mailbox) => {
+            int64 selection_started = DebugTrace.mark ();
+            string previous_mailbox_id = active_mailbox == null ? "" : active_mailbox.id;
+            DebugTrace.log ("navigation", "mailbox_selected target=%s previous=%s calendar_active=%s".printf (
+                mailbox.id, previous_mailbox_id, calendar_view_active.to_string ()));
             active_mailbox = mailbox;
-            settings.selected_mailbox_id = mailbox.id;
+            last_selected_mailbox_id = mailbox.id;
+            if (mailbox.id == CachedMailRepository.CALENDAR_ID) {
+                if (!calendar_view_active) calendar_return_mailbox_id = previous_mailbox_id;
+                DebugTrace.log ("navigation", "enter_calendar return_mailbox=%s".printf (calendar_return_mailbox_id));
+                show_calendar_tasks_view (); update_action_sensitivity ();
+                DebugTrace.duration ("navigation", "enter_calendar_complete", selection_started);
+                return;
+            }
+            bool returning_to_cached_mailbox = calendar_view_active &&
+                calendar_return_mailbox_id == mailbox.id;
+            show_reader_view ();
             if (search.text != "") search.text = "";
+            if (returning_to_cached_mailbox) {
+                DebugTrace.log ("navigation", "return_to_cached_mailbox mailbox=%s".printf (mailbox.id));
+                if (repository_refresh_pending) queue_repository_refresh ();
+                update_action_sensitivity ();
+                if (mailbox_split.collapsed) { mailbox_split.show_sidebar = false; set_message_content_visible (false); }
+                DebugTrace.duration ("navigation", "return_to_cached_mailbox_complete", selection_started);
+                return;
+            }
+            DebugTrace.log ("navigation", "load_mailbox mailbox=%s".printf (mailbox.id));
             message_list.show_mailbox (mailbox);
             var first_message = message_list.first_message ();
             if (first_message != null && !is_local_draft (first_message.id)) {
@@ -151,7 +197,8 @@ public class MailWindow : Adw.ApplicationWindow {
                 mark_read_after_selection (first_message.id);
                 rebuild_move_menu (); update_action_sensitivity ();
             } else { selected_message = null; reader.show_empty (); update_action_sensitivity (); }
-            if (mailbox_split.collapsed) { mailbox_split.show_sidebar = false; message_split.show_content = false; }
+            if (mailbox_split.collapsed) { mailbox_split.show_sidebar = false; set_message_content_visible (false); }
+            DebugTrace.duration ("navigation", "mailbox_selected_complete", selection_started);
         });
         sidebar.create_folder_requested.connect ((account, parent) => prompt_create_folder.begin (account, parent));
         sidebar.rename_folder_requested.connect ((mailbox) => prompt_rename_folder.begin (mailbox));
@@ -168,11 +215,16 @@ public class MailWindow : Adw.ApplicationWindow {
             }
             selected_message = repository.find_message (message.id) ?? message;
             display_message (selected_message);
-            mark_read_after_selection (message.id);
+            if (preserve_unread_selection_id == message.id)
+                preserve_unread_selection_id = "";
+            else
+                mark_read_after_selection (message.id);
             rebuild_move_menu (); update_action_sensitivity ();
-            if (message_split.collapsed) message_split.show_content = true;
+            set_message_content_visible (true);
         });
         message_list.selection_changed.connect ((messages) => {
+            if (messages.size != 1 || messages[0].id != preserve_unread_selection_id)
+                preserve_unread_selection_id = "";
             rebuild_move_menu (); update_action_sensitivity ();
         });
         message_list.message_activated.connect ((message) => {
@@ -215,35 +267,67 @@ public class MailWindow : Adw.ApplicationWindow {
         sidebar_column.append (build_sync_status ());
         mailbox_pane.append (sidebar_column);
         var mailbox_handle = new PaneResizeHandle ("Resize mailbox and message panes"); mailbox_pane.append (mailbox_handle);
+        mailbox_handle.bind_drag_to (mailbox_pane);
         mailbox_handle.drag_started.connect ((pointer_x) => {
-            resize_start_width = mailbox_pane.get_width (); resize_start_pointer_x = pointer_x;
+            resize_start_width = mailbox_pane.get_width ();
+            resize_start_pointer_x = pointer_x;
         });
         mailbox_handle.dragged.connect ((pointer_x) =>
             set_mailbox_pane_width (resize_start_width + pointer_x - resize_start_pointer_x));
         mailbox_handle.drag_finished.connect (() => settings.mailbox_pane_width = mailbox_pane_width);
         mailbox_split.sidebar = mailbox_pane; mailbox_split.sidebar_width_unit = Adw.LengthUnit.PX;
-        mailbox_split.min_sidebar_width = 190; mailbox_split.max_sidebar_width = 420;
+        mailbox_split.min_sidebar_width = 190; mailbox_split.max_sidebar_width = 560;
         mailbox_split.sidebar_width_fraction = mailbox_pane_width / 1320.0;
-        var message_pane = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0); message_list.hexpand = true; message_pane.append (message_list);
-        var message_handle = new PaneResizeHandle ("Resize message list and reading panes"); message_pane.append (message_handle);
-        message_handle.drag_started.connect ((pointer_x) => {
-            resize_start_width = message_pane.get_width (); resize_start_pointer_x = pointer_x;
+        message_pane = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        message_pane.add_css_class ("message-pane");
+        message_pane.hexpand = true; message_pane.vexpand = true;
+        message_pane.overflow = Gtk.Overflow.HIDDEN;
+        message_list.hexpand = true; message_list.vexpand = true;
+        message_pane.append (message_list);
+        message_split.hexpand = true; message_split.vexpand = true;
+        message_split.set_size_request (0, -1);
+        message_split.overflow = Gtk.Overflow.HIDDEN;
+        // Match the three-column mail layout: the message list is flexible,
+        // and the reader resizes into the remaining space. Its content is
+        // responsive, so the divider can move to roughly 75% of the workspace
+        // without pushing anything past the application's right edge.
+        message_split.resize_start_child = true; message_split.resize_end_child = true;
+        message_split.shrink_start_child = true; message_split.shrink_end_child = true;
+        message_pane.set_size_request (280, -1);
+        message_split.start_child = message_pane;
+        content_stack.hexpand = true; content_stack.vexpand = true;
+        content_stack.overflow = Gtk.Overflow.HIDDEN;
+        content_stack.transition_type = Gtk.StackTransitionType.NONE;
+        content_stack.add_named (reader, "reader");
+        content_stack.visible_child_name = "reader";
+        content_page = new Adw.NavigationPage (content_stack, "Message");
+        // The reader must not contribute an oversized natural width to the
+        // split. Its usable minimum is enforced when the divider is moved.
+        content_page.hexpand = true; content_page.vexpand = true;
+        content_page.set_size_request (0, -1);
+        content_page.overflow = Gtk.Overflow.HIDDEN;
+        message_split.end_child = content_page;
+        message_split.position = (int) message_pane_width;
+        message_split.notify["width"].connect (() => {
+            clamp_message_split_position ();
         });
-        message_handle.dragged.connect ((pointer_x) =>
-            set_message_pane_width (resize_start_width + pointer_x - resize_start_pointer_x));
-        message_handle.drag_finished.connect (() => settings.message_pane_width = message_pane_width);
-        message_split.sidebar = new Adw.NavigationPage (message_pane, "Messages");
-        message_split.content = new Adw.NavigationPage (reader, "Message");
-        message_split.sidebar_width_unit = Adw.LengthUnit.PX;
-        message_split.min_sidebar_width = 300; message_split.max_sidebar_width = 620;
-        message_split.sidebar_width_fraction = message_pane_width / 1080.0;
+        message_split.notify["position"].connect (() => {
+            clamp_message_split_position ();
+            message_pane_width = message_split.position;
+        });
         mailbox_split.content = message_split; toolbar.set_content (mailbox_split);
         mailbox_split.show_sidebar = settings.sidebar_visible;
         var mail_overlay = new Gtk.Overlay ();
+        mail_overlay.overflow = Gtk.Overflow.HIDDEN;
         mail_overlay.child = toolbar;
+        toast_overlay.overflow = Gtk.Overflow.HIDDEN;
         toast_overlay.child = mail_overlay; content = toast_overlay;
         restore_pane_widths_after_layout ();
         Idle.add (() => {
+            // Build the calendar page after the first frame is available so
+            // opening it later does not pay the widget-construction cost in
+            // the sidebar click handler.
+            ensure_calendar_view ();
             select_preferred_mailbox ();
             if (selected_message == null) show_reader_empty_state ();
             return Source.REMOVE;
@@ -253,20 +337,16 @@ public class MailWindow : Adw.ApplicationWindow {
         // allowed a simultaneous startup sync to monopolize the main thread first.
         if (!qa_layout && settings.window_maximized) maximize ();
         repository.changed.connect (() => {
-            // Marking the selected unread message read emits repository.changed
-            // while the click is still settling. Preserve the displayed id
-            // explicitly; the selection model may already be rebuilding and
-            // no longer be reliable as the source of the id.
-            string selected_id = selected_message == null ? "" : selected_message.id;
-            sidebar.reload (false);
-            if (!marking_selected_message_read)
-                message_list.refresh_preserving_selection (selected_id);
-            if (selected_message != null) {
-                var refreshed = repository.find_message (selected_message.id);
-                if (refreshed != null) selected_message = refreshed;
-            }
-            rebuild_move_menu ();
-            update_action_sensitivity ();
+            DebugTrace.log ("repository", "changed marking_read=%s calendar_active=%s pending_before=%s".printf (
+                marking_selected_message_read.to_string (), calendar_view_active.to_string (),
+                repository_refresh_pending.to_string ()));
+            // The selected row is already updated in place before this
+            // idempotent read-state notification arrives.
+            if (marking_selected_message_read) return;
+            repository_refresh_pending = true;
+            if (!calendar_view_active)
+                queue_repository_refresh ();
+            DebugTrace.log ("repository", "changed handled pending_after=%s".printf (repository_refresh_pending.to_string ()));
         });
         if (sync_service != null) {
             sync_service.progress_changed.connect ((account_id, fraction, detail) => {
@@ -373,15 +453,36 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void set_mailbox_pane_width (double requested) {
-        mailbox_pane_width = double.max (190, double.min (420, requested));
+        mailbox_pane_width = double.max (190, double.min (560, requested));
         int available = mailbox_split.get_width ();
-        if (available > 0) mailbox_split.sidebar_width_fraction = mailbox_pane_width / available;
+        if (available > 0)
+            mailbox_split.sidebar_width_fraction = mailbox_pane_width / available;
     }
 
     private void set_message_pane_width (double requested) {
-        message_pane_width = double.max (300, double.min (620, requested));
-        int available = message_split.get_width ();
-        if (available > 0) message_split.sidebar_width_fraction = message_pane_width / available;
+        message_pane_width = double.max (280, double.min (1400, requested));
+        if (message_split.get_width () > 0) {
+            message_split.position = (int) message_pane_width;
+            clamp_message_split_position ();
+        }
+    }
+
+    private void clamp_message_split_position () {
+        int split_width = message_split.get_width ();
+        if (split_width <= 0) return;
+
+        // Use both the split allocation and the window allocation. The latter
+        // protects against an oversized natural request from a rendered email
+        // making the reader extend beyond the application's right edge.
+        int available = split_width;
+        int window_width = get_width ();
+        if (window_width > 0 && mailbox_split.show_sidebar)
+            available = int.min (available, window_width - (int) mailbox_pane_width);
+        int maximum = int.min (available - READER_MIN_WIDTH, (available * 3) / 4);
+        if (maximum < 280) maximum = 280;
+        int bounded = int.max (280, int.min (message_split.position, maximum));
+        if (bounded != message_split.position) message_split.position = bounded;
+        reader.set_viewport_width (split_width - bounded);
     }
 
     private void restore_pane_widths_after_layout () {
@@ -407,8 +508,14 @@ public class MailWindow : Adw.ApplicationWindow {
         });
     }
 
+    private void set_message_content_visible (bool visible) {
+        var content = message_split.end_child;
+        if (content != null) content.visible = visible;
+    }
+
     public void persist_layout () {
         if (qa_layout) return;
+        if (last_selected_mailbox_id != "") settings.selected_mailbox_id = last_selected_mailbox_id;
         settings.mailbox_pane_width = mailbox_pane_width;
         settings.message_pane_width = message_pane_width;
         settings.save_window_state (get_width (), get_height (), is_maximized ());
@@ -537,12 +644,12 @@ public class MailWindow : Adw.ApplicationWindow {
         header.add_css_class ("mail-header-bar");
         message_back.tooltip_text = "Back to message list";
         Accessibility.label (message_back, "Back to message list");
-        message_back.clicked.connect (() => message_split.show_content = false);
+        message_back.clicked.connect (() => set_message_content_visible (false));
         message_back.visible = false;
         header.append (message_back);
 
         search.placeholder_text = "Search Mail";
-        search.set_size_request (280, -1);
+        search.set_size_request (240, -1);
         search.add_css_class ("apple-toolbar-search");
         Accessibility.label (search, "Search mail");
         search.search_changed.connect (() => message_list.search (search.text));
@@ -558,11 +665,15 @@ public class MailWindow : Adw.ApplicationWindow {
 
         var more_menu = new Menu (); more_menu.append ("Archive", "win.archive"); more_menu.append ("Move to Trash", "win.trash");
         more_menu.append ("Junk or Not Junk", "win.junk"); more_menu.append ("Flag or Unflag", "win.flag");
-        more_menu.append ("Mark Read or Unread", "win.toggle-read"); more_menu.append ("Move or Copy…", "win.show-move");
+        more_toggle_read_item = new MenuItem ("Mark as Read", "win.toggle-read");
+        more_menu.append_item (more_toggle_read_item);
+        more_menu.append ("Move or Copy…", "win.show-move");
         more_button.icon_name = "view-more-symbolic"; more_button.tooltip_text = "More message actions"; more_button.menu_model = more_menu;
         Accessibility.label (more_button, "More message actions");
 
         customizable_toolbar.hexpand = true;
+        customizable_toolbar.halign = Gtk.Align.FILL;
+        customizable_toolbar.set_size_request (0, -1);
         customizable_toolbar.add_css_class ("apple-toolbar");
         header.append (customizable_toolbar);
 
@@ -570,6 +681,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var mail_menu = new Menu ();
         mail_menu.append ("New Message", "win.compose");
         mail_menu.append ("Get Mail", "win.refresh");
+        mail_menu.append ("Calendar & Tasks…", "win.calendar-tasks");
         app_menu.append_section ("Mail", mail_menu);
 
         var view_menu = new Menu ();
@@ -748,8 +860,12 @@ public class MailWindow : Adw.ApplicationWindow {
                 customizable_toolbar.append (item);
             }
         }
-        search.hexpand = false;
-        search.set_size_request (compact_toolbar ? 150 : 280, -1);
+        // The search field is the flexible part of the toolbar. Keeping a
+        // minimum width preserves usability while allowing the toolbar to
+        // consume extra window width instead of clipping its right side.
+        search.hexpand = !compact_toolbar;
+        search.halign = Gtk.Align.FILL;
+        search.set_size_request (compact_toolbar ? 150 : 240, -1);
         update_action_sensitivity ();
     }
 
@@ -783,7 +899,7 @@ public class MailWindow : Adw.ApplicationWindow {
         case "trash": delete_button = make_toolbar_button (id, "win.trash"); return delete_button;
         case "junk": junk_button = make_toolbar_button (id, "win.junk"); return junk_button;
         case "flag": return make_flag_control ();
-        case "toggle-read": return make_toolbar_button (id, "win.toggle-read");
+        case "toggle-read": toggle_read_button = make_toolbar_button (id, "win.toggle-read"); return toggle_read_button;
         case "labels": return make_toolbar_button (id, "win.labels");
         case "snooze": return make_toolbar_button (id, "win.snooze");
         case "print": return make_toolbar_button (id, "win.print-message");
@@ -888,7 +1004,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void install_adaptive_layout () {
         var breakpoint = new Adw.Breakpoint (
             new Adw.BreakpointCondition.length (
-                Adw.BreakpointConditionLengthType.MAX_WIDTH, 1100, Adw.LengthUnit.PX));
+                Adw.BreakpointConditionLengthType.MAX_WIDTH, 1300, Adw.LengthUnit.PX));
         breakpoint.apply.connect (() => {
             apply_compact_layout ();
         });
@@ -900,7 +1016,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void apply_compact_layout () {
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
-        message_split.collapsed = false; message_split.show_content = true;
+        set_message_content_visible (true);
         message_back.visible = false;
         compact_toolbar = true;
         rebuild_toolbar ();
@@ -908,7 +1024,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void apply_wide_layout () {
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
-        message_split.collapsed = false; message_split.show_content = true;
+        set_message_content_visible (true);
         message_back.visible = false;
         compact_toolbar = false;
         rebuild_toolbar ();
@@ -922,6 +1038,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void install_actions () {
         var compose = new SimpleAction ("compose", null); compose.activate.connect (() => open_compose ()); add_action (compose);
         var preferences = new SimpleAction ("preferences", null); preferences.activate.connect (() => show_preferences ()); add_action (preferences);
+        var calendar_tasks = new SimpleAction ("calendar-tasks", null); calendar_tasks.activate.connect (() => show_calendar_tasks ()); add_action (calendar_tasks);
         var customize_toolbar = new SimpleAction ("customize-toolbar", null);
         customize_toolbar.activate.connect (() => show_toolbar_customization ());
         add_action (customize_toolbar);
@@ -944,8 +1061,16 @@ public class MailWindow : Adw.ApplicationWindow {
         var shortcuts = new SimpleAction ("shortcuts", null); shortcuts.activate.connect (() => new ShortcutsDialog ().present (this)); add_action (shortcuts);
         var about = new SimpleAction ("about", null); about.activate.connect (() => show_about ()); add_action (about);
         var focus_search = new SimpleAction ("search", null); focus_search.activate.connect (() => search.grab_focus ()); add_action (focus_search);
+        var zoom_in = new SimpleAction ("zoom-in", null);
+        zoom_in.activate.connect (() => reader.zoom_in ());
+        add_action (zoom_in);
+        var zoom_out = new SimpleAction ("zoom-out", null);
+        zoom_out.activate.connect (() => reader.zoom_out ());
+        add_action (zoom_out);
         application.set_accels_for_action ("win.compose", { "<Control>n" });
         application.set_accels_for_action ("win.search", { "<Control>f" });
+        application.set_accels_for_action ("win.zoom-in", { "<Control>plus", "<Control>equal", "<Control>KP_Add" });
+        application.set_accels_for_action ("win.zoom-out", { "<Control>minus", "<Control>KP_Subtract" });
         var select_all = new SimpleAction ("select-all", null);
         select_all.activate.connect (() => message_list.select_all ()); add_action (select_all);
         application.set_accels_for_action ("win.select-all", { "<Control>a" });
@@ -1133,6 +1258,12 @@ public class MailWindow : Adw.ApplicationWindow {
             permanent ? "Delete permanently" : "Move to Trash";
         Accessibility.label (delete_button, delete_button.tooltip_text);
         Accessibility.label (junk_button, in_junk ? "Mark as Not Junk" : "Move to Junk");
+        string read_label = read_action_label (messages);
+        if (toggle_read_button != null) {
+            toggle_read_button.tooltip_text = read_label;
+            Accessibility.label (toggle_read_button, read_label);
+        }
+        if (more_toggle_read_item != null) more_toggle_read_item.set_label (read_label);
         reply_button.sensitive = single; reply_all_button.sensitive = single; forward_button.sensitive = single;
         archive_button.sensitive = server_messages; delete_button.sensitive = selected;
         junk_button.sensitive = server_messages; move_button.sensitive = server_messages;
@@ -1220,7 +1351,7 @@ public class MailWindow : Adw.ApplicationWindow {
     public void open_message (string id) {
         var message = repository.find_message (id); if (message == null) return;
         selected_message = message; display_message (message); update_action_sensitivity ();
-        if (message_split.collapsed) message_split.show_content = true;
+        set_message_content_visible (true);
         present ();
     }
 
@@ -1252,14 +1383,112 @@ public class MailWindow : Adw.ApplicationWindow {
             credential_cleanup, account_provisioner, mail_engine, sync_service, online_accounts);
         dialog.account_saved.connect ((account) => account_changed (account));
         dialog.accounts_changed.connect (() => account_changed (null));
+        dialog.smart_mailboxes_changed.connect (() => repository.reload ());
         if (page_name != "") dialog.set_visible_page_name (page_name);
         dialog.present (this);
+    }
+
+    private void show_calendar_tasks () {
+        show_calendar_tasks_view ();
+    }
+
+    private void ensure_calendar_view () {
+        if (calendar_view != null) return;
+        calendar_view = new CalendarTasksWindow (cache);
+        content_stack.add_named (calendar_view, "calendar");
+    }
+
+    private void show_calendar_tasks_view () {
+        int64 started = DebugTrace.mark ();
+        DebugTrace.log ("view", "show_calendar_tasks_view begin active=%s".printf (calendar_view_active.to_string ()));
+        if (calendar_view_active) return;
+
+        ensure_calendar_view ();
+
+        if (!calendar_view_active) {
+            calendar_message_sidebar_was_visible = message_pane == null || message_pane.visible;
+            calendar_sidebar_was_visible = mailbox_split.show_sidebar;
+            calendar_view_active = true;
+        }
+
+        // Calendar belongs in the content pane beside Favorites. Never let
+        // the outer overlay split turn it into a sidebar overlay.
+        mailbox_split.collapsed = false;
+        mailbox_split.show_sidebar = true;
+        // Keep the message list mounted as the split's sidebar so returning to
+        // mail preserves its selection, but remove it from hit testing while
+        // Calendar is active. This prevents clicks and keyboard focus from
+        // reaching an Inbox row underneath the calendar.
+        message_list.sensitive = false;
+        message_list.suspend_for_calendar ();
+        if (message_pane != null) message_pane.visible = false;
+        message_split.start_child = null;
+        // Calendar belongs directly beside Favorites. Remove the reader page
+        // from the nested mail split before placing it in the outer content
+        // area, otherwise the hidden message column still reserves space.
+        message_split.end_child = null;
+        mailbox_split.content = content_page;
+        content_stack.visible_child_name = "calendar";
+        DebugTrace.duration ("view", "show_calendar_tasks_view end", started);
+    }
+
+    private void show_reader_view () {
+        int64 started = DebugTrace.mark ();
+        DebugTrace.log ("view", "show_reader_view begin calendar_active=%s".printf (calendar_view_active.to_string ()));
+        message_list.sensitive = true;
+        content_stack.visible_child_name = "reader";
+
+        if (calendar_view_active) {
+            calendar_view_active = false;
+            mailbox_split.content = message_split;
+            message_split.start_child = message_pane;
+            message_split.end_child = content_page;
+            if (message_pane != null) message_pane.visible = calendar_message_sidebar_was_visible;
+            mailbox_split.show_sidebar = calendar_sidebar_was_visible;
+            // Restore the model after the navigation split has accepted its
+            // normal layout, avoiding a synchronous row rebind in the click
+            // handler that returns from Calendar.
+            Idle.add (() => { message_list.resume_after_calendar (); return Source.REMOVE; });
+        } else {
+            message_list.resume_after_calendar ();
+        }
+
+        set_message_content_visible (true);
+        DebugTrace.duration ("view", "show_reader_view end", started);
+    }
+
+    private void queue_repository_refresh () {
+        DebugTrace.log ("refresh", "queue requested calendar_active=%s source=%u pending=%s".printf (
+            calendar_view_active.to_string (), repository_refresh_source, repository_refresh_pending.to_string ()));
+        if (calendar_view_active || repository_refresh_source != 0) return;
+        repository_refresh_source = Timeout.add (250, () => {
+            int64 started = DebugTrace.mark ();
+            DebugTrace.log ("refresh", "queued refresh begin pending=%s calendar_active=%s".printf (
+                repository_refresh_pending.to_string (), calendar_view_active.to_string ()));
+            repository_refresh_source = 0;
+            if (calendar_view_active) return Source.REMOVE;
+            if (!repository_refresh_pending) return Source.REMOVE;
+
+            repository_refresh_pending = false;
+            string selected_id = selected_message == null ? "" : selected_message.id;
+            DebugTrace.log ("refresh", "reload sidebar and message list selected=%s".printf (selected_id));
+            sidebar.reload (false);
+            message_list.refresh_preserving_selection (selected_id);
+            if (selected_message != null) {
+                var refreshed = repository.find_message (selected_message.id);
+                if (refreshed != null) selected_message = refreshed;
+            }
+            rebuild_move_menu ();
+            update_action_sensitivity ();
+            DebugTrace.duration ("refresh", "queued refresh complete", started);
+            return Source.REMOVE;
+        });
     }
 
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.13"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.14"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -1371,11 +1600,19 @@ public class MailWindow : Adw.ApplicationWindow {
     private void toggle_selected_read () {
         var messages = action_messages (); if (messages.size == 0) return;
         bool read = false; foreach (var message in messages) if (message.unread) read = true;
+        if (!read && messages.size == 1) preserve_unread_selection_id = messages[0].id;
         repository.begin_batch ();
         try {
             foreach (var message in messages) { message.unread = !read; repository.mark_read (message.id, read); }
         } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
+    }
+
+    private static string read_action_label (Gee.List<Message> messages) {
+        if (messages.size == 0) return "Mark as Read or Unread";
+        foreach (var message in messages)
+            if (message.unread) return "Mark as Read";
+        return "Mark as Unread";
     }
 
     private void move_selected (MailboxRole role) {

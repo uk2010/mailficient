@@ -10,12 +10,18 @@ public class HtmlContentPolicy : Object {
             "<meta http-equiv='Content-Security-Policy' content=\"%s\">".printf (policy) +
             "<meta name='viewport' content='width=device-width, initial-scale=1'>" +
             "<meta name='color-scheme' content='light'>" +
-            "<style>html{max-width:100%;overflow-x:hidden;background:#fff;color:#000;color-scheme:light}" +
-            "body{box-sizing:border-box;max-width:100%;font:16px system-ui;margin:clamp(12px,4vw,24px);" +
+            "<style>html{box-sizing:border-box;width:100%;max-width:100%;overflow-x:hidden;background:#fff;color:#000;color-scheme:light}" +
+            "html,body{min-width:0}" +
+            "body{box-sizing:border-box;width:100%;min-width:0;max-width:100%;font:16px system-ui;margin:0;" +
+            "padding:clamp(12px,4vw,24px);" +
             "line-height:1.5;overflow-wrap:anywhere;word-break:break-word;background:#fff;color:#000}" +
-            "img{max-width:100%!important;height:auto!important;object-fit:contain}" +
-            "table{max-width:100%!important;border-collapse:collapse;table-layout:auto}" +
-            "td,th{max-width:100%;overflow-wrap:anywhere;word-break:break-word}" +
+            "body *{box-sizing:border-box;min-width:0!important;max-width:100%!important;overflow-wrap:anywhere;word-break:break-word}" +
+            "img,svg,video{max-width:100%!important;height:auto!important;object-fit:contain}" +
+            "table{border-collapse:collapse;width:100%!important;max-width:100%!important;table-layout:fixed!important}" +
+            "table[width='100%'],table[style*='width:100%'],table.email-content-wrapper," +
+            "table[width='600']{width:100%!important;max-width:100%!important;table-layout:fixed!important}" +
+            "td,th{min-width:0!important;max-width:100%!important;overflow-wrap:anywhere;word-break:break-word;white-space:normal!important}" +
+            "h1,h2,h3,h4,h5,h6,p,div,span,a{max-width:100%;overflow-wrap:anywhere;word-break:break-word}" +
             "pre,code{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}" +
             "blockquote{max-width:100%;margin-inline:1em;border-inline-start:3px solid currentColor;" +
             "padding-inline-start:1em;opacity:.85}" +
@@ -27,7 +33,8 @@ public class HtmlContentPolicy : Object {
             ".mailficient-print-header h1{font-size:18pt;line-height:1.2;margin:0 0 9pt}" +
             ".mailficient-print-header p{font-size:10pt;line-height:1.35;margin:2pt 0;color:#333}" +
             "img,blockquote,tr{break-inside:avoid}}</style>" +
-            "</head><body>" + print_header_html + sanitized_html + "</body></html>";
+            "</head><body>" + print_header_html + sanitized_html +
+            "</body></html>";
     }
 
     public static bool allows_resource (string uri, bool allow_remote_content) {

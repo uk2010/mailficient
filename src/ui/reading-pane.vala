@@ -18,14 +18,21 @@ public class ReadingPane : Gtk.Box {
     private uint message_generation;
     private HtmlMessageView? current_html_view;
     private Gee.ArrayList<HtmlMessageView> html_views = new Gee.ArrayList<HtmlMessageView> ();
+    private int constrained_width;
 
     public ReadingPane (ReceivedAttachmentService attachment_service, RemoteContentPolicy remote_content_policy) {
         Object (orientation: Gtk.Orientation.VERTICAL);
         this.attachment_service = attachment_service;
         this.remote_content_policy = remote_content_policy;
+        set_size_request (0, -1);
+        hexpand = true;
         add_css_class ("reading-pane");
-        content.hexpand = true;
+        content.hexpand = true; content.halign = Gtk.Align.FILL;
+        content.set_size_request (0, -1);
         scroller.hscrollbar_policy = Gtk.PolicyType.NEVER;
+        scroller.hexpand = true;
+        scroller.propagate_natural_width = false;
+        scroller.propagate_natural_height = false;
         scroller.set_child (content);
         // GtkScrolledWindow wraps non-scrollable content in a GtkViewport.
         // Its default focus handling scrolls a large WebKit child into view
@@ -37,6 +44,24 @@ public class ReadingPane : Gtk.Box {
         show_empty ();
     }
 
+    public void set_viewport_width (int width) {
+        if (width <= 0) return;
+        constrained_width = width;
+        content.set_size_request (width, -1);
+        foreach (var html_view in html_views)
+            if (html_view.get_parent () != null) html_view.constrain_width (width);
+    }
+
+    public void zoom_in () {
+        foreach (var html_view in html_views)
+            if (html_view.get_parent () != null) html_view.zoom_in ();
+    }
+
+    public void zoom_out () {
+        foreach (var html_view in html_views)
+            if (html_view.get_parent () != null) html_view.zoom_out ();
+    }
+
     public void show_message (Message message, Gee.List<Message>? conversation = null,
                               bool sender_is_vip = false, bool always_load_remote_content = false,
                               bool full_html_formatting = false) {
@@ -46,8 +71,8 @@ public class ReadingPane : Gtk.Box {
         this.full_html_formatting = full_html_formatting;
         replace_scroll_adjustment ();
         clear ();
-        var header = new Gtk.Box (Gtk.Orientation.VERTICAL, 7); header.add_css_class ("message-header");
-        var subject_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        var header = new Gtk.Box (Gtk.Orientation.VERTICAL, 7); header.hexpand = true; header.halign = Gtk.Align.FILL; header.add_css_class ("message-header");
+        var subject_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8); subject_line.hexpand = true; subject_line.halign = Gtk.Align.FILL;
         var subject = new Gtk.Label (message.subject); subject.xalign = 0; subject.wrap = true; subject.hexpand = true; subject.add_css_class ("message-subject"); subject_line.append (subject);
         var vip = new Gtk.ToggleButton (); vip.icon_name = sender_is_vip ? "starred-symbolic" : "non-starred-symbolic";
         vip.active = sender_is_vip; vip.tooltip_text = sender_is_vip ? "Remove sender from VIPs" : "Add sender to VIPs";
@@ -71,6 +96,7 @@ public class ReadingPane : Gtk.Box {
         content.append (header);
         if (conversation == null || conversation.size == 0) append_conversation_message (message, true);
         else foreach (var item in conversation) append_conversation_message (item, item.id == message.id);
+        if (constrained_width > 0) set_viewport_width (constrained_width);
         string? qa_preview = Environment.get_variable ("MAILFICIENT_QA_PREVIEW");
         if (!qa_preview_opened && qa_preview != null && qa_preview != "" && message.attachments.size > 0) {
             int index = qa_preview == "image" && message.attachments.size > 1 ? 1 : 0;
@@ -103,9 +129,9 @@ public class ReadingPane : Gtk.Box {
     }
 
     private void append_conversation_message (Message message, bool expanded) {
-        var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); card.add_css_class ("conversation-message");
-        var header_button = new Gtk.Button (); header_button.add_css_class ("flat");
-        var sender_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); card.hexpand = true; card.halign = Gtk.Align.FILL; card.add_css_class ("conversation-message");
+        var header_button = new Gtk.Button (); header_button.hexpand = true; header_button.halign = Gtk.Align.FILL; header_button.add_css_class ("flat");
+        var sender_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10); sender_line.hexpand = true; sender_line.halign = Gtk.Align.FILL;
         sender_line.append (new Adw.Avatar (42, message.initials (), false));
         var sender_text = new Gtk.Box (Gtk.Orientation.VERTICAL, 1); sender_text.hexpand = true;
         var sender = new Gtk.Label ("<b>%s</b>  <span alpha='65%%'>&lt;%s&gt;</span>".printf (Markup.escape_text (message.sender_name), Markup.escape_text (message.sender_address)));
@@ -121,8 +147,8 @@ public class ReadingPane : Gtk.Box {
         header_button.child = sender_line; header_button.tooltip_text = expanded ? "Collapse message" : "Expand message";
         Accessibility.label (header_button, "%s message from %s".printf (expanded ? "Collapse" : "Expand", message.sender_name));
         card.append (header_button);
-        var revealer = new Gtk.Revealer (); revealer.reveal_child = expanded; revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
-        var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); revealer.child = message_content;
+        var revealer = new Gtk.Revealer (); revealer.hexpand = true; revealer.halign = Gtk.Align.FILL; revealer.reveal_child = expanded; revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
+        var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); message_content.hexpand = true; message_content.halign = Gtk.Align.FILL; revealer.child = message_content;
         bool content_loaded = false;
         if (expanded) {
             populate_message_content (message, message_content);
@@ -150,7 +176,7 @@ public class ReadingPane : Gtk.Box {
         HtmlMessageView? html_view = null;
         if (message.body_html != "") {
             uint view_generation = message_generation;
-            html_view = new HtmlMessageView (); html_view.vexpand = true;
+            html_view = new HtmlMessageView (); html_view.hexpand = true; html_view.halign = Gtk.Align.FILL; html_view.vexpand = true;
             html_views.add (html_view);
             if (current != null && message.id == current.id) current_html_view = html_view;
             html_view.link_requested.connect ((uri) => confirm_external_link.begin (uri));
@@ -167,7 +193,7 @@ public class ReadingPane : Gtk.Box {
         bool sender_trusted = always_load_remote_content ||
             (message.has_remote_content && remote_content_policy.is_sender_trusted (message.sender_address));
         if (message.has_remote_content && !sender_trusted) {
-            var notice_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            var notice_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); notice_box.hexpand = true; notice_box.halign = Gtk.Align.FILL;
             notice_box.add_css_class ("remote-notice");
             var notice_text = new Gtk.Label ("Remote images are blocked to protect your privacy.");
             notice_text.xalign = 0; notice_text.wrap = true;
@@ -205,7 +231,7 @@ public class ReadingPane : Gtk.Box {
                 full_html_formatting, print_header (message));
             message_content.append (html_view);
         }
-        else { var body = new Gtk.Label (message.body); body.xalign = 0; body.yalign = 0; body.wrap = true; body.selectable = true; body.add_css_class ("message-body"); message_content.append (body); }
+        else { var body = new Gtk.Label (message.body); body.hexpand = true; body.halign = Gtk.Align.FILL; body.xalign = 0; body.yalign = 0; body.wrap = true; body.selectable = true; body.add_css_class ("message-body"); message_content.append (body); }
         append_attachments (message, message_content);
     }
 
