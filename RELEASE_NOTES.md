@@ -1,3 +1,14 @@
+# Mailficient 0.1.15
+
+Mailficient 0.1.15 fixes calendar context-menu stability and initial toolbar
+layout selection.
+
+Highlights:
+
+- Prevents a crash when right-clicking an unselected calendar day
+- Shows the complete wide toolbar when a window starts maximized
+- Publishes AMD64 and ARM64 Debian packages with SHA-256 checksums
+
 # Mailficient 0.1.14
 
 Mailficient 0.1.14 improves large-mailbox navigation and responsive message

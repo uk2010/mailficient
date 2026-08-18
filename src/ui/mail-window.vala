@@ -1012,9 +1012,27 @@ public class MailWindow : Adw.ApplicationWindow {
             apply_wide_layout ();
         });
         add_breakpoint (breakpoint);
+
+        // A window restored maximized can be allocated before the breakpoint
+        // gets its first size evaluation. Keep the toolbar in sync with the
+        // actual window width so it does not remain in its compact layout
+        // until the user performs a resize.
+        notify["width"].connect (() => sync_adaptive_toolbar_layout ());
+        add_tick_callback ((widget, frame_clock) => {
+            if (get_width () <= 0) return Source.CONTINUE;
+            sync_adaptive_toolbar_layout ();
+            return Source.REMOVE;
+        });
+    }
+
+    private void sync_adaptive_toolbar_layout () {
+        if (get_width () <= 0) return;
+        if (get_width () <= 1300) apply_compact_layout ();
+        else apply_wide_layout ();
     }
 
     private void apply_compact_layout () {
+        if (compact_toolbar) return;
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
         set_message_content_visible (true);
         message_back.visible = false;
@@ -1023,6 +1041,7 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void apply_wide_layout () {
+        if (!compact_toolbar) return;
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
         set_message_content_visible (true);
         message_back.visible = false;
@@ -1488,7 +1507,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.14"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.15"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

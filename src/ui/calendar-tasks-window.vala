@@ -364,11 +364,21 @@ public class CalendarTasksWindow : Gtk.Box {
     }
 
     private void show_day_context_menu (Gtk.Widget anchor, int year, int month, int day, string value, double x, double y) {
-        set_calendar_date (calendar, new DateTime.local (year, month, day, 0, 0, 0));
         selected_day = value;
         reload_day_events ();
 
         var popover = new Gtk.Popover (); popover.autohide = true; popover.has_arrow = true;
+        // Changing Gtk.Calendar's date can emit day-selected, which rebuilds
+        // month_grid. Do that only after the popover is closed: rebuilding
+        // first removes `anchor` and leaves Gtk.Popover with a dangling
+        // parent while handling a right-click on an unselected day.
+        popover.closed.connect (() => {
+            popover.unparent ();
+            set_calendar_date (calendar, new DateTime.local (year, month, day, 0, 0, 0));
+            selected_day = value;
+            reload_day_events ();
+            reload_month_grid ();
+        });
         var menu = new Gtk.Box (Gtk.Orientation.VERTICAL, 4); menu.margin_top = 6; menu.margin_bottom = 6; menu.margin_start = 6; menu.margin_end = 6;
         var add_event_button = new Gtk.Button.with_label ("Add event on this day"); add_event_button.halign = Gtk.Align.FILL;
         var add_task_button = new Gtk.Button.with_label ("Add task on this day"); add_task_button.halign = Gtk.Align.FILL;
