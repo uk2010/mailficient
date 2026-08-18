@@ -54,7 +54,7 @@ jobs:
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
-            name: mailficient-0.1.14-${{ matrix.arch }}-deb
+          name: mailficient-0.1.14-${{ matrix.arch }}-deb
           path: |
             dist/mailficient_0.1.14-1_${{ matrix.arch }}.deb
             dist/mailficient_0.1.14-1_${{ matrix.arch }}.deb.sha256
