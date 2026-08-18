@@ -1,3 +1,13 @@
+# Mailficient 0.1.16
+
+Mailficient 0.1.16 fixes unread-count badges for non-Inbox folders.
+
+Highlights:
+
+- Shows unread counts for Sent, Archive, Junk, Trash, and Snoozed
+- Keeps unified-folder counts synchronized with cached mailbox totals
+- Publishes matching AMD64 and ARM64 Debian packages with SHA-256 checksums
+
 # Mailficient 0.1.15
 
 Mailficient 0.1.15 fixes calendar context-menu stability and initial toolbar

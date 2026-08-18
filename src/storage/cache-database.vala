@@ -1474,10 +1474,12 @@ public class CacheDatabase : Object, AccountStore {
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load cached attachments");
     }
 
-    public uint unified_unread_count () throws MailError {
+    public uint unified_unread_count (MailboxRole role = MailboxRole.INBOX) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT COALESCE(SUM(unread_count),0) FROM cached_mailboxes WHERE role=0", -1, out statement) != Sqlite.OK || statement.step () != Sqlite.ROW)
+        if (database.prepare_v2 ("SELECT COALESCE(SUM(unread_count),0) FROM cached_mailboxes WHERE role=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not count unread mail");
+        statement.bind_int (1, (int) role);
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not count unread mail");
         return (uint) statement.column_int (0);
     }
 

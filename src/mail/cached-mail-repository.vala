@@ -72,11 +72,16 @@ public class CachedMailRepository : Object, MailRepository {
             result.add (new Mailbox ("unified-flagged", "Flagged", "mailficient-flag-symbolic", MailboxRole.FLAGGED, cache.smart_unread_count ("unified-flagged")));
             result.add (new Mailbox (LOCAL_DRAFTS_ID, "Drafts", "document-edit-symbolic", MailboxRole.DRAFTS, (uint) cache.saved_draft_count ()));
             result.add (new Mailbox (LOCAL_OUTBOX_ID, "Outbox", "mail-send-symbolic", MailboxRole.CUSTOM, (uint) cache.outbox_count ()));
-            result.add (new Mailbox ("unified-sent", "Sent", "mail-sent-symbolic", MailboxRole.SENT));
-            result.add (new Mailbox ("unified-archive", "Archive", "package-x-generic-symbolic", MailboxRole.ARCHIVE));
-            result.add (new Mailbox ("unified-junk", "Junk", "dialog-warning-symbolic", MailboxRole.JUNK));
-            result.add (new Mailbox ("unified-trash", "Trash", "user-trash-symbolic", MailboxRole.TRASH));
-            result.add (new Mailbox ("unified-snoozed", "Snoozed", "alarm-symbolic", MailboxRole.SNOOZED));
+            result.add (new Mailbox ("unified-sent", "Sent", "mail-sent-symbolic", MailboxRole.SENT,
+                cache.unified_unread_count (MailboxRole.SENT)));
+            result.add (new Mailbox ("unified-archive", "Archive", "package-x-generic-symbolic", MailboxRole.ARCHIVE,
+                cache.unified_unread_count (MailboxRole.ARCHIVE)));
+            result.add (new Mailbox ("unified-junk", "Junk", "dialog-warning-symbolic", MailboxRole.JUNK,
+                cache.unified_unread_count (MailboxRole.JUNK)));
+            result.add (new Mailbox ("unified-trash", "Trash", "user-trash-symbolic", MailboxRole.TRASH,
+                cache.unified_unread_count (MailboxRole.TRASH)));
+            result.add (new Mailbox ("unified-snoozed", "Snoozed", "alarm-symbolic", MailboxRole.SNOOZED,
+                (uint) cache.count_cached_messages ("unified-snoozed", true)));
             result.add_all (cache.list_cached_mailboxes ());
             append_smart_mailboxes (result);
             result.insert (0, new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));

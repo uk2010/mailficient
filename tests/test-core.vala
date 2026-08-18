@@ -2769,6 +2769,8 @@ private void test_vip_and_unified_mailboxes () {
         assert (cache.count_cached_messages ("unified-flagged") == 1);
         assert (cache.smart_unread_count ("unified-flagged") == 1);
         assert (cache.list_cached_messages ("unified-sent").size == 1);
+        assert (cache.unified_unread_count (MailboxRole.SENT) == 0);
+        assert (cache.unified_unread_count (MailboxRole.ARCHIVE) == 1);
         assert (cache.list_cached_messages ("unified-vip").size == 0);
         cache.set_vip_sender ("maya@example.net", true);
         assert (cache.is_vip_sender ("MAYA@example.net"));
