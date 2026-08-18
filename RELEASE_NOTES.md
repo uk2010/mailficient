@@ -1,3 +1,13 @@
+# Mailficient 0.1.17
+
+Mailficient 0.1.17 fixes live unread badges and message deletion navigation.
+
+Highlights:
+
+- Updates sidebar unread counts immediately when a message is opened
+- Applies message removal before selecting the next message, preventing the wrong message from being deleted
+- Publishes matching AMD64 and ARM64 Debian packages with SHA-256 checksums
+
 # Mailficient 0.1.16
 
 Mailficient 0.1.16 fixes unread-count badges for non-Inbox folders.

@@ -140,6 +140,14 @@ public class MessageList : Gtk.Box {
         }
         reload (true, true, preferred_id);
     }
+
+    public void refresh_after_removal () {
+        // Removal actions must rebuild the model before selecting the next
+        // message. Selecting against the old model lets the selection callback
+        // run while the deleted row is still present and can retarget the next
+        // delete action to the wrong message.
+        reload (false, false);
+    }
     public void set_sort (MessageSortMode mode) { sort_mode = mode; reload (); }
 
     public void mark_read_in_place (string id) {

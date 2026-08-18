@@ -342,7 +342,12 @@ public class MailWindow : Adw.ApplicationWindow {
                 repository_refresh_pending.to_string ()));
             // The selected row is already updated in place before this
             // idempotent read-state notification arrives.
-            if (marking_selected_message_read) return;
+            if (marking_selected_message_read) {
+                // Keep the selected message/list snapshot in place, but the
+                // sidebar still needs the new unread totals immediately.
+                sidebar.reload (false);
+                return;
+            }
             repository_refresh_pending = true;
             if (!calendar_view_active)
                 queue_repository_refresh ();
@@ -1507,7 +1512,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.16"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.1.17"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -1748,8 +1753,10 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void select_after_removal (string next_message_id, int completed) {
         message_list.finish_bulk_action ();
-        if (completed > 0 && next_message_id != "" &&
-            message_list.select_message (next_message_id)) return;
+        if (completed > 0) {
+            message_list.refresh_after_removal ();
+            if (next_message_id != "" && message_list.select_message (next_message_id)) return;
+        }
         selected_message = null;
         reader.show_empty ();
         update_action_sensitivity ();
