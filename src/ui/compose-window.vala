@@ -46,6 +46,11 @@ public class ComposeWindow : Adw.Window {
     private bool uncertain_resend_confirmed;
     private Gee.ArrayList<RecipientCompletionController> recipient_completions = new Gee.ArrayList<RecipientCompletionController> ();
     private ContactSuggestionProvider? address_book;
+    private string response_quote_text = "";
+    private string response_quote_html = "";
+    private string loaded_body_text = "";
+    private string loaded_body_html = "";
+    private bool loaded_draft_snapshot;
 
     public ComposeWindow (Gtk.Window parent, CacheDatabase cache, AttachmentService attachment_service,
                           ReceivedAttachmentService received_attachment_service,
@@ -186,8 +191,12 @@ public class ComposeWindow : Adw.Window {
             Timeout.add (700, () => { schedule_send.begin (); return Source.REMOVE; });
         else if (saved_draft == null && source_message == null)
             Idle.add (() => { to_entry.grab_focus (); return Source.REMOVE; });
-        if (saved_draft == null && source_message != null && mode == ComposeMode.FORWARD)
-            copy_forward_attachments.begin (source_message);
+        if (saved_draft == null && source_message != null) {
+            if (mode == ComposeMode.FORWARD)
+                copy_response_attachments.begin (source_message, true);
+            else
+                copy_response_attachments.begin (source_message, false);
+        }
         configure_outbox_state ();
         update_security_button ();
     }
@@ -220,6 +229,8 @@ public class ComposeWindow : Adw.Window {
         to_entry.text = draft.to; cc_entry.text = draft.cc; bcc_entry.text = draft.bcc;
         subject_entry.text = draft.subject; body.buffer.text = draft.body_text;
         RichTextBuffer.restore (body.buffer, draft.body_format); render_attachments ();
+        loaded_body_text = draft.body_text; loaded_body_html = draft.body_html;
+        loaded_draft_snapshot = true;
     }
 
     private async void configure_security () {
@@ -398,10 +409,13 @@ public class ComposeWindow : Adw.Window {
 
     private void prepare_response (Message source, ComposeMode mode) {
         string original_body = response_body (source);
+        string original_html = response_html (source);
         if (mode == ComposeMode.FORWARD) {
             subject_entry.text = source.subject.has_prefix ("Fwd:") ? source.subject : "Fwd: " + source.subject;
-            body.buffer.text = "\n\n---------- Forwarded message ----------\nFrom: %s <%s>\nTo: %s\nDate: %s\nSubject: %s\n\n%s".printf (
+            response_quote_text = "---------- Forwarded message ----------\nFrom: %s <%s>\nTo: %s\nDate: %s\nSubject: %s\n\n%s".printf (
                 source.sender_name, source.sender_address, source.recipients, source.timestamp, source.subject, original_body);
+            response_quote_html = original_html == "" ? "" : response_html_block (source, original_html, true);
+            body.buffer.text = "\n\n" + response_quote_text;
             return;
         }
         if (mode == ComposeMode.REPLY_ALL) {
@@ -416,7 +430,9 @@ public class ComposeWindow : Adw.Window {
         subject_entry.text = source.subject.has_prefix ("Re:") ? source.subject : "Re: " + source.subject;
         var quoted = new StringBuilder ();
         foreach (string line in original_body.split ("\n")) quoted.append ("> ").append (line).append_c ('\n');
-        body.buffer.text = "\n\nOn %s, %s wrote:\n%s".printf (source.timestamp, source.sender_name, quoted.str);
+        response_quote_text = "On %s, %s wrote:\n%s".printf (source.timestamp, source.sender_name, quoted.str);
+        response_quote_html = original_html == "" ? "" : response_html_block (source, original_html, false);
+        body.buffer.text = "\n\n" + response_quote_text;
         draft.in_reply_to = source.internet_message_id == "" ? source.id : source.internet_message_id;
         draft.references = source.references.strip () == "" ? draft.in_reply_to :
             source.references.strip () + " " + draft.in_reply_to;
@@ -433,15 +449,40 @@ public class ComposeWindow : Adw.Window {
         return plain;
     }
 
-    private async void copy_forward_attachments (Message source) {
-        if (source.attachments.size == 0) return;
+    private string response_html (Message source) {
+        if (source.body_html.strip () == "") return "";
+        // The received HTML has already been parsed for display, but sanitize
+        // again at the outgoing boundary. Remote images are retained so a
+        // forwarded/replied message keeps the original visual content.
+        return HtmlSanitizer.sanitize (source.body_html, true, settings.full_html_formatting);
+    }
+
+    private static string response_html_block (Message source, string original_html, bool forwarded) {
+        if (forwarded) {
+            return "<p>---------- Forwarded message ----------</p>" +
+                "<p><strong>From:</strong> %s &lt;%s&gt;<br>".printf (
+                    Markup.escape_text (source.sender_name), Markup.escape_text (source.sender_address)) +
+                "<strong>To:</strong> %s<br><strong>Date:</strong> %s<br>".printf (
+                    Markup.escape_text (source.recipients), Markup.escape_text (source.timestamp)) +
+                "<strong>Subject:</strong> %s</p><blockquote type=\"cite\">%s</blockquote>".printf (
+                    Markup.escape_text (source.subject), original_html);
+        }
+        return "<p>On %s, %s wrote:</p><blockquote type=\"cite\">%s</blockquote>".printf (
+            Markup.escape_text (source.timestamp), Markup.escape_text (source.sender_name), original_html);
+    }
+
+    private async void copy_response_attachments (Message source, bool forwarded) {
+        var candidates = new Gee.ArrayList<Attachment> ();
+        foreach (var attachment in source.attachments)
+            if (forwarded || attachment.content_id != "") candidates.add (attachment);
+        if (candidates.size == 0) return;
         importing_forward_attachments = true; send_button.sensitive = false;
-        forward_status_label.label = source.attachments.size == 1 ?
-            "Preparing forwarded attachment…" :
-            "Preparing %d forwarded attachments…".printf (source.attachments.size);
+        forward_status_label.label = candidates.size == 1 ?
+            (forwarded ? "Preparing forwarded attachment…" : "Preparing inline image…") :
+            (forwarded ? "Preparing %d forwarded attachments…" : "Preparing %d inline images…").printf (candidates.size);
         forward_status.visible = true; forward_spinner.start ();
         int failures = 0;
-        foreach (var attachment in source.attachments) {
+        foreach (var attachment in candidates) {
             try {
                 var copy = yield received_attachment_service.copy_for_draft (
                     source, attachment, attachment_operations);
@@ -537,7 +578,18 @@ public class ComposeWindow : Adw.Window {
         draft.to = to_entry.text; draft.cc = cc_entry.text; draft.bcc = bcc_entry.text;
         draft.subject = subject_entry.text; draft.body_text = body.buffer.text;
         draft.body_format = RichTextBuffer.serialize (body.buffer);
-        draft.body_html = RichTextBuffer.to_html (body.buffer);
+        bool preserve_loaded = loaded_draft_snapshot && body.buffer.text == loaded_body_text;
+        int quote_byte_start = response_quote_text == "" ? -1 : body.buffer.text.index_of (response_quote_text);
+        int quote_start = quote_byte_start < 0 ? -1 :
+            body.buffer.text.substring (0, quote_byte_start).char_count ();
+        if (response_quote_html != "" && quote_start >= 0) {
+            int quote_end = quote_start + response_quote_text.char_count ();
+            draft.body_html = "<div>" +
+                RichTextBuffer.to_html_fragment (body.buffer, 0, quote_start) +
+                response_quote_html +
+                RichTextBuffer.to_html_fragment (body.buffer, quote_end, body.buffer.get_char_count ()) +
+                "</div>";
+        } else if (!preserve_loaded) draft.body_html = RichTextBuffer.to_html (body.buffer);
         foreach (var attachment in draft.attachments) {
             if (attachment.content_id == "" || draft.body_html == "") continue;
             string marker = "[Image: %s]".printf (Markup.escape_text (attachment.name));
@@ -545,6 +597,8 @@ public class ComposeWindow : Adw.Window {
             draft.body_html = draft.body_html.replace (marker,
                 "<img src=\"cid:%s\" alt=\"%s\">".printf (cid, Markup.escape_text (attachment.name)));
         }
+        loaded_body_text = draft.body_text; loaded_body_html = draft.body_html;
+        loaded_draft_snapshot = true;
         draft.touch ();
     }
 

@@ -72,14 +72,31 @@ public class RichTextBuffer : Object {
     }
 
     public static string to_html (Gtk.TextBuffer buffer) {
-        int count = buffer.get_char_count (); bool bold = false; bool italic = false; bool underline = false;
+        bool has_formatting;
+        string fragment = render_html (buffer, 0, buffer.get_char_count (), out has_formatting);
+        return has_formatting ? "<div>" + fragment + "</div>" : "";
+    }
+
+    // Render a range even when it has no composer formatting. This lets
+    // replies and forwards combine editable text with a preserved HTML quote.
+    public static string to_html_fragment (Gtk.TextBuffer buffer, int start_offset, int end_offset) {
+        bool has_formatting;
+        return render_html (buffer, start_offset, end_offset, out has_formatting);
+    }
+
+    private static string render_html (Gtk.TextBuffer buffer, int start_offset, int end_offset,
+                                       out bool has_formatting) {
+        int count = buffer.get_char_count ();
+        int start = int.max (0, int.min (count, start_offset));
+        int end = int.max (start, int.min (count, end_offset));
+        bool bold = false; bool italic = false; bool underline = false;
         bool strike = false; bool code = false;
-        bool has_formatting = buffer.text.contains ("[Image: "); var html = new StringBuilder ("<div>");
+        has_formatting = buffer.text.contains ("[Image: "); var html = new StringBuilder ();
         var bold_tag = buffer.tag_table.lookup (BOLD); var italic_tag = buffer.tag_table.lookup (ITALIC);
         var underline_tag = buffer.tag_table.lookup (UNDERLINE);
         var strike_tag = buffer.tag_table.lookup (STRIKETHROUGH); var code_tag = buffer.tag_table.lookup (CODE);
-        Gtk.TextIter iter; buffer.get_start_iter (out iter);
-        for (int offset = 0; offset < count; offset++) {
+        Gtk.TextIter iter; buffer.get_iter_at_offset (out iter, start);
+        for (int offset = start; offset < end; offset++) {
             bool next_bold = bold_tag != null && iter.has_tag (bold_tag);
             bool next_italic = italic_tag != null && iter.has_tag (italic_tag);
             bool next_underline = underline_tag != null && iter.has_tag (underline_tag);
@@ -104,8 +121,8 @@ public class RichTextBuffer : Object {
             }
             iter.forward_char ();
         }
-        close_tags (html, bold, italic, underline, strike, code); html.append ("</div>");
-        return has_formatting ? html.str : "";
+        close_tags (html, bold, italic, underline, strike, code);
+        return html.str;
     }
 
     private static void close_tags (StringBuilder html, bool bold, bool italic, bool underline,

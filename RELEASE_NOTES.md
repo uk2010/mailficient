@@ -1,11 +1,12 @@
-# Mailficient 0.1.17
+# Mailficient 0.1.18
 
-Mailficient 0.1.17 fixes live unread badges and message deletion navigation.
+Mailficient 0.1.18 fixes live unread badges, message deletion navigation, and reply/forward formatting.
 
 Highlights:
 
 - Updates sidebar unread counts immediately when a message is opened
 - Applies message removal before selecting the next message, preventing the wrong message from being deleted
+- Preserves sanitized original HTML and inline images in replies and forwards
 - Publishes matching AMD64 and ARM64 Debian packages with SHA-256 checksums
 
 # Mailficient 0.1.16
