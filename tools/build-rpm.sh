@@ -33,6 +33,11 @@ trap 'rm -rf "$build_root"' EXIT HUP INT TERM
 topdir="$build_root/rpmbuild"
 mkdir -p "$topdir"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
+has_addressbook=0
+if [ -x "$app_tree/bin/mailficient-addressbook-probe" ]; then
+    has_addressbook=1
+fi
+
 rpmbuild \
     --target "$rpm_architecture" \
     --define "_topdir $topdir" \
@@ -40,6 +45,7 @@ rpmbuild \
     --define "mailficient_release $rpm_release" \
     --define "mailficient_source_root $root_dir" \
     --define "mailficient_app_tree $app_tree" \
+    --define "mailficient_has_addressbook $has_addressbook" \
     -bb "$root_dir/packaging/rpm/mailficient.spec"
 
 output_dir="$root_dir/dist"

@@ -112,6 +112,9 @@ fi
 %doc %{_datadir}/doc/mailficient/README.md
 %doc %{_datadir}/doc/mailficient/RELEASE_NOTES.md
 %{_bindir}/mailficient
+%if 0%{?mailficient_has_addressbook}
+%{_bindir}/mailficient-addressbook-probe
+%endif
 %{_libdir}/mailficient/
 %{_datadir}/applications/com.local.Mailficient.desktop
 %{_datadir}/dbus-1/services/com.local.Mailficient.service
