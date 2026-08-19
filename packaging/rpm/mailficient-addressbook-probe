@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+private_lib=@LIBDIR@/mailficient
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    export LD_LIBRARY_PATH="$private_lib:$private_lib/evolution-data-server:$LD_LIBRARY_PATH"
+else
+    export LD_LIBRARY_PATH="$private_lib:$private_lib/evolution-data-server"
+fi
+
+exec "$private_lib/mailficient-addressbook-probe.real" "$@"
