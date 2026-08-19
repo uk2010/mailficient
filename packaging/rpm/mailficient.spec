@@ -57,6 +57,16 @@ cp -a %{mailficient_app_tree}/lib/*.so* \
 cp -a %{mailficient_app_tree}/lib/evolution-data-server \
     %{buildroot}%{_libdir}/mailficient/
 
+for sdk_library in %{mailficient_sdk_lib}/libxml2.so.* \
+    %{mailficient_sdk_lib}/libicuuc.so.* \
+    %{mailficient_sdk_lib}/libicui18n.so.* \
+    %{mailficient_sdk_lib}/libicudata.so.*; do
+    if test -e "$sdk_library"; then
+        cp -a "$sdk_library" \
+            %{buildroot}%{_libdir}/mailficient/
+    fi
+done
+
 command -v patchelf
 find %{buildroot}%{_libdir}/mailficient -type f -exec sh -c '
     for elf_file do

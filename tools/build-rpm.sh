@@ -10,6 +10,17 @@ case "$rpm_architecture" in
     *) printf 'Unsupported RPM architecture: %s\n' "$rpm_architecture" >&2; exit 1 ;;
 esac
 
+if [ -n "${MAILFICIENT_SDK_LIB:-}" ]; then
+    sdk_lib=$MAILFICIENT_SDK_LIB
+else
+    sdk_location=$(flatpak info -l org.gnome.Sdk//49)
+    case "$rpm_architecture" in
+        x86_64) sdk_multiarch=x86_64-linux-gnu ;;
+        aarch64) sdk_multiarch=aarch64-linux-gnu ;;
+    esac
+    sdk_lib="$sdk_location/files/lib/$sdk_multiarch"
+fi
+
 if [ ! -x "$app_tree/bin/mailficient" ]; then
     printf 'Required application binary is missing: %s\n' "$app_tree/bin/mailficient" >&2
     exit 1
@@ -20,6 +31,13 @@ for required_file in \
     "$app_tree/share/metainfo/com.local.Mailficient.metainfo.xml"; do
     if [ ! -f "$required_file" ]; then
         printf 'Required application file is missing: %s\n' "$required_file" >&2
+        exit 1
+    fi
+done
+for sdk_library in libxml2.so.* libicuuc.so.* libicui18n.so.* libicudata.so.*; do
+    set -- "$sdk_lib"/$sdk_library
+    if ! [ -e "$1" ]; then
+        printf 'Required SDK library is missing: %s/%s\n' "$sdk_lib" "$sdk_library" >&2
         exit 1
     fi
 done
@@ -45,6 +63,7 @@ rpmbuild \
     --define "mailficient_release $rpm_release" \
     --define "mailficient_source_root $root_dir" \
     --define "mailficient_app_tree $app_tree" \
+    --define "mailficient_sdk_lib $sdk_lib" \
     --define "mailficient_has_addressbook $has_addressbook" \
     -bb "$root_dir/packaging/rpm/mailficient.spec"
 
