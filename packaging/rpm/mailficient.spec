@@ -134,5 +134,5 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
-* Tue Aug 18 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.1.18-1
-- Add x86_64 and aarch64 RPM packages for the 0.1.18 release.
+* Fri Aug 21 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.1.19-1
+- Add x86_64 and aarch64 RPM packages for the 0.1.19 release.

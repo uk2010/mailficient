@@ -1,3 +1,14 @@
+# Mailficient 0.1.19
+
+Mailficient 0.1.19 integrates GNOME Calendar as the companion calendar
+application for mail invitations.
+
+Highlights:
+
+- Adds an Add to Calendar action for `text/calendar` and `.ics` invitations
+- Opens invitations through the desktop calendar handler, including GNOME Calendar
+- Publishes matching AMD64 and ARM64 Debian and RPM packages
+
 # Mailficient 0.1.18
 
 Mailficient 0.1.18 fixes live unread badges, message deletion navigation, and reply/forward formatting.

@@ -35,7 +35,7 @@ jobs:
       - name: Upload snap
         uses: actions/upload-artifact@v4
         with:
-          name: mailficient-0.1.18-${{ matrix.platform }}-snap
+          name: mailficient-0.1.19-${{ matrix.platform }}-snap
           path: |
             ${{ steps.snapcraft.outputs.snap }}
             ${{ steps.snapcraft.outputs.snap }}.sha256

@@ -54,6 +54,6 @@ jobs:
         with:
           name: mailficient-${{ matrix.arch }}-rpm
           path: |
-            dist/mailficient-*.${{ matrix.arch }}.rpm
-            dist/mailficient-*.${{ matrix.arch }}.rpm.sha256
+            dist/mailficient-0.1.19-*.${{ matrix.arch }}.rpm
+            dist/mailficient-0.1.19-*.${{ matrix.arch }}.rpm.sha256
           if-no-files-found: error
