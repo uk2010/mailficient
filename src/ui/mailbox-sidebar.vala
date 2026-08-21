@@ -414,5 +414,11 @@ public class MailboxSidebar : Gtk.Box {
         } else owner.select_row (row);
         return true;
     }
+
+    public void clear_selection () {
+        selected_mailbox_id = "";
+        list.unselect_all ();
+        foreach (var account_list in account_lists) account_list.unselect_all ();
+    }
 }
 }

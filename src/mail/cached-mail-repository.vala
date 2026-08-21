@@ -5,7 +5,10 @@ public class CachedMailRepository : Object, MailRepository {
     public const string LOCAL_OUTBOX_ID = "local-outbox";
     public const string OUTBOX_PREFIX = "local-outbox:";
     public const string SMART_MAILBOX_PREFIX = "smart:";
-    public const string CALENDAR_ID = "local-calendar";
+    // Calendar is provided by GNOME Calendar.  Keep the synthetic mailbox
+    // entry here so it can live in Favorites without pretending to contain
+    // messages in Mailficient's cache.
+    public const string GNOME_CALENDAR_ID = "gnome-calendar";
     private CacheDatabase cache;
     private DemoMailRepository demo;
     private bool demo_mode;
@@ -56,14 +59,14 @@ public class CachedMailRepository : Object, MailRepository {
             }
             catch (Error error) { warning ("Could not count queued messages: %s", error.message); }
             append_smart_mailboxes (result);
-            result.insert (0, new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+            result.insert (0, new Mailbox (GNOME_CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
             DebugTrace.duration ("repository", "list_mailboxes demo complete count=%d".printf (result.size), started);
             return result;
         }
         try {
             var result = new Gee.ArrayList<Mailbox> ();
             if (cache.list_accounts ().size == 0) {
-                result.add (new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+                result.add (new Mailbox (GNOME_CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
                 DebugTrace.duration ("repository", "list_mailboxes no-accounts complete", started);
                 return result;
             }
@@ -84,7 +87,7 @@ public class CachedMailRepository : Object, MailRepository {
                 (uint) cache.count_cached_messages ("unified-snoozed", true)));
             result.add_all (cache.list_cached_mailboxes ());
             append_smart_mailboxes (result);
-            result.insert (0, new Mailbox (CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+            result.insert (0, new Mailbox (GNOME_CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
             DebugTrace.duration ("repository", "list_mailboxes complete count=%d".printf (result.size), started);
             return result;
         } catch (Error error) {

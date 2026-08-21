@@ -421,11 +421,9 @@ private void test_smart_mailboxes_and_planner () {
         var repository = new CachedMailRepository (cache, new DemoMailRepository (), false);
         bool found = false; foreach (var mailbox in repository.list_mailboxes ()) if (mailbox.id == "smart:" + smart.id.to_string ()) found = true;
         assert (found); assert (repository.list_messages ("smart:" + smart.id.to_string ()).size == 1);
-        cache.add_calendar_event ("Review", "2026-08-17 09:00", "2026-08-17 10:00", "Office");
-        assert (cache.list_calendar_events ().size == 1);
         cache.add_mail_task ("Review attachment", "2026-08-18", "Follow up", snapshot.messages[0].id);
         var tasks = cache.list_mail_tasks (); assert (tasks.size == 1); cache.set_mail_task_completed (tasks[0].id, true);
-        assert (cache.list_mail_tasks ()[0].completed); cache.remove_mail_task (tasks[0].id); cache.remove_calendar_event (cache.list_calendar_events ()[0].id);
+        assert (cache.list_mail_tasks ()[0].completed); cache.remove_mail_task (tasks[0].id);
     } catch (Error error) { GLib.error ("Smart Mailbox/planner test failed: %s", error.message); }
     FileUtils.unlink (path);
 }
@@ -2725,7 +2723,7 @@ private void test_demo_is_testing_only () {
         var normal = new CachedMailRepository (cache, demo);
         var normal_mailboxes = normal.list_mailboxes ();
         assert (normal_mailboxes.size == 1);
-        assert (normal_mailboxes[0].id == CachedMailRepository.CALENDAR_ID);
+        assert (normal_mailboxes[0].id == CachedMailRepository.GNOME_CALENDAR_ID);
         assert (normal.list_messages ("inbox").size == 0);
         assert (normal.find_message ("1") == null);
         var testing = new CachedMailRepository (cache, demo, true);

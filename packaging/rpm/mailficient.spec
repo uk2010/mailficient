@@ -6,6 +6,7 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/uk2010/mailficient
 
 Requires:       gtk4 >= 4.12
+Requires:       gnome-calendar
 Requires:       libadwaita >= 1.5
 Requires:       libgee
 Requires:       json-glib

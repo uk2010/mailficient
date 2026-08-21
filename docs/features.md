@@ -24,7 +24,7 @@ Open **Preferences → Rules** to match Sender, Recipient, Subject, body text, a
 
 Open **Preferences → Smart Mailboxes** to save searches such as `is:unread has:attachment` or `from:alice@example.com after:2026-01-01`. Saved searches appear in the left column with live unread counts.
 
-**Calendar** and **Tasks** are available directly in the left-column Favorites. Selecting either opens the integrated workspace: a mini-calendar rail, full month grid with marked event days and selected-day details, plus a persistent task pane. Events support start/end times and locations; tasks support due dates, notes, completion, and an originating message ID. **Calendar & Tasks…** remains available from the Mailficient menu.
+**Calendar** is available directly in Favorites and opens the installed GNOME Calendar application. Mailficient does not maintain a second calendar database or embedded calendar view. Calendar invitations continue to offer **Add to Calendar**, which hands the bounded `.ics` invitation to the desktop calendar application.
 
 Snooze removes selected mail from ordinary views until the chosen time and keeps it under the unified **Snoozed** mailbox meanwhile. Preferences contains per-account vacation-response dates, subject, and body. The responder skips no-reply senders and the account's own address, and records senders locally so each receives at most one response for the active period.
 

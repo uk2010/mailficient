@@ -19,7 +19,6 @@ public class MessageList : Gtk.Box {
     private bool suppress_selection;
     private bool local_queue;
     private bool mailbox_loaded;
-    private bool suspended_for_calendar;
     private Gtk.Label mailbox_title = new Gtk.Label ("Inbox");
     private Gtk.Label message_count = new Gtk.Label ("");
     private Gtk.ToggleButton unread_filter = new Gtk.ToggleButton ();
@@ -116,21 +115,6 @@ public class MessageList : Gtk.Box {
 
     public void refresh () { reload (); }
 
-    // Keep the mailbox model and selection alive, but let Gtk.ListView release
-    // its recycled row widgets while another full-page view is active. This
-    // avoids making calendar navigation pay for inbox layout work that is not
-    // visible, especially for large mailboxes.
-    public void suspend_for_calendar () {
-        if (suspended_for_calendar) return;
-        suspended_for_calendar = true;
-        list.model = null;
-    }
-
-    public void resume_after_calendar () {
-        if (!suspended_for_calendar) return;
-        suspended_for_calendar = false;
-        list.model = selection;
-    }
     public void refresh_preserving_selection (string preferred_id = "") {
         // An unread-only list is a reading queue. Repository changes caused by
         // opening its selected message must not immediately remove that row

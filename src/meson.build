@@ -24,7 +24,6 @@ sources = files(
   'models/mail-label.vala',
   'models/mail-rule.vala',
   'models/smart-mailbox.vala',
-  'models/calendar-event.vala',
   'models/mail-task.vala',
   'models/mail-template.vala',
   'models/vacation-settings.vala',
@@ -55,6 +54,7 @@ sources = files(
   'services/recipient-completion-service.vala',
   'services/reply-recipient-service.vala',
   'services/online-account-service.vala',
+  'services/gnome-calendar-launcher.vala',
   'services/junk-filter-service.vala',
   'services/mail-rule-service.vala',
   'services/vacation-responder-service.vala',
@@ -98,7 +98,6 @@ sources = files(
   'ui/shortcuts-dialog.vala',
   'ui/recipient-completion-controller.vala',
   'ui/contact-picker-window.vala',
-  'ui/calendar-tasks-window.vala',
   'ui/html-message-view.vala',
 )
 

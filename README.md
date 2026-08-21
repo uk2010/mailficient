@@ -109,6 +109,13 @@ action. Mailficient copies the invitation to a private, size-bounded temporary
 file and opens it with the desktop's registered calendar application, including
 GNOME Calendar when it is the default `text/calendar` handler.
 
+GNOME Calendar is a required companion application. The **Calendar** item in
+Favorites launches it directly, keeping calendar data and synchronization in
+GNOME Calendar instead of duplicating them in Mailficient. Debian and RPM
+packages declare the dependency; Flatpak and Snap installations must have
+GNOME Calendar installed separately because their application sandboxes do not
+install another desktop application as a runtime dependency.
+
 If the local mail database cannot be opened, Mailficient now shows a non-destructive recovery window with understandable guidance, expandable diagnostics, and a safe retry action rather than silently exiting or replacing the cache.
 
 Invalid IMAP or SMTP certificates are rejected without a trust bypass. Account Setup now preserves Camel's validation reason and shows the affected host in an expandable certificate warning instead of reducing the failure to a generic connection error.

@@ -42,7 +42,6 @@ test_sources = files(
   'src/models/mail-label.vala',
   'src/models/mail-rule.vala',
   'src/models/smart-mailbox.vala',
-  'src/models/calendar-event.vala',
   'src/models/mail-task.vala',
   'src/models/mail-template.vala',
   'src/models/vacation-settings.vala',

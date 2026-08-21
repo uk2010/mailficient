@@ -75,12 +75,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Paned message_split = new Gtk.Paned (Gtk.Orientation.HORIZONTAL);
     private Gtk.Stack content_stack = new Gtk.Stack ();
     private Adw.NavigationPage content_page;
-    private CalendarTasksWindow? calendar_view;
     private Gtk.Box? message_pane;
-    private bool calendar_view_active = false;
-    private bool calendar_message_sidebar_was_visible = true;
-    private bool calendar_sidebar_was_visible = true;
-    private string calendar_return_mailbox_id = "";
     private Gtk.Button mailbox_toggle = new Gtk.Button.from_icon_name ("sidebar-show-symbolic");
     private Gtk.Button message_back = new Gtk.Button.from_icon_name ("go-previous-symbolic");
     private double mailbox_pane_width = 240;
@@ -165,29 +160,16 @@ public class MailWindow : Adw.ApplicationWindow {
         sidebar.mailbox_selected.connect ((mailbox) => {
             int64 selection_started = DebugTrace.mark ();
             string previous_mailbox_id = active_mailbox == null ? "" : active_mailbox.id;
-            DebugTrace.log ("navigation", "mailbox_selected target=%s previous=%s calendar_active=%s".printf (
-                mailbox.id, previous_mailbox_id, calendar_view_active.to_string ()));
+            DebugTrace.log ("navigation", "mailbox_selected target=%s previous=%s".printf (
+                mailbox.id, previous_mailbox_id));
+            if (mailbox.id == CachedMailRepository.GNOME_CALENDAR_ID) {
+                open_gnome_calendar (previous_mailbox_id);
+                DebugTrace.duration ("navigation", "open_gnome_calendar_complete", selection_started);
+                return;
+            }
             active_mailbox = mailbox;
             last_selected_mailbox_id = mailbox.id;
-            if (mailbox.id == CachedMailRepository.CALENDAR_ID) {
-                if (!calendar_view_active) calendar_return_mailbox_id = previous_mailbox_id;
-                DebugTrace.log ("navigation", "enter_calendar return_mailbox=%s".printf (calendar_return_mailbox_id));
-                show_calendar_tasks_view (); update_action_sensitivity ();
-                DebugTrace.duration ("navigation", "enter_calendar_complete", selection_started);
-                return;
-            }
-            bool returning_to_cached_mailbox = calendar_view_active &&
-                calendar_return_mailbox_id == mailbox.id;
-            show_reader_view ();
             if (search.text != "") search.text = "";
-            if (returning_to_cached_mailbox) {
-                DebugTrace.log ("navigation", "return_to_cached_mailbox mailbox=%s".printf (mailbox.id));
-                if (repository_refresh_pending) queue_repository_refresh ();
-                update_action_sensitivity ();
-                if (mailbox_split.collapsed) { mailbox_split.show_sidebar = false; set_message_content_visible (false); }
-                DebugTrace.duration ("navigation", "return_to_cached_mailbox_complete", selection_started);
-                return;
-            }
             DebugTrace.log ("navigation", "load_mailbox mailbox=%s".printf (mailbox.id));
             message_list.show_mailbox (mailbox);
             var first_message = message_list.first_message ();
@@ -324,10 +306,6 @@ public class MailWindow : Adw.ApplicationWindow {
         toast_overlay.child = mail_overlay; content = toast_overlay;
         restore_pane_widths_after_layout ();
         Idle.add (() => {
-            // Build the calendar page after the first frame is available so
-            // opening it later does not pay the widget-construction cost in
-            // the sidebar click handler.
-            ensure_calendar_view ();
             select_preferred_mailbox ();
             if (selected_message == null) show_reader_empty_state ();
             return Source.REMOVE;
@@ -337,8 +315,8 @@ public class MailWindow : Adw.ApplicationWindow {
         // allowed a simultaneous startup sync to monopolize the main thread first.
         if (!qa_layout && settings.window_maximized) maximize ();
         repository.changed.connect (() => {
-            DebugTrace.log ("repository", "changed marking_read=%s calendar_active=%s pending_before=%s".printf (
-                marking_selected_message_read.to_string (), calendar_view_active.to_string (),
+            DebugTrace.log ("repository", "changed marking_read=%s pending_before=%s".printf (
+                marking_selected_message_read.to_string (),
                 repository_refresh_pending.to_string ()));
             // The selected row is already updated in place before this
             // idempotent read-state notification arrives.
@@ -349,8 +327,7 @@ public class MailWindow : Adw.ApplicationWindow {
                 return;
             }
             repository_refresh_pending = true;
-            if (!calendar_view_active)
-                queue_repository_refresh ();
+            queue_repository_refresh ();
             DebugTrace.log ("repository", "changed handled pending_after=%s".printf (repository_refresh_pending.to_string ()));
         });
         if (sync_service != null) {
@@ -686,7 +663,6 @@ public class MailWindow : Adw.ApplicationWindow {
         var mail_menu = new Menu ();
         mail_menu.append ("New Message", "win.compose");
         mail_menu.append ("Get Mail", "win.refresh");
-        mail_menu.append ("Calendar & Tasks…", "win.calendar-tasks");
         app_menu.append_section ("Mail", mail_menu);
 
         var view_menu = new Menu ();
@@ -1062,7 +1038,6 @@ public class MailWindow : Adw.ApplicationWindow {
     private void install_actions () {
         var compose = new SimpleAction ("compose", null); compose.activate.connect (() => open_compose ()); add_action (compose);
         var preferences = new SimpleAction ("preferences", null); preferences.activate.connect (() => show_preferences ()); add_action (preferences);
-        var calendar_tasks = new SimpleAction ("calendar-tasks", null); calendar_tasks.activate.connect (() => show_calendar_tasks ()); add_action (calendar_tasks);
         var customize_toolbar = new SimpleAction ("customize-toolbar", null);
         customize_toolbar.activate.connect (() => show_toolbar_customization ());
         add_action (customize_toolbar);
@@ -1412,85 +1387,15 @@ public class MailWindow : Adw.ApplicationWindow {
         dialog.present (this);
     }
 
-    private void show_calendar_tasks () {
-        show_calendar_tasks_view ();
-    }
-
-    private void ensure_calendar_view () {
-        if (calendar_view != null) return;
-        calendar_view = new CalendarTasksWindow (cache);
-        content_stack.add_named (calendar_view, "calendar");
-    }
-
-    private void show_calendar_tasks_view () {
-        int64 started = DebugTrace.mark ();
-        DebugTrace.log ("view", "show_calendar_tasks_view begin active=%s".printf (calendar_view_active.to_string ()));
-        if (calendar_view_active) return;
-
-        ensure_calendar_view ();
-
-        if (!calendar_view_active) {
-            calendar_message_sidebar_was_visible = message_pane == null || message_pane.visible;
-            calendar_sidebar_was_visible = mailbox_split.show_sidebar;
-            calendar_view_active = true;
-        }
-
-        // Calendar belongs in the content pane beside Favorites. Never let
-        // the outer overlay split turn it into a sidebar overlay.
-        mailbox_split.collapsed = false;
-        mailbox_split.show_sidebar = true;
-        // Keep the message list mounted as the split's sidebar so returning to
-        // mail preserves its selection, but remove it from hit testing while
-        // Calendar is active. This prevents clicks and keyboard focus from
-        // reaching an Inbox row underneath the calendar.
-        message_list.sensitive = false;
-        message_list.suspend_for_calendar ();
-        if (message_pane != null) message_pane.visible = false;
-        message_split.start_child = null;
-        // Calendar belongs directly beside Favorites. Remove the reader page
-        // from the nested mail split before placing it in the outer content
-        // area, otherwise the hidden message column still reserves space.
-        message_split.end_child = null;
-        mailbox_split.content = content_page;
-        content_stack.visible_child_name = "calendar";
-        DebugTrace.duration ("view", "show_calendar_tasks_view end", started);
-    }
-
-    private void show_reader_view () {
-        int64 started = DebugTrace.mark ();
-        DebugTrace.log ("view", "show_reader_view begin calendar_active=%s".printf (calendar_view_active.to_string ()));
-        message_list.sensitive = true;
-        content_stack.visible_child_name = "reader";
-
-        if (calendar_view_active) {
-            calendar_view_active = false;
-            mailbox_split.content = message_split;
-            message_split.start_child = message_pane;
-            message_split.end_child = content_page;
-            if (message_pane != null) message_pane.visible = calendar_message_sidebar_was_visible;
-            mailbox_split.show_sidebar = calendar_sidebar_was_visible;
-            // Restore the model after the navigation split has accepted its
-            // normal layout, avoiding a synchronous row rebind in the click
-            // handler that returns from Calendar.
-            Idle.add (() => { message_list.resume_after_calendar (); return Source.REMOVE; });
-        } else {
-            message_list.resume_after_calendar ();
-        }
-
-        set_message_content_visible (true);
-        DebugTrace.duration ("view", "show_reader_view end", started);
-    }
-
     private void queue_repository_refresh () {
-        DebugTrace.log ("refresh", "queue requested calendar_active=%s source=%u pending=%s".printf (
-            calendar_view_active.to_string (), repository_refresh_source, repository_refresh_pending.to_string ()));
-        if (calendar_view_active || repository_refresh_source != 0) return;
+        DebugTrace.log ("refresh", "queue requested source=%u pending=%s".printf (
+            repository_refresh_source, repository_refresh_pending.to_string ()));
+        if (repository_refresh_source != 0) return;
         repository_refresh_source = Timeout.add (250, () => {
             int64 started = DebugTrace.mark ();
-            DebugTrace.log ("refresh", "queued refresh begin pending=%s calendar_active=%s".printf (
-                repository_refresh_pending.to_string (), calendar_view_active.to_string ()));
+            DebugTrace.log ("refresh", "queued refresh begin pending=%s".printf (
+                repository_refresh_pending.to_string ()));
             repository_refresh_source = 0;
-            if (calendar_view_active) return Source.REMOVE;
             if (!repository_refresh_pending) return Source.REMOVE;
 
             repository_refresh_pending = false;
@@ -1560,9 +1465,27 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void select_preferred_mailbox () {
         string preferred = settings.selected_mailbox_id;
-        if (preferred != "" && sidebar.select_mailbox (preferred)) return;
+        if (preferred != "" && preferred != CachedMailRepository.GNOME_CALENDAR_ID &&
+            preferred != "local-calendar" && sidebar.select_mailbox (preferred)) return;
         var mailboxes = repository.list_mailboxes ();
-        if (mailboxes.size > 0) sidebar.select_mailbox (mailboxes[0].id);
+        foreach (var mailbox in mailboxes) {
+            if (mailbox.id != CachedMailRepository.GNOME_CALENDAR_ID)
+                if (sidebar.select_mailbox (mailbox.id)) return;
+        }
+    }
+
+    private void open_gnome_calendar (string previous_mailbox_id) {
+        try {
+            GnomeCalendarLauncher.launch ();
+        } catch (Error error) {
+            toast_overlay.add_toast (new Adw.Toast (error.message));
+        }
+
+        // The launcher is an action, not a mailbox. Restore the previous mail
+        // selection so it is never persisted or reopened during a refresh.
+        if (previous_mailbox_id != "" && previous_mailbox_id != CachedMailRepository.GNOME_CALENDAR_ID &&
+            sidebar.select_mailbox (previous_mailbox_id)) return;
+        sidebar.clear_selection ();
     }
 
     private void show_reader_empty_state () {

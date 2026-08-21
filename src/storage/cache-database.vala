@@ -43,7 +43,6 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE TABLE IF NOT EXISTS mail_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,account_id TEXT NOT NULL," +
             "field INTEGER NOT NULL,pattern TEXT NOT NULL,action INTEGER NOT NULL,value TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);" +
             "CREATE TABLE IF NOT EXISTS smart_mailboxes(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,query TEXT NOT NULL);" +
-            "CREATE TABLE IF NOT EXISTS calendar_events(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,location TEXT NOT NULL,notes TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS mail_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,due_at TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0,notes TEXT NOT NULL,message_id TEXT NOT NULL DEFAULT '');" +
             "CREATE TABLE IF NOT EXISTS mail_templates(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE," +
             "subject TEXT NOT NULL,body_text TEXT NOT NULL,body_html TEXT NOT NULL,body_format TEXT NOT NULL);" +
@@ -295,32 +294,6 @@ public class CacheDatabase : Object, AccountStore {
             throw new MailError.STORAGE ("Could not prepare Smart Mailbox deletion");
         statement.bind_int64 (1, id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete Smart Mailbox");
-    }
-
-    public Gee.ArrayList<CalendarEvent> list_calendar_events () throws MailError {
-        var result = new Gee.ArrayList<CalendarEvent> (); Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT id,title,starts_at,ends_at,location,notes FROM calendar_events ORDER BY starts_at", -1, out statement) != Sqlite.OK)
-            throw new MailError.STORAGE ("Could not prepare calendar loading");
-        int row; while ((row = statement.step ()) == Sqlite.ROW)
-            result.add (new CalendarEvent (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
-                statement.column_text (3), statement.column_text (4), statement.column_text (5)));
-        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load calendar events");
-        return result;
-    }
-
-    public void add_calendar_event (string title, string starts_at, string ends_at,
-                                    string location = "", string notes = "") throws MailError {
-        if (title.strip () == "" || starts_at.strip () == "") throw new MailError.STORAGE ("Event title and start are required");
-        Sqlite.Statement statement;
-        if (database.prepare_v2 ("INSERT INTO calendar_events(title,starts_at,ends_at,location,notes) VALUES(?,?,?,?,?)", -1, out statement) != Sqlite.OK)
-            throw new MailError.STORAGE ("Could not prepare calendar event storage");
-        statement.bind_text (1, title.strip ()); statement.bind_text (2, starts_at.strip ()); statement.bind_text (3, ends_at.strip ());
-        statement.bind_text (4, location.strip ()); statement.bind_text (5, notes.strip ());
-        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save calendar event");
-    }
-
-    public void remove_calendar_event (int64 id) throws MailError {
-        delete_bound_int64 ("DELETE FROM calendar_events WHERE id=?", id);
     }
 
     public Gee.ArrayList<MailTask> list_mail_tasks () throws MailError {
