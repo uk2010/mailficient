@@ -134,5 +134,8 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Sat Aug 22 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.2-1
+- Require Ctrl for letter-based mail shortcuts and publish 0.2.2 packages.
+
 * Fri Aug 21 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.1.19-1
 - Add x86_64 and aarch64 RPM packages for the 0.1.19 release.

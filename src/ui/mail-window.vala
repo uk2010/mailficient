@@ -1123,16 +1123,16 @@ public class MailWindow : Adw.ApplicationWindow {
             Accessibility.label (sort_button, sort_button.tooltip_text);
         });
         add_action (sort);
-        application.set_accels_for_action ("win.reply", { "<Control>r", "r" });
+        application.set_accels_for_action ("win.reply", { "<Control>r" });
         application.set_accels_for_action ("win.reply-all", { "<Control><Shift>r" });
-        application.set_accels_for_action ("win.forward", { "<Control>l", "f" });
+        application.set_accels_for_action ("win.forward", { "<Control>l" });
         application.set_accels_for_action ("win.trash", { "Delete" });
-        application.set_accels_for_action ("win.archive", { "<Control><Shift>a", "e" });
+        application.set_accels_for_action ("win.archive", { "<Control><Shift>a", "<Control>e" });
         application.set_accels_for_action ("win.flag", { "<Control><Shift>l" });
-        application.set_accels_for_action ("win.toggle-read", { "<Control><Shift>u", "i" });
-        application.set_accels_for_action ("win.next-message", { "<Alt>Down", "j" });
-        application.set_accels_for_action ("win.previous-message", { "<Alt>Up", "k" });
-        application.set_accels_for_action ("win.snooze", { "s" });
+        application.set_accels_for_action ("win.toggle-read", { "<Control><Shift>u", "<Control>i" });
+        application.set_accels_for_action ("win.next-message", { "<Alt>Down", "<Control>j" });
+        application.set_accels_for_action ("win.previous-message", { "<Alt>Up", "<Control>k" });
+        application.set_accels_for_action ("win.snooze", { "<Control>s" });
     }
 
     private static MessageSortMode sort_mode_for (string value) {
@@ -1423,7 +1423,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.18"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.2.2"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

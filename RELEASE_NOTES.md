@@ -1,3 +1,14 @@
+# Mailficient 0.2.2
+
+Mailficient 0.2.2 makes letter-based mail commands safe while typing in
+search and other text fields.
+
+Highlights:
+
+- Requires Ctrl for reply, forward, archive, read-state, navigation, and snooze letter shortcuts
+- Updates the in-app keyboard shortcut reference and documentation
+- Publishes matching AMD64 and ARM64 Debian and RPM packages
+
 # Mailficient 0.1.19
 
 Mailficient 0.1.19 integrates GNOME Calendar as the companion calendar
