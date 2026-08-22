@@ -11,7 +11,7 @@
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
-    <release version="0.1.18" date="2026-08-18">
+    <release version="0.2" date="2026-08-22">
       <description>
         <p>Unread badges now update immediately when messages are opened, and deleting a message reliably selects the next message after the removal is applied.</p>
       </description>

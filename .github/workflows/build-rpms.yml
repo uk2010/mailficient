@@ -1,4 +1,4 @@
-name: Build Debian packages
+name: Build RPM packages
 
 on:
   workflow_dispatch:
@@ -7,19 +7,19 @@ permissions:
   contents: read
 
 jobs:
-  deb:
-    name: Debian (${{ matrix.arch }})
+  rpm:
+    name: RPM (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
-            runner: ubuntu-24.04
+          - arch: x86_64
             flatpak_arch: x86_64
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-24.04
+          - arch: aarch64
             flatpak_arch: aarch64
+            runner: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder dpkg-dev
+          sudo apt-get install -y flatpak flatpak-builder rpm file patchelf
 
       - name: Install GNOME 49 SDK and runtime
         run: |
@@ -43,20 +43,17 @@ jobs:
             "flatpak-build-${{ matrix.arch }}" \
             packaging/com.local.Mailficient.Devel.json
 
-      - name: Build Debian package
+      - name: Build RPM package
         env:
           MAILFICIENT_FLATPAK_APP_TREE: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files
-          MAILFICIENT_NATIVE_BINARY: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files/bin/mailficient
-          MAILFICIENT_PROBE_BINARY: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files/bin/mailficient-addressbook-probe
-          MAILFICIENT_DEB_ARCHITECTURE: ${{ matrix.arch }}
-          MAILFICIENT_DEB_VERSION: 0.2
-        run: tools/build-deb.sh
+          MAILFICIENT_RPM_ARCHITECTURE: ${{ matrix.arch }}
+        run: tools/build-rpm.sh
 
-      - name: Upload Debian package
+      - name: Upload RPM package
         uses: actions/upload-artifact@v4
         with:
-          name: mailficient-0.2-${{ matrix.arch }}-deb
+          name: mailficient-0.2-${{ matrix.arch }}-rpm
           path: |
-            dist/mailficient_0.2_${{ matrix.arch }}.deb
-            dist/mailficient_0.2_${{ matrix.arch }}.deb.sha256
+            dist/mailficient-0.2-*.${{ matrix.arch }}.rpm
+            dist/mailficient-0.2-*.${{ matrix.arch }}.rpm.sha256
           if-no-files-found: error

@@ -20,7 +20,11 @@ eds_private_lib=${MAILFICIENT_EDS_PRIVATE_LIB:-"$runtime_lib/evolution-data-serv
 app_version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
     head -n 1 |
     cut -d "'" -f 2)
-package_version="$app_version-${MAILFICIENT_DEB_REVISION:-1}"
+if [ -n "${MAILFICIENT_DEB_VERSION:-}" ]; then
+    package_version=$MAILFICIENT_DEB_VERSION
+else
+    package_version="$app_version-${MAILFICIENT_DEB_REVISION:-1}"
+fi
 build_root=$(mktemp -d "$root_dir/build-deb.XXXXXX")
 trap 'rm -rf "$build_root"' EXIT HUP INT TERM
 stage="$build_root/stage"

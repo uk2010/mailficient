@@ -719,6 +719,7 @@ public class MailWindow : Adw.ApplicationWindow {
         help_menu.append ("About Mailficient", "win.about");
         app_menu.append_section ("Help", help_menu);
         var app_menu_button = new Gtk.MenuButton (); app_menu_button.icon_name = "open-menu-symbolic";
+        app_menu_button.set_size_request (30, 30);
         app_menu_button.add_css_class ("app-menu-button");
         app_menu_button.valign = Gtk.Align.CENTER;
         app_menu_button.tooltip_text = "Mailficient menu"; app_menu_button.menu_model = app_menu; header.append (app_menu_button);
@@ -1512,7 +1513,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.1.18"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.2"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
