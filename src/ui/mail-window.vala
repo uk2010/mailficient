@@ -640,7 +640,9 @@ public class MailWindow : Adw.ApplicationWindow {
         sort_menu.append ("Oldest First", "win.sort::oldest"); sort_menu.append ("Sender", "win.sort::sender");
         sort_menu.append ("Subject", "win.sort::subject"); sort_menu.append ("Unread First", "win.sort::unread");
         sort_menu.append ("Flagged First", "win.sort::flagged");
-        sort_button.icon_name = "view-sort-descending-symbolic";
+        sort_button.child = new Gtk.Image.from_icon_name ("view-sort-descending-symbolic");
+        sort_button.set_size_request (44, 38);
+        sort_button.always_show_arrow = false;
         sort_button.tooltip_text = "Sort messages — " + sort_label_for (settings.message_sort);
         sort_button.menu_model = sort_menu;
         Accessibility.label (sort_button, "Sort messages");
@@ -694,7 +696,10 @@ public class MailWindow : Adw.ApplicationWindow {
         help_menu.append ("Keyboard Shortcuts", "win.shortcuts");
         help_menu.append ("About Mailficient", "win.about");
         app_menu.append_section ("Help", help_menu);
-        var app_menu_button = new Gtk.MenuButton (); app_menu_button.icon_name = "open-menu-symbolic";
+        var app_menu_button = new Gtk.MenuButton ();
+        app_menu_button.child = new Gtk.Image.from_icon_name ("open-menu-symbolic");
+        app_menu_button.set_size_request (44, 38);
+        app_menu_button.always_show_arrow = false;
         app_menu_button.add_css_class ("app-menu-button");
         app_menu_button.valign = Gtk.Align.CENTER;
         app_menu_button.tooltip_text = "Mailficient menu"; app_menu_button.menu_model = app_menu; header.append (app_menu_button);
@@ -895,6 +900,7 @@ public class MailWindow : Adw.ApplicationWindow {
         case "search": return search;
         case "sort":
             sort_button.add_css_class ("apple-toolbar-button");
+            sort_button.add_css_class ("sort-toolbar-button");
             return sort_button;
         case "space":
             var space = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);

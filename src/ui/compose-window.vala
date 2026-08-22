@@ -64,6 +64,7 @@ public class ComposeWindow : Adw.Window {
                 modal: false,
                 default_width: child_window_dimension (720, parent.get_width (), 480),
                 default_height: child_window_dimension (620, parent.get_height (), 420));
+        add_css_class ("compose-window");
         this.cache = cache;
         this.attachment_service = attachment_service;
         this.received_attachment_service = received_attachment_service;
@@ -92,6 +93,7 @@ public class ComposeWindow : Adw.Window {
         Accessibility.label (send_later, "Schedule message to send later"); send_later.clicked.connect (() => schedule_send.begin ()); header.pack_end (send_later);
         toolbar.add_top_bar (header);
         var root = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        root.add_css_class ("compose-root");
         if (queued_item != null) root.append (new OutboxStatusView (queued_item));
         from_selector = build_from_selector ();
         var compose_header = new ComposeHeader (from_selector, to_entry, cc_entry, bcc_entry, subject_entry);
@@ -106,7 +108,8 @@ public class ComposeWindow : Adw.Window {
             recipient_completions.add (new RecipientCompletionController (recipient_entry, completion_service, draft.account_id));
         body.wrap_mode = Gtk.WrapMode.WORD_CHAR; body.add_css_class ("compose-body"); Accessibility.label (body, "Message body");
         RichTextBuffer.prepare (body.buffer);
-        var scroller = new Gtk.ScrolledWindow (); scroller.set_child (body); scroller.vexpand = true; root.append (scroller);
+        var scroller = new Gtk.ScrolledWindow (); scroller.add_css_class ("compose-editor-scroller");
+        scroller.set_child (body); scroller.vexpand = true; root.append (scroller);
         forward_status.set_margin_start (14); forward_status.set_margin_end (14);
         forward_status.set_margin_top (8); forward_status.set_margin_bottom (2);
         forward_status.append (forward_spinner); forward_status.append (forward_status_label);
@@ -114,7 +117,8 @@ public class ComposeWindow : Adw.Window {
         forward_status.visible = false; root.append (forward_status);
         attachment_rows.set_margin_start (12); attachment_rows.set_margin_end (12); attachment_rows.set_margin_top (6);
         root.append (attachment_rows);
-        bottom_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6); bottom_actions.set_margin_start (12); bottom_actions.set_margin_end (12); bottom_actions.set_margin_top (8); bottom_actions.set_margin_bottom (10);
+        bottom_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6); bottom_actions.add_css_class ("compose-actions");
+        bottom_actions.set_margin_start (12); bottom_actions.set_margin_end (12); bottom_actions.set_margin_top (8); bottom_actions.set_margin_bottom (10);
         attach_button = new Gtk.Button.from_icon_name ("mail-attachment-symbolic"); attach_button.tooltip_text = "Attach files"; Accessibility.label (attach_button, "Attach files"); attach_button.clicked.connect (() => choose_attachments.begin ()); bottom_actions.append (attach_button);
         var image_button = new Gtk.Button.from_icon_name ("insert-image-symbolic"); image_button.tooltip_text = "Insert image";
         Accessibility.label (image_button, "Insert inline image"); image_button.clicked.connect (() => choose_inline_image.begin ()); bottom_actions.append (image_button);

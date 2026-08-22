@@ -45,6 +45,18 @@ public class MailboxSidebar : Gtk.Box {
                 }
             }
         });
+        var identity = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+        identity.add_css_class ("sidebar-identity");
+        identity.set_margin_start (14); identity.set_margin_end (14);
+        identity.set_margin_top (12); identity.set_margin_bottom (5);
+        var identity_icon = new Gtk.Image.from_icon_name ("mail-unread-symbolic");
+        identity_icon.add_css_class ("sidebar-identity-icon");
+        identity.append (identity_icon);
+        var identity_label = new Gtk.Label ("Mailficient");
+        identity_label.xalign = 0; identity_label.hexpand = true;
+        identity_label.add_css_class ("sidebar-identity-title");
+        identity.append (identity_label);
+        append (identity);
         var scroller = new Gtk.ScrolledWindow ();
         scroller.hscrollbar_policy = Gtk.PolicyType.NEVER;
         scroller.set_child (list);
