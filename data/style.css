@@ -535,9 +535,9 @@ menubutton.app-menu-button > button {
 }
 
 .message-row {
-  min-height: 74px;
-  margin: 3px 6px;
-  padding: 11px 11px 11px 9px;
+  min-height: 62px;
+  margin: 2px 6px;
+  padding: 7px 11px 7px 9px;
   border: 1px solid transparent;
   border-left: 3px solid transparent;
   border-radius: 10px;
@@ -564,8 +564,8 @@ menubutton.app-menu-button > button {
 }
 
 .sender-avatar {
-  min-width: 38px;
-  min-height: 38px;
+  min-width: 32px;
+  min-height: 32px;
   background: color-mix(in srgb, var(--accent-bg-color) 68%, var(--window-bg-color));
   color: var(--accent-fg-color);
   font-size: .86em;
@@ -931,8 +931,8 @@ menubutton.app-menu-button > button {
 }
 
 .mail-header-bar .app-menu-button {
-  min-width: 44px;
-  min-height: 38px;
+  min-width: 30px;
+  min-height: 30px;
   padding: 0;
   background: transparent;
   border: 0;
@@ -940,8 +940,8 @@ menubutton.app-menu-button > button {
 }
 
 .mail-header-bar .app-menu-button > button {
-  min-width: 44px;
-  min-height: 38px;
+  min-width: 30px;
+  min-height: 30px;
   padding: 0;
   margin: 0;
   border-radius: 8px;

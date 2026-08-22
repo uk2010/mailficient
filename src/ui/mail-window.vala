@@ -698,7 +698,7 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu.append_section ("Help", help_menu);
         var app_menu_button = new Gtk.MenuButton ();
         app_menu_button.child = new Gtk.Image.from_icon_name ("open-menu-symbolic");
-        app_menu_button.set_size_request (44, 38);
+        app_menu_button.set_size_request (30, 30);
         app_menu_button.always_show_arrow = false;
         app_menu_button.add_css_class ("app-menu-button");
         app_menu_button.valign = Gtk.Align.CENTER;

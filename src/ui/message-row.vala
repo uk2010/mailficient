@@ -16,7 +16,7 @@ public class MessageRow : Gtk.Box {
         update_unread_style ();
         accessible_role = Gtk.AccessibleRole.LIST_ITEM;
 
-        var outer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        var outer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
         if (multiple && context_selection != null) {
             var selector = new Gtk.CheckButton ();
             selector.valign = Gtk.Align.CENTER;
@@ -44,7 +44,7 @@ public class MessageRow : Gtk.Box {
             });
             outer.append (selector);
         }
-        var avatar = new Adw.Avatar (36, message.initials (), false); avatar.add_css_class ("sender-avatar"); outer.append (avatar);
+        var avatar = new Adw.Avatar (32, message.initials (), false); avatar.add_css_class ("sender-avatar"); outer.append (avatar);
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); content.hexpand = true;
         var top = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
         var sender = new Gtk.Label (message.sender_name); sender.xalign = 0; sender.hexpand = true; sender.ellipsize = Pango.EllipsizeMode.END; sender.add_css_class ("sender"); top.append (sender);
