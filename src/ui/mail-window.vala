@@ -1441,6 +1441,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var message = repository.find_message (id); if (message == null) return;
         selected_message = message; display_message (message); update_action_sensitivity ();
         set_message_content_visible (true);
+        if (!is_local_draft (message.id)) mark_read_after_selection (message);
         present ();
     }
 
