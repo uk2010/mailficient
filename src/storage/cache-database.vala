@@ -1159,8 +1159,11 @@ public class CacheDatabase : Object, AccountStore {
 
     public Gee.ArrayList<Mailbox> list_cached_mailboxes () throws MailError {
         var result = new Gee.ArrayList<Mailbox> (); Sqlite.Statement statement;
+        // The server's unread total can cover messages outside the bounded
+        // local cache. Read the authoritative total instead of deriving it
+        // from the currently cached message window.
         const string sql = "SELECT b.id,b.name,b.icon_name,b.role," +
-            "COALESCE((SELECT COUNT(*) FROM cached_messages m WHERE m.mailbox_id=b.id AND m.unread=1),0)," +
+            "b.unread_count," +
             "b.account_id,b.remote_name FROM cached_mailboxes b " +
             "ORDER BY b.account_id,CASE b.role WHEN 0 THEN 0 WHEN 4 THEN 1 WHEN 3 THEN 2 WHEN 5 THEN 3 WHEN 6 THEN 4 WHEN 7 THEN 5 ELSE 6 END,b.name COLLATE NOCASE";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare cached mailbox loading");
@@ -1465,8 +1468,8 @@ public class CacheDatabase : Object, AccountStore {
     public uint unified_unread_count (MailboxRole role = MailboxRole.INBOX) throws MailError {
         Sqlite.Statement statement;
         if (database.prepare_v2 (
-                "SELECT COUNT(*) FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id " +
-                "WHERE b.role=? AND m.unread=1", -1, out statement) != Sqlite.OK)
+                "SELECT COALESCE(SUM(unread_count),0) FROM cached_mailboxes WHERE role=?", -1,
+                out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not count unread mail");
         statement.bind_int (1, (int) role);
         if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not count unread mail");
