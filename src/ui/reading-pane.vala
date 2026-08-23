@@ -144,8 +144,8 @@ public class ReadingPane : Gtk.Box {
         recipients.add_css_class ("dim-label"); sender_text.append (recipients); sender_line.append (sender_text);
         var time = new Gtk.Label (message.timestamp); time.add_css_class ("dim-label");
         time.ellipsize = Pango.EllipsizeMode.END; time.max_width_chars = 18; sender_line.append (time);
-        header_button.child = sender_line; header_button.tooltip_text = expanded ? "Collapse message" : "Expand message";
-        Accessibility.label (header_button, "%s message from %s".printf (expanded ? "Collapse" : "Expand", message.sender_name));
+        header_button.child = sender_line; header_button.tooltip_text = expanded ? "Message details" : "Expand message";
+        Accessibility.label (header_button, "%s message from %s".printf (expanded ? "Message details" : "Expand", message.sender_name));
         card.append (header_button);
         var revealer = new Gtk.Revealer (); revealer.hexpand = true; revealer.halign = Gtk.Align.FILL; revealer.reveal_child = expanded; revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
         var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); message_content.hexpand = true; message_content.halign = Gtk.Align.FILL; revealer.child = message_content;
@@ -156,13 +156,16 @@ public class ReadingPane : Gtk.Box {
         }
         card.append (revealer); card.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
         header_button.clicked.connect (() => {
-            if (!revealer.reveal_child && !content_loaded) {
+            // A header click may reveal an older collapsed message, but it
+            // must never hide the message that is already open.
+            if (revealer.reveal_child) return;
+            if (!content_loaded) {
                 populate_message_content (message, message_content);
                 content_loaded = true;
             }
-            revealer.reveal_child = !revealer.reveal_child;
-            header_button.tooltip_text = revealer.reveal_child ? "Collapse message" : "Expand message";
-            Accessibility.label (header_button, "%s message from %s".printf (revealer.reveal_child ? "Collapse" : "Expand", message.sender_name));
+            revealer.reveal_child = true;
+            header_button.tooltip_text = "Message details";
+            Accessibility.label (header_button, "Message details from %s".printf (message.sender_name));
         });
         content.append (card);
     }
@@ -226,7 +229,7 @@ public class ReadingPane : Gtk.Box {
             });
             notice_box.append (trust); message_content.append (notice_box);
         }
-        if (html_view != null) {
+        if (html_view != null && message.body_html.strip () != "") {
             html_view.display (message.body_html, sender_trusted, message.attachments,
                 full_html_formatting, print_header (message));
             message_content.append (html_view);

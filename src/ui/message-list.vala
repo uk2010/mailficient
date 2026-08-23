@@ -36,7 +36,7 @@ public class MessageList : Gtk.Box {
         header.add_css_class ("message-list-header");
         var labels = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); labels.hexpand = true;
         mailbox_title.xalign = 0; mailbox_title.add_css_class ("title-3"); labels.append (mailbox_title);
-        message_count.xalign = 0; message_count.add_css_class ("dim-label"); labels.append (message_count);
+        message_count.xalign = 0; message_count.add_css_class ("dim-label"); message_count.add_css_class ("message-count"); labels.append (message_count);
         header.append (labels);
         unread_filter.icon_name = "mail-unread-symbolic";
         unread_filter.tooltip_text = "Show unread messages only";
@@ -73,6 +73,10 @@ public class MessageList : Gtk.Box {
         });
         scroller.set_child (list); scroller.vexpand = true;
         content_stack.vexpand = true;
+        content_stack.transition_type = Gtk.StackTransitionType.CROSSFADE;
+        content_stack.transition_duration = 160;
+        empty_status.vexpand = true;
+        empty_status.add_css_class ("empty-state");
         content_stack.add_named (scroller, "messages");
         content_stack.add_named (empty_status, "empty");
         append (content_stack);

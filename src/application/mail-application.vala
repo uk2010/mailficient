@@ -134,12 +134,12 @@ public class MailApplication : Adw.Application {
                 repository = new CachedMailRepository (cache, demo_repository, demo_mode);
 #if HAVE_CAMEL
                 // Camel's folder-summary SQLite schema is private to the EDS
-                // release that created it. Do not reopen the pre-v2 cache:
+                // release that created it. Do not reopen the pre-v3 cache:
                 // some upgrades abort inside Camel instead of reporting an
                 // error when an older folders.db lacks a required column.
                 // This cache is disposable; mail.db remains authoritative.
                 var camel_engine = new CamelMailEngine (credentials,
-                    Path.build_filename (directory, "camel-data"), Path.build_filename (directory, "camel-cache-v2"),
+                    Path.build_filename (directory, "camel-data"), Path.build_filename (directory, "camel-cache-v3"),
                     Path.build_filename (directory, "received-attachments"), online_accounts);
                 mail_engine = camel_engine;
                 account_provisioner = new AccountProvisioningService (cache, credentials,

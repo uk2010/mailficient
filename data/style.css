@@ -541,12 +541,18 @@ menubutton.app-menu-button > button {
   border: 1px solid transparent;
   border-left: 3px solid transparent;
   border-radius: 10px;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .message-row:hover:not(:selected) {
   background: alpha(currentColor, .045);
   border-color: alpha(currentColor, .07);
+  box-shadow: 0 2px 8px alpha(black, .045);
+}
+
+.message-row:focus-visible {
+  outline: 2px solid alpha(var(--accent-bg-color), .72);
+  outline-offset: -2px;
 }
 
 .message-row:selected {
@@ -577,9 +583,31 @@ menubutton.app-menu-button > button {
   font-size: .93em;
 }
 
+.message-count,
+.conversation-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: alpha(currentColor, .07);
+  font-size: .78em;
+  font-weight: 600;
+}
+
 .message-row.unread .sender,
 .message-row.unread .subject {
   font-weight: 750;
+}
+
+.unread-indicator-slot {
+  min-width: 8px;
+  min-height: 8px;
+}
+
+.unread-indicator-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 999px;
+  background: var(--accent-bg-color);
+  box-shadow: 0 1px 2px alpha(black, .22);
 }
 
 .subject {
@@ -594,8 +622,15 @@ menubutton.app-menu-button > button {
 }
 
 .timestamp {
+  min-width: 68px;
   color: alpha(currentColor, .50);
   font-size: .78em;
+}
+
+.message-meta-icon {
+  min-width: 16px;
+  min-height: 16px;
+  opacity: .68;
 }
 
 .reading-pane {
@@ -958,4 +993,65 @@ menubutton.app-menu-button > button {
   background: alpha(currentColor, .095);
   border-color: alpha(currentColor, .14);
   box-shadow: inset 0 1px alpha(white, .24), 0 2px 6px alpha(black, .06);
+}
+
+/* MenuButton wrappers stay unstyled; only their inner button is a toolbar
+ * surface. This prevents a second rounded hover surface from being painted. */
+menubutton.toolbar-menu-button > button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: alpha(currentColor, .045);
+  border: 1px solid alpha(currentColor, .09);
+  box-shadow: inset 0 1px alpha(white, .18);
+}
+
+menubutton.toolbar-menu-button > button:hover {
+  background: alpha(currentColor, .095);
+  border-color: alpha(currentColor, .14);
+  box-shadow: inset 0 1px alpha(white, .24), 0 2px 6px alpha(black, .06);
+}
+
+.flag-control menubutton.toolbar-menu-button > button {
+  min-width: 16px;
+  min-height: 30px;
+  padding: 1px 3px;
+  border-radius: 0 8px 8px 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.flag-control .apple-toolbar-button:hover,
+.flag-control menubutton.toolbar-menu-button > button:hover {
+  background: alpha(currentColor, .095);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.apple-toolbar-group .apple-toolbar-button:hover,
+.toolbar-action-cluster .apple-toolbar-group .apple-toolbar-button:hover {
+  background: alpha(currentColor, .095);
+  border-color: alpha(currentColor, .14);
+  box-shadow: none;
+}
+
+.mail-header-bar .toolbar-action-cluster > menubutton.toolbar-menu-button.toolbar-cluster-segment > button {
+  min-width: 36px;
+  min-height: 28px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.mail-header-bar .toolbar-action-cluster > menubutton.toolbar-menu-button.toolbar-cluster-segment > button:hover {
+  background: alpha(currentColor, .095);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }

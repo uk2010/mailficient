@@ -1,9 +1,15 @@
+# Mailficient 0.2.4
+
+Mailficient 0.2.4 improves responsive toolbar spacing and fixes compact-toolbar
+hover rendering. Existing pixel-based flexible spaces are migrated to
+percentages so the toolbar scales with the window.
+
 # Mailficient 0.2.3
 
-Mailficient 0.2.3 improves toolbar control sizing and neutralizes the New
+Mailficient 0.2.3 improved toolbar control sizing and neutralized the New
 Message button styling for a consistent toolbar appearance. GNOME Contacts
-support is enabled in address-book builds, and the Debian and RPM release
-packaging includes the required private Evolution Data Server/Camel runtime.
+support was enabled in address-book builds, and the Debian and RPM release
+packaging included the required private Evolution Data Server/Camel runtime.
 
 # Mailficient 0.2.2
 

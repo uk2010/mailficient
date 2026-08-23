@@ -1,11 +1,9 @@
 namespace Mailficient {
 public class ToolbarCustomizationDialog : Adw.PreferencesDialog {
     public signal void layout_changed (string layout);
-
     private Gee.ArrayList<string> items;
     private Gtk.FlowBox palette = new Gtk.FlowBox ();
     private Gtk.Box preview = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
-
     public ToolbarCustomizationDialog (string serialized_layout) {
         title = "Customize Toolbar";
         content_width = 1040;
@@ -112,6 +110,22 @@ public class ToolbarCustomizationDialog : Adw.PreferencesDialog {
             label.ellipsize = Pango.EllipsizeMode.END;
             label.max_width_chars = 15;
             label.add_css_class ("caption");
+            if (ToolbarLayout.is_flexible_space (id)) {
+                var size_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 3);
+                size_box.halign = Gtk.Align.CENTER;
+                var width = new Gtk.SpinButton.with_range (0, 100, 1);
+                width.value = ToolbarLayout.flexible_space_percentage (id);
+                width.numeric = true;
+                width.digits = 0;
+                width.tooltip_text = "Percentage of the toolbar width (0 = no space)";
+                width.value_changed.connect (() =>
+                    set_flexible_space_percentage (item_index, (int) width.value));
+                size_box.append (width);
+                var percentage = new Gtk.Label ("%");
+                percentage.add_css_class ("dim-label");
+                size_box.append (percentage);
+                card.append (size_box);
+            }
             var controls = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
             controls.halign = Gtk.Align.CENTER;
             controls.add_css_class ("linked");
@@ -146,6 +160,17 @@ public class ToolbarCustomizationDialog : Adw.PreferencesDialog {
         end.append (end_label);
         add_drop_target (end, items.size, false);
         preview.append (end);
+    }
+
+    private void set_flexible_space_percentage (int index, int percentage) {
+        if (index < 0 || index >= items.size || !ToolbarLayout.is_flexible_space (items[index])) return;
+        string next = ToolbarLayout.flexible_space_id (percentage);
+        if (items[index] == next) return;
+        items[index] = next;
+        // Percentage edits only change the serialized layout. Keep the existing
+        // preview widgets alive so the spin control does not reset the
+        // horizontal scroller back to the beginning on every click.
+        layout_changed (ToolbarLayout.serialize (items));
     }
 
     private void add_drag_source (Gtk.Widget widget, string payload) {

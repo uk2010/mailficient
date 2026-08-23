@@ -2910,6 +2910,12 @@ private void test_toolbar_layout () {
         "sidebar,refresh,flex,space,flex,archive");
     assert (ToolbarLayout.is_repeatable ("space"));
     assert (!ToolbarLayout.is_repeatable ("archive"));
+    assert (ToolbarLayout.is_flexible_space ("flex:25"));
+    assert (ToolbarLayout.flexible_space_percentage ("flex:25") == 25);
+    assert (ToolbarLayout.flexible_space_id (25) == "flex:25");
+    assert (ToolbarLayout.is_legacy_pixel_space ("flex:101"));
+    assert (ToolbarLayout.migrate_pixel_spaces ("sidebar,flex:200,flex:20,sort", 1000) ==
+        "sidebar,flex:20,flex:2,sort");
     assert (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT).size > 0);
     assert (ToolbarLayout.icon_name ("junk") == "dialog-warning-symbolic");
 }

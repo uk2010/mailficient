@@ -110,6 +110,11 @@ public class MailSettingsStore : Object {
         }
     }
 
+    public bool toolbar_layout_percentages_migrated {
+        get { return get_bool ("toolbar-layout-percentages-migrated", false); }
+        set { set_bool ("toolbar-layout-percentages-migrated", value); }
+    }
+
     public string preferences_page {
         owned get {
             string value = get_string ("preferences-page", "general");

@@ -61,6 +61,9 @@ public class MailWindow : Adw.ApplicationWindow {
     private SimpleAction? full_html_formatting_action;
     private Gtk.MenuButton sort_button = new Gtk.MenuButton ();
     private Gtk.Box customizable_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+    private Gee.ArrayList<Gtk.Box> percentage_spacers = new Gee.ArrayList<Gtk.Box> ();
+    private Gee.ArrayList<int> percentage_spacer_values = new Gee.ArrayList<int> ();
+    private bool migrating_toolbar_layout = false;
     private Gtk.PopoverMenu? toolbar_context_menu;
     // Start compact until the first allocation tells the adaptive breakpoint
     // that a wide toolbar is genuinely available. This prevents the wide
@@ -173,10 +176,10 @@ public class MailWindow : Adw.ApplicationWindow {
             DebugTrace.log ("navigation", "load_mailbox mailbox=%s".printf (mailbox.id));
             message_list.show_mailbox (mailbox);
             var first_message = message_list.first_message ();
-            if (first_message != null && !is_local_draft (first_message.id)) {
+            if (first_message != null) {
                 selected_message = repository.find_message (first_message.id) ?? first_message;
                 display_message (selected_message);
-                mark_read_after_selection (first_message.id);
+                if (!is_local_draft (first_message.id)) mark_read_after_selection (first_message.id);
                 rebuild_move_menu (); update_action_sensitivity ();
             } else { selected_message = null; reader.show_empty (); update_action_sensitivity (); }
             if (mailbox_split.collapsed) { mailbox_split.show_sidebar = false; set_message_content_visible (false); }
@@ -192,12 +195,11 @@ public class MailWindow : Adw.ApplicationWindow {
         sidebar.edit_account_requested.connect (edit_account);
         sidebar.account_info_requested.connect (show_account_info);
         message_list.message_selected.connect ((message) => {
-            if (is_local_draft (message.id)) {
-                selected_message = null; reader.show_empty (); update_action_sensitivity (); return;
-            }
             selected_message = repository.find_message (message.id) ?? message;
             display_message (selected_message);
-            if (preserve_unread_selection_id == message.id)
+            if (is_local_draft (message.id))
+                preserve_unread_selection_id = "";
+            else if (preserve_unread_selection_id == message.id)
                 preserve_unread_selection_id = "";
             else
                 mark_read_after_selection (message.id);
@@ -659,6 +661,7 @@ public class MailWindow : Adw.ApplicationWindow {
         customizable_toolbar.halign = Gtk.Align.FILL;
         customizable_toolbar.set_size_request (0, -1);
         customizable_toolbar.add_css_class ("apple-toolbar");
+        customizable_toolbar.notify["width"].connect (() => update_percentage_spacers ());
         header.append (customizable_toolbar);
 
         var app_menu = new Menu ();
@@ -700,7 +703,6 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu_button.child = new Gtk.Image.from_icon_name ("open-menu-symbolic");
         app_menu_button.set_size_request (28, 38);
         app_menu_button.always_show_arrow = false;
-        app_menu_button.add_css_class ("apple-toolbar-button");
         app_menu_button.add_css_class ("app-menu-button");
         app_menu_button.valign = Gtk.Align.CENTER;
         app_menu_button.tooltip_text = "Mailficient menu"; app_menu_button.menu_model = app_menu; header.append (app_menu_button);
@@ -804,6 +806,10 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void rebuild_toolbar () {
+        percentage_spacers.clear ();
+        percentage_spacer_values.clear ();
+        more_button.remove_css_class ("apple-toolbar-button");
+        more_button.remove_css_class ("toolbar-menu-button");
         Gtk.Widget? child = customizable_toolbar.get_first_child ();
         while (child != null) {
             Gtk.Widget? next = child.get_next_sibling ();
@@ -826,7 +832,7 @@ public class MailWindow : Adw.ApplicationWindow {
             if (compact_toolbar && overflows_in_compact_toolbar (id)) {
                 action_cluster = null;
                 if (!added_overflow) {
-                    more_button.add_css_class ("apple-toolbar-button");
+                    more_button.add_css_class ("toolbar-menu-button");
                     customizable_toolbar.append (more_button);
                     added_overflow = true;
                 }
@@ -853,10 +859,54 @@ public class MailWindow : Adw.ApplicationWindow {
         search.hexpand = !compact_toolbar;
         search.halign = Gtk.Align.FILL;
         search.set_size_request (compact_toolbar ? 150 : 240, -1);
+        update_percentage_spacers ();
         update_action_sensitivity ();
     }
 
+    private void update_percentage_spacers () {
+        int toolbar_width = customizable_toolbar.get_width ();
+        if (toolbar_width <= 0) return;
+        if (!migrating_toolbar_layout && !settings.toolbar_layout_percentages_migrated) {
+            string current = settings.toolbar_layout;
+            string migrated = ToolbarLayout.migrate_pixel_spaces (current, toolbar_width);
+            migrating_toolbar_layout = true;
+            settings.toolbar_layout = migrated;
+            settings.toolbar_layout_percentages_migrated = true;
+            migrating_toolbar_layout = false;
+            return;
+        }
+        int fixed_width = 0;
+        int child_count = 0;
+        Gtk.Widget? child = customizable_toolbar.get_first_child ();
+        while (child != null) {
+            child_count++;
+            var child_box = child as Gtk.Box;
+            if (child_box == null || !percentage_spacers.contains (child_box))
+                fixed_width += child.get_width ();
+            child = child.get_next_sibling ();
+        }
+        int spacing_width = int.max (0, child_count - 1) * 6;
+        int flexible_width = int.max (0, toolbar_width - fixed_width - spacing_width);
+        for (int index = 0; index < percentage_spacers.size; index++) {
+            int percentage = percentage_spacer_values[index];
+            int width = (flexible_width * percentage) / 100;
+            percentage_spacers[index].set_size_request (width, -1);
+        }
+    }
+
     private Gtk.Widget? toolbar_widget_for (string id) {
+        if (ToolbarLayout.is_flexible_space (id)) {
+            var flexible = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+            // The palette adds explicit percentage spacers. The legacy bare
+            // "flex" token remains the automatic expanding spacer used by
+            // the built-in default layout.
+            flexible.hexpand = id == "flex";
+            if (id != "flex") {
+                percentage_spacers.add (flexible);
+                percentage_spacer_values.add (ToolbarLayout.flexible_space_percentage (id));
+            }
+            return flexible;
+        }
         switch (id) {
         case "sidebar":
             mailbox_toggle = make_toolbar_button (id, "");
@@ -894,23 +944,19 @@ public class MailWindow : Adw.ApplicationWindow {
             move_button = new Gtk.MenuButton ();
             move_button.icon_name = ToolbarLayout.icon_name (id);
             move_button.tooltip_text = "Move or copy to mailbox";
-            move_button.add_css_class ("apple-toolbar-button");
+            move_button.add_css_class ("toolbar-menu-button");
             Accessibility.label (move_button, "Move or copy to mailbox");
             rebuild_move_menu ();
             return move_button;
         case "search": return search;
         case "sort":
-            sort_button.add_css_class ("apple-toolbar-button");
+            sort_button.add_css_class ("toolbar-menu-button");
             sort_button.add_css_class ("sort-toolbar-button");
             return sort_button;
         case "space":
             var space = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
             space.set_size_request (18, -1);
             return space;
-        case "flex":
-            var flexible = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
-            flexible.hexpand = true;
-            return flexible;
         default: return null;
         }
     }
@@ -927,7 +973,7 @@ public class MailWindow : Adw.ApplicationWindow {
         flag_color_button = new Gtk.MenuButton ();
         flag_color_button.icon_name = "pan-down-symbolic";
         flag_color_button.tooltip_text = "Choose flag color";
-        flag_color_button.add_css_class ("apple-toolbar-button");
+        flag_color_button.add_css_class ("toolbar-menu-button");
         Accessibility.label (flag_color_button, "Choose flag color");
 
         var popover = new Gtk.Popover ();
@@ -1009,6 +1055,7 @@ public class MailWindow : Adw.ApplicationWindow {
         add_tick_callback ((widget, frame_clock) => {
             if (get_width () <= 0) return Source.CONTINUE;
             sync_adaptive_toolbar_layout ();
+            update_percentage_spacers ();
             return Source.REMOVE;
         });
     }
@@ -1424,7 +1471,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.2.3"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.2.4"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

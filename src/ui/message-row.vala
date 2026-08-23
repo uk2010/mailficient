@@ -5,6 +5,7 @@ public class MessageRow : Gtk.Box {
     private uint model_position;
     private ulong selection_handler;
     private MenuItem? read_menu_item;
+    private Gtk.Widget? unread_dot;
 
     public MessageRow (Message message, Gtk.SelectionModel? context_selection = null,
                        uint model_position = 0, bool multiple = false) {
@@ -44,6 +45,14 @@ public class MessageRow : Gtk.Box {
             });
             outer.append (selector);
         }
+        var unread_indicator = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        unread_indicator.add_css_class ("unread-indicator-slot");
+        unread_dot = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        unread_dot.add_css_class ("unread-indicator-dot");
+        unread_dot.valign = Gtk.Align.CENTER;
+        unread_dot.visible = message.unread;
+        unread_indicator.append (unread_dot);
+        outer.append (unread_indicator);
         var avatar = new Adw.Avatar (32, message.initials (), false); avatar.add_css_class ("sender-avatar"); outer.append (avatar);
         var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); content.hexpand = true;
         var top = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
@@ -54,12 +63,19 @@ public class MessageRow : Gtk.Box {
             flag.tooltip_text = "%s flag".printf (flag_color_label (message.flag_color));
             top.append (flag);
         }
-        var time = new Gtk.Label (message.timestamp); time.add_css_class ("timestamp"); top.append (time);
+        var time = new Gtk.Label (message.timestamp); time.add_css_class ("timestamp");
+        time.set_size_request (68, -1); time.xalign = 1;
+        top.append (time);
         content.append (top);
         var subject_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 5);
         var subject = new Gtk.Label (message.subject); subject.xalign = 0; subject.hexpand = true; subject.ellipsize = Pango.EllipsizeMode.END; subject.add_css_class ("subject"); subject_box.append (subject);
-        if (message.conversation_count > 1) { var count = new Gtk.Label (message.conversation_count.to_string ()); count.add_css_class ("dim-label"); subject_box.append (count); }
-        if (message.has_attachment) subject_box.append (new Gtk.Image.from_icon_name ("mail-attachment-symbolic"));
+        if (message.conversation_count > 1) { var count = new Gtk.Label (message.conversation_count.to_string ()); count.add_css_class ("dim-label"); count.add_css_class ("conversation-count"); subject_box.append (count); }
+        if (message.has_attachment) {
+            var attachment = new Gtk.Image.from_icon_name ("mail-attachment-symbolic");
+            attachment.add_css_class ("message-meta-icon");
+            attachment.tooltip_text = "Has attachment";
+            subject_box.append (attachment);
+        }
         content.append (subject_box);
         var preview = new Gtk.Label (message.preview); preview.xalign = 0; preview.ellipsize = Pango.EllipsizeMode.END; preview.add_css_class ("preview"); content.append (preview);
         outer.append (content);
@@ -116,6 +132,7 @@ public class MessageRow : Gtk.Box {
     private void update_unread_style () {
         if (message.unread) add_css_class ("unread");
         else remove_css_class ("unread");
+        if (unread_dot != null) unread_dot.visible = message.unread;
         if (read_menu_item != null) read_menu_item.set_label (message.unread ? "Mark as Read" : "Mark as Unread");
     }
 
