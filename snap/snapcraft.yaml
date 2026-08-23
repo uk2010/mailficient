@@ -1,0 +1,106 @@
+name: mailficient
+base: core24
+version: '0.2.3'
+title: Mailficient
+summary: A native desktop email client
+description: |
+  Mailficient is a native GTK email client for IMAP and SMTP accounts. It
+  provides bounded mailbox browsing, background synchronization, search,
+  conversations, attachments, rules, labels, templates, and an offline cache.
+icon: data/icons/hicolor/512x512/apps/com.local.Mailficient.png
+contact: https://github.com/uk2010/mailficient/issues
+issues: https://github.com/uk2010/mailficient/issues
+license: GPL-3.0-or-later
+source-code: https://github.com/uk2010/mailficient
+website: https://github.com/uk2010/mailficient
+
+grade: stable
+confinement: strict
+compression: lzo
+
+# Each package is compiled natively. This avoids cross-compiled WebKitGTK and
+# Evolution Data Server binaries and makes the same manifest usable locally or
+# with Launchpad's remote builders.
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [arm64]
+    build-for: [arm64]
+
+layout:
+  /usr/bin/gpg-agent:
+    bind-file: $SNAP/usr/bin/gpg-agent
+
+apps:
+  mailficient:
+    command: usr/bin/mailficient
+    desktop: usr/share/applications/com.local.Mailficient.desktop
+    common-id: com.local.Mailficient
+    extensions: [gnome]
+    environment:
+      EDS_CAMEL_PROVIDER_DIR: $SNAP/usr/lib/evolution-data-server/camel-providers
+    plugs:
+      - network
+      - network-status
+      - online-accounts-service
+      - password-manager-service
+      - home
+      - removable-media
+
+parts:
+  mailficient:
+    plugin: meson
+    source: .
+    meson-parameters:
+      - --prefix=/usr
+      - --buildtype=release
+      - -Dcamel=enabled
+      - -Dwebkit=enabled
+      - -Dsecret=enabled
+      - -Daddressbook=enabled
+    build-packages:
+      - valac
+      - libcamel1.2-dev
+      - libebook1.2-dev
+      - libgee-0.8-dev
+      - libjson-glib-dev
+      - libsecret-1-dev
+      - libssl-dev
+      - libsqlite3-dev
+      - libwebkitgtk-6.0-dev
+      - libxml2-dev
+    stage-packages:
+      - evolution-data-server
+      - gpg
+      - gpg-agent
+      - libcamel-1.2-64t64
+      - libebook-1.2-21t64
+      - libgee-0.8-2
+      - libjson-glib-1.0-0
+      - libsecret-1-0
+      - libssl3t64
+      - libsqlite3-0
+      - libwebkitgtk-6.0-4
+      - libxml2
+    override-build: |
+      craftctl default
+      # The source service file intentionally targets Flatpak's /app prefix.
+      # A snap is launched through /snap/bin instead of exporting that service.
+      sed -i 's/^DBusActivatable=true$/DBusActivatable=false/' \
+        "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop"
+      sed -i \
+        -e 's|^Exec=.*$|Exec=mailficient|' \
+        -e 's|^Icon=.*$|Icon=${SNAP}/usr/share/icons/hicolor/512x512/apps/com.local.Mailficient.png|' \
+        "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop"
+      rm -f \
+        "$CRAFT_PART_INSTALL/usr/share/dbus-1/services/com.local.Mailficient.service"
+      chmod 0755 \
+        "$CRAFT_PART_INSTALL/usr/bin/mailficient" \
+        "$CRAFT_PART_INSTALL/usr/bin/mailficient-addressbook-probe"
+      chmod 0644 \
+        "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop" \
+        "$CRAFT_PART_INSTALL/usr/share/metainfo/com.local.Mailficient.metainfo.xml"
+      find "$CRAFT_PART_INSTALL/usr/share/icons/hicolor" -type d -exec chmod 0755 {} +
+      find "$CRAFT_PART_INSTALL/usr/share/icons/hicolor" -type f -exec chmod 0644 {} +

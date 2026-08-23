@@ -1,0 +1,4 @@
+Design review notes
+
+The narrow layout now preserves the mailbox, message-list, and reading-pane
+navigation hierarchy. Verify keyboard focus and attachment removal before send.

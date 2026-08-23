@@ -1,0 +1,12 @@
+.flatpak-builder/
+.local-tools/
+build*/
+flatpak-build*/
+/build-deb.*
+/build-rpm.*
+dist/
+*.deb
+*.rpm
+*.sha256
+*.flatpak
+*.snap

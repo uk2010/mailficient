@@ -1,0 +1,174 @@
+#!/bin/sh
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+STATE=${1:-wide}
+DISPLAY_NUMBER=${MAIL_QA_DISPLAY:-:99}
+CLIENT_DISPLAY="127.0.0.1${DISPLAY_NUMBER}"
+if command -v Xvfb >/dev/null 2>&1; then
+  XVFB=$(command -v Xvfb)
+else
+  XVFB=/tmp/mailficient-xvfb/root/usr/bin/Xvfb
+fi
+LOG=/tmp/mailficient-visual-qa.log
+SHOT=${MAIL_QA_SHOT:-/tmp/mailficient-${STATE}.png}
+APP_BINARY=${MAIL_QA_BINARY:-build/src/mailficient}
+
+QA_DARK=0
+QA_NARROW=0
+QA_COMPOSE=0
+QA_FORWARD=0
+QA_DISCARD=0
+QA_RECIPIENTS=0
+QA_ACCOUNT=0
+QA_ACCOUNTS=0
+QA_ONLINE_ACCOUNTS=0
+QA_PROVIDERS=0
+QA_PREFERENCES=0
+QA_MESSAGE=1
+QA_SEARCH=
+QA_MAILBOX=
+QA_ERROR=0
+QA_RATE_LIMIT=0
+QA_PREVIEW=
+QA_MAILBOX_WIDTH=
+QA_MESSAGE_WIDTH=
+QA_HIDE_SIDEBAR=0
+QA_SYNC_PROGRESS=0
+QA_PRESERVE_SELECTION=0
+QA_TOOLBAR_CUSTOMIZATION=0
+QA_NO_DEMO=0
+QA_OUTBOX_EDITOR=0
+QA_OUTBOX_ACCEPTED=0
+QA_OUTBOX_REJECTED=0
+QA_STARTUP_ERROR=0
+QA_ACCOUNT_TLS_ERROR=0
+QA_DATA_DIR=
+QA_REMOVE_DATA=1
+case "$STATE" in
+  dark) QA_DARK=1 ;;
+  narrow) QA_NARROW=1 ;;
+  compose) QA_COMPOSE=1 ;;
+  compose-discard) QA_COMPOSE=1; QA_RECIPIENTS=1; QA_DISCARD=1 ;;
+  compose-forward) QA_FORWARD=1 ;;
+  compose-recipients) QA_COMPOSE=1; QA_RECIPIENTS=1 ;;
+  account) QA_ACCOUNT=1 ;;
+  account-tls-error) QA_ACCOUNT=1; QA_ACCOUNT_TLS_ERROR=1 ;;
+  accounts) QA_ACCOUNTS=1 ;;
+  online-accounts) QA_ONLINE_ACCOUNTS=1 ;;
+  providers) QA_PROVIDERS=1 ;;
+  preferences) QA_PREFERENCES=1 ;;
+  preferences-junk) QA_PREFERENCES=junk; QA_DATA_DIR=/tmp/mailficient-preferences-qa; QA_REMOVE_DATA=0 ;;
+  preferences-restored) QA_PREFERENCES=1; QA_DATA_DIR=/tmp/mailficient-preferences-qa; QA_REMOVE_DATA=0 ;;
+  privacy) QA_PREFERENCES=privacy ;;
+  remote-content) QA_MESSAGE=3; QA_SEARCH='project digest' ;;
+  search) QA_SEARCH='from:maya has:attachment design' ;;
+  empty) QA_MAILBOX=junk ;;
+  error) QA_ERROR=1 ;;
+  partial-sync) QA_ERROR=1 ;;
+  rate-limit) QA_RATE_LIMIT=1 ;;
+  preview-image) QA_PREVIEW=image ;;
+  preview-text) QA_PREVIEW=text ;;
+  attachment-unavailable) QA_MESSAGE=5; QA_SEARCH='weekend photographs' ;;
+  layout) QA_MAILBOX_WIDTH=330; QA_MESSAGE_WIDTH=500 ;;
+  hide-sidebar) QA_HIDE_SIDEBAR=1; QA_DATA_DIR=/tmp/mailficient-sidebar-qa; QA_REMOVE_DATA=0 ;;
+  sync-progress) QA_SYNC_PROGRESS=1 ;;
+  selection-refresh) QA_MESSAGE=3; QA_PRESERVE_SELECTION=1 ;;
+  toolbar-customization) QA_TOOLBAR_CUSTOMIZATION=1 ;;
+  sidebar-restored) QA_DATA_DIR=/tmp/mailficient-sidebar-qa; QA_REMOVE_DATA=0 ;;
+  onboarding) QA_NO_DEMO=1 ;;
+  outbox-uncertain) QA_OUTBOX_EDITOR=1 ;;
+  outbox-rejected) QA_OUTBOX_EDITOR=1; QA_OUTBOX_REJECTED=1 ;;
+  outbox-accepted) QA_OUTBOX_EDITOR=1; QA_OUTBOX_ACCEPTED=1 ;;
+  startup-error) QA_STARTUP_ERROR=1; QA_NO_DEMO=1 ;;
+esac
+
+if [ -z "$QA_DATA_DIR" ]; then
+  QA_DATA_DIR=$(mktemp -d /tmp/mailficient-qa-data.XXXXXX)
+fi
+
+if [ ! -x "$XVFB" ]; then
+  printf '%s\n' "Xvfb is required for visual QA (looked for Xvfb and $XVFB)" >&2
+  exit 1
+fi
+"$XVFB" "$DISPLAY_NUMBER" -ac -screen 0 1400x900x24 -nolisten unix -nolisten local -listen tcp >"$LOG" 2>&1 &
+XVFB_PID=$!
+APP_PID=
+cleanup() {
+  if [ -n "$APP_PID" ]; then
+    kill -TERM "-$APP_PID" 2>/dev/null || true
+    wait "$APP_PID" 2>/dev/null || true
+  fi
+  kill "$XVFB_PID" 2>/dev/null || true
+  if [ "$QA_REMOVE_DATA" = 1 ]; then rm -rf "$QA_DATA_DIR"; fi
+}
+trap cleanup EXIT
+sleep 1
+if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+  printf '%s\n' "Xvfb exited before visual QA could start" >>"$LOG"
+  sed -n '1,120p' "$LOG"
+  exit 1
+fi
+
+cd "$ROOT_DIR"
+DISPLAY="$CLIENT_DISPLAY" setsid dbus-run-session -- env GDK_BACKEND=x11 G_DEBUG=fatal-criticals NO_AT_BRIDGE=1 GTK_A11Y=none MAILFICIENT_QA=1 XDG_DATA_HOME="${MAIL_QA_DATA_DIR:-$QA_DATA_DIR}" \
+  GTK_THEME="${MAIL_QA_THEME:-Adwaita}" MAILFICIENT_QA_COMPOSE="${MAIL_QA_COMPOSE:-$QA_COMPOSE}" MAILFICIENT_QA_MESSAGE="${MAIL_QA_MESSAGE:-$QA_MESSAGE}" \
+  MAILFICIENT_QA_FORWARD="${MAIL_QA_FORWARD:-$QA_FORWARD}" \
+  MAILFICIENT_QA_DISCARD="${MAIL_QA_DISCARD:-$QA_DISCARD}" \
+  MAILFICIENT_QA_ACCOUNT="${MAIL_QA_ACCOUNT:-$QA_ACCOUNT}" \
+  MAILFICIENT_QA_ACCOUNT_TLS_ERROR="${MAIL_QA_ACCOUNT_TLS_ERROR:-$QA_ACCOUNT_TLS_ERROR}" \
+  MAILFICIENT_QA_ACCOUNTS="${MAIL_QA_ACCOUNTS:-$QA_ACCOUNTS}" \
+  MAILFICIENT_QA_ONLINE_ACCOUNTS="${MAIL_QA_ONLINE_ACCOUNTS:-$QA_ONLINE_ACCOUNTS}" \
+  MAILFICIENT_QA_PROVIDERS="${MAIL_QA_PROVIDERS:-$QA_PROVIDERS}" \
+  MAILFICIENT_QA_PREFERENCES="${MAIL_QA_PREFERENCES:-$QA_PREFERENCES}" \
+  MAILFICIENT_QA_SIGNATURE="${MAIL_QA_SIGNATURE:-0}" \
+  MAILFICIENT_QA_CONFIGURE_SIGNATURE="${MAIL_QA_CONFIGURE_SIGNATURE:-0}" \
+  MAILFICIENT_QA_DARK="${MAIL_QA_DARK:-$QA_DARK}" \
+  MAILFICIENT_QA_COMPLETION="${MAIL_QA_COMPLETION:-}" \
+  MAILFICIENT_QA_RECIPIENTS="${MAIL_QA_RECIPIENTS:-$QA_RECIPIENTS}" \
+  MAILFICIENT_QA_DRAFTS="${MAIL_QA_DRAFTS:-0}" \
+  MAILFICIENT_QA_OUTBOX="${MAIL_QA_OUTBOX:-$QA_OUTBOX_EDITOR}" \
+  MAILFICIENT_QA_OUTBOX_EDITOR="${MAIL_QA_OUTBOX_EDITOR:-$QA_OUTBOX_EDITOR}" \
+  MAILFICIENT_QA_OUTBOX_ACCEPTED="${MAIL_QA_OUTBOX_ACCEPTED:-$QA_OUTBOX_ACCEPTED}" \
+  MAILFICIENT_QA_OUTBOX_REJECTED="${MAIL_QA_OUTBOX_REJECTED:-$QA_OUTBOX_REJECTED}" \
+  MAILFICIENT_QA_STARTUP_ERROR="${MAIL_QA_STARTUP_ERROR:-$QA_STARTUP_ERROR}" \
+  MAILFICIENT_QA_NARROW="${MAIL_QA_NARROW:-$QA_NARROW}" \
+  MAILFICIENT_QA_SEARCH="${MAIL_QA_SEARCH:-$QA_SEARCH}" \
+  MAILFICIENT_QA_ATTACHMENT="${MAIL_QA_ATTACHMENT:-}" \
+  MAILFICIENT_QA_PREVIEW="${MAIL_QA_PREVIEW:-$QA_PREVIEW}" \
+  MAILFICIENT_QA_MAILBOX="${MAIL_QA_MAILBOX:-$QA_MAILBOX}" \
+  MAILFICIENT_QA_ERROR="${MAIL_QA_ERROR:-$QA_ERROR}" \
+  MAILFICIENT_QA_RATE_LIMIT="${MAIL_QA_RATE_LIMIT:-$QA_RATE_LIMIT}" \
+  MAILFICIENT_QA_MAILBOX_WIDTH="${MAIL_QA_MAILBOX_WIDTH:-$QA_MAILBOX_WIDTH}" \
+  MAILFICIENT_QA_MESSAGE_WIDTH="${MAIL_QA_MESSAGE_WIDTH:-$QA_MESSAGE_WIDTH}" \
+  MAILFICIENT_QA_HIDE_SIDEBAR="${MAIL_QA_HIDE_SIDEBAR:-$QA_HIDE_SIDEBAR}" \
+  MAILFICIENT_QA_SYNC_PROGRESS="${MAIL_QA_SYNC_PROGRESS:-$QA_SYNC_PROGRESS}" \
+  MAILFICIENT_QA_PRESERVE_SELECTION="${MAIL_QA_PRESERVE_SELECTION:-$QA_PRESERVE_SELECTION}" \
+  MAILFICIENT_QA_ASSERT_READER_TOP="${MAIL_QA_ASSERT_READER_TOP:-0}" \
+  MAILFICIENT_QA_TOOLBAR_CUSTOMIZATION="${MAIL_QA_TOOLBAR_CUSTOMIZATION:-$QA_TOOLBAR_CUSTOMIZATION}" \
+  MAILFICIENT_QA_NO_DEMO="${MAIL_QA_NO_DEMO:-$QA_NO_DEMO}" \
+  "$APP_BINARY" >>"$LOG" 2>&1 &
+APP_PID=$!
+sleep 5
+
+if ! kill -0 "$APP_PID" 2>/dev/null; then
+  app_status=0
+  wait "$APP_PID" || app_status=$?
+  printf 'application exited before screenshot (status %s)\n' "$app_status" >>"$LOG"
+  sed -n '1,240p' "$LOG"
+  exit 1
+fi
+if ! DISPLAY="$CLIENT_DISPLAY" xwininfo -root -tree >>"$LOG" 2>&1 ||
+   ! grep -q 'Mailficient' "$LOG"; then
+  printf 'Mailficient did not create a visible QA window\n' >>"$LOG"
+  sed -n '1,240p' "$LOG"
+  exit 1
+fi
+DISPLAY="$CLIENT_DISPLAY" import -window root "$SHOT"
+kill "$APP_PID" 2>/dev/null || true
+wait "$APP_PID" 2>/dev/null || true
+
+if grep -E '\(mailficient.*(CRITICAL|ERROR)' "$LOG"; then
+  exit 1
+fi
+printf '%s\n' "$SHOT"
