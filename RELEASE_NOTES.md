@@ -1,3 +1,8 @@
+# Mailficient 0.2.7
+
+The 0.2.7 build fixes read-state handling when a message is opened directly,
+so the unread indicator is cleared and the read state is persisted consistently.
+
 # Mailficient 0.2.5
 
 The 0.2.5 build improves favorite switching and updates move and copy destinations immediately.

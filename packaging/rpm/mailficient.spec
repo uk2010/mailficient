@@ -134,6 +134,9 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Sun Aug 23 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.7-1
+- Clear and persist unread state when messages are opened directly.
+
 * Sun Aug 23 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.6-1
 - Keep unread indicators, mailbox counts, and read-action labels synchronized.
 

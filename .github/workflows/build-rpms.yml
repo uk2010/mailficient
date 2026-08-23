@@ -52,8 +52,8 @@ jobs:
       - name: Upload RPM package
         uses: actions/upload-artifact@v4
         with:
-          name: mailficient-0.2.2-${{ matrix.arch }}-rpm
+          name: mailficient-${{ matrix.arch }}-rpm
           path: |
-            dist/mailficient-0.2.2-*.${{ matrix.arch }}.rpm
-            dist/mailficient-0.2.2-*.${{ matrix.arch }}.rpm.sha256
+            dist/mailficient-*.${{ matrix.arch }}.rpm
+            dist/mailficient-*.${{ matrix.arch }}.rpm.sha256
           if-no-files-found: error
