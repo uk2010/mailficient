@@ -24,6 +24,16 @@ public class MessageList : Gtk.Box {
     private Gtk.ToggleButton unread_filter = new Gtk.ToggleButton ();
     private Gtk.ToggleButton select_multiple = new Gtk.ToggleButton ();
     private string mailbox_name = "Inbox";
+    private Gtk.Stack list_stack = new Gtk.Stack ();
+    private Gtk.ListView? transient_list;
+    private Gee.HashMap<string, Gtk.ListView> cached_lists =
+        new Gee.HashMap<string, Gtk.ListView> ();
+    private Gee.HashMap<string, VirtualMessageModel> cached_models =
+        new Gee.HashMap<string, VirtualMessageModel> ();
+    private Gee.HashMap<string, Gtk.SelectionModel> cached_selections =
+        new Gee.HashMap<string, Gtk.SelectionModel> ();
+    private Gee.HashMap<string, int> cached_counts = new Gee.HashMap<string, int> ();
+    private Gee.HashSet<string> dirty_cached_mailboxes = new Gee.HashSet<string> ();
 
     public MessageList (MailRepository repository, MailSearchService search_service) {
         Object (orientation: Gtk.Orientation.VERTICAL);
@@ -51,27 +61,11 @@ public class MessageList : Gtk.Box {
         header.append (select_multiple);
         append (header); append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
 
-        var factory = new Gtk.SignalListItemFactory ();
-        factory.bind.connect ((object) => {
-            var item = object as Gtk.ListItem;
-            var message = item == null ? null : item.item as Message;
-            if (item == null || message == null) return;
-            item.child = new MessageRow (message, selection, item.position,
-                select_multiple.active);
-        });
-        factory.unbind.connect ((object) => {
-            var item = object as Gtk.ListItem;
-            var row = item == null ? null : item.child as MessageRow;
-            if (row != null) row.unbind_selection ();
-            if (item != null) item.child = null;
-        });
-        list = new Gtk.ListView (null, factory);
-        list.add_css_class ("boxed-list"); list.show_separators = true;
-        list.activate.connect ((position) => {
-            var message = model == null ? null : model.get_item (position) as Message;
-            if (message != null) message_activated (message);
-        });
-        scroller.set_child (list); scroller.vexpand = true;
+        list = create_list_view ();
+        transient_list = list;
+        list_stack.add_named (list, "transient");
+        list_stack.vexpand = true; list_stack.hexpand = true;
+        scroller.set_child (list_stack); scroller.vexpand = true;
         content_stack.vexpand = true;
         content_stack.transition_type = Gtk.StackTransitionType.CROSSFADE;
         content_stack.transition_duration = 160;
@@ -92,9 +86,34 @@ public class MessageList : Gtk.Box {
         });
     }
 
+    private Gtk.ListView create_list_view () {
+        var factory = new Gtk.SignalListItemFactory ();
+        factory.bind.connect ((object) => {
+            var item = object as Gtk.ListItem;
+            var message = item == null ? null : item.item as Message;
+            if (item == null || message == null) return;
+            item.child = new MessageRow (message, selection, item.position,
+                select_multiple.active);
+        });
+        factory.unbind.connect ((object) => {
+            var item = object as Gtk.ListItem;
+            var row = item == null ? null : item.child as MessageRow;
+            if (row != null) row.unbind_selection ();
+            if (item != null) item.child = null;
+        });
+        var result = new Gtk.ListView (null, factory);
+        result.add_css_class ("boxed-list"); result.show_separators = true;
+        result.activate.connect ((position) => {
+            var message = model == null ? null : model.get_item (position) as Message;
+            if (message != null) message_activated (message);
+        });
+        return result;
+    }
+
     public void show_mailbox (Mailbox mailbox) {
         int64 started = DebugTrace.mark ();
-        bool already_loaded = mailbox_loaded && mailbox_id == mailbox.id && query == "" && !unread_filter.active;
+        bool already_loaded = mailbox_loaded && mailbox_id == mailbox.id && query == "" &&
+            !unread_filter.active && !dirty_cached_mailboxes.contains (mailbox.id);
         DebugTrace.log ("message-list", "show_mailbox begin mailbox=%s old=%s already_loaded=%s".printf (
             mailbox.id, mailbox_id, already_loaded.to_string ()));
         mailbox_id = mailbox.id; mailbox_name = mailbox.name; mailbox_title.label = mailbox.name;
@@ -103,6 +122,22 @@ public class MessageList : Gtk.Box {
         if (already_loaded) {
             content_stack.visible_child_name = model != null && model.get_n_items () > 0 ? "messages" : "empty";
             DebugTrace.duration ("message-list", "show_mailbox cached_complete", started);
+            return;
+        }
+        if (!dirty_cached_mailboxes.contains (mailbox.id) && cached_models.has_key (mailbox.id) &&
+            cached_lists.has_key (mailbox.id)) {
+            model = cached_models[mailbox.id];
+            selection = cached_selections[mailbox.id];
+            list = cached_lists[mailbox.id];
+            list_stack.set_visible_child (list);
+            mailbox_loaded = true;
+            mailbox_title.label = mailbox_name;
+            message_count.label = cached_counts[mailbox.id] == 1 ? "1 message" :
+                "%d messages".printf (cached_counts[mailbox.id]);
+            local_queue = mailbox_id == CachedMailRepository.LOCAL_DRAFTS_ID ||
+                mailbox_id == CachedMailRepository.LOCAL_OUTBOX_ID || mailbox_id == "drafts";
+            content_stack.visible_child_name = model.get_n_items () > 0 ? "messages" : "empty";
+            DebugTrace.duration ("message-list", "show_mailbox retained_complete", started);
             return;
         }
         reload (false);
@@ -117,7 +152,29 @@ public class MessageList : Gtk.Box {
         });
     }
 
-    public void refresh () { reload (); }
+    public void refresh () { reload (true, false, "", true); }
+
+    // A repository notification invalidates cached favorites, but does not
+    // rebuild them immediately. The active view is refreshed by the caller;
+    // another favorite is refreshed only when the user returns to it.
+    public void invalidate_cached_views () {
+        foreach (var id in cached_models.keys) dirty_cached_mailboxes.add (id);
+    }
+
+    public void invalidate_cached_view (string id) {
+        if (cached_models.has_key (id)) dirty_cached_mailboxes.add (id);
+    }
+
+    public void invalidate_current_view () {
+        invalidate_cached_view (mailbox_id);
+    }
+
+    public void mark_current_view_clean () {
+        if (model == null || query != "" || unread_filter.active) return;
+        cached_models[mailbox_id] = model;
+        cached_counts[mailbox_id] = (int) model.get_n_items ();
+        dirty_cached_mailboxes.remove (mailbox_id);
+    }
 
     public void refresh_preserving_selection (string preferred_id = "") {
         // An unread-only list is a reading queue. Repository changes caused by
@@ -126,7 +183,7 @@ public class MessageList : Gtk.Box {
         if (unread_filter.active) {
             return;
         }
-        reload (true, true, preferred_id);
+        reload (true, true, preferred_id, true);
     }
 
     public void refresh_after_removal () {
@@ -134,9 +191,39 @@ public class MessageList : Gtk.Box {
         // message. Selecting against the old model lets the selection callback
         // run while the deleted row is still present and can retarget the next
         // delete action to the wrong message.
-        reload (false, false);
+        if (model != null) {
+            var selected = selected_messages ();
+            var removed_ids = new Gee.ArrayList<string> ();
+            foreach (var message in selected) removed_ids.add (message.id);
+            if (removed_ids.size > 0 && model.remove_messages (removed_ids) == removed_ids.size) {
+                int remaining = (int) model.get_n_items ();
+                message_count.label = remaining == 1 ? "1 message" : "%d messages".printf (remaining);
+                mark_current_view_clean ();
+                if (remaining == 0) no_messages ();
+                return;
+            }
+        }
+        reload (false, false, "", true);
     }
-    public void set_sort (MessageSortMode mode) { sort_mode = mode; reload (); }
+
+    public void refresh_after_mail_check () {
+        if (model == null || query != "" || unread_filter.active) return;
+        int total;
+        try { total = repository.message_count (mailbox_id, "", false); }
+        catch (Error error) { warning ("Could not update the mailbox after mail check: %s", error.message); return; }
+        if (!model.add_new_items (total)) {
+            // The new mail may belong to another mailbox/favorite. Keep this
+            // active view clean when its own count did not change.
+            mark_current_view_clean ();
+            return;
+        }
+        cached_models[mailbox_id] = model;
+        cached_counts[mailbox_id] = total;
+        dirty_cached_mailboxes.remove (mailbox_id);
+        message_count.label = total == 1 ? "1 message" : "%d messages".printf (total);
+        content_stack.visible_child_name = "messages";
+    }
+    public void set_sort (MessageSortMode mode) { sort_mode = mode; reload (true, false, "", true); }
 
     public void mark_read_in_place (string id) {
         if (model == null) return;
@@ -239,7 +326,7 @@ public class MessageList : Gtk.Box {
     public void finish_bulk_action () { select_multiple.active = false; }
 
     private void reload (bool notify_selection = true, bool preserve_selection = false,
-                         string preferred_id = "") {
+                         string preferred_id = "", bool force_reload = false) {
         int64 started = DebugTrace.mark ();
         DebugTrace.log ("message-list", "reload begin mailbox=%s query=%s notify=%s preserve=%s preferred=%s".printf (
             mailbox_id, query, notify_selection.to_string (), preserve_selection.to_string (), preferred_id));
@@ -250,51 +337,80 @@ public class MessageList : Gtk.Box {
             var previously_selected = selected_messages ();
             if (previously_selected.size == 1) preserve_id = previously_selected[0].id;
         }
+        bool cacheable = query == "" && !unread_filter.active;
+        bool use_cached = cacheable && !force_reload && cached_models.has_key (mailbox_id) &&
+            !dirty_cached_mailboxes.contains (mailbox_id);
         int total;
-        try {
-            total = query == "" ? repository.message_count (mailbox_id, "", unread_filter.active) :
-                search_service.count (query, unread_filter.active);
-        } catch (Error error) {
-            show_status ("Search Unavailable",
-                "The local mail index could not be searched. Try refreshing Mailficient.",
-                "dialog-warning-symbolic");
-            warning ("Cached-mail search failed: %s", error.message); return;
+        if (use_cached) total = cached_counts[mailbox_id];
+        else {
+            try {
+                total = query == "" ? repository.message_count (mailbox_id, "", unread_filter.active) :
+                    search_service.count (query, unread_filter.active);
+            } catch (Error error) {
+                show_status ("Search Unavailable",
+                    "The local mail index could not be searched. Try refreshing Mailficient.",
+                    "dialog-warning-symbolic");
+                warning ("Cached-mail search failed: %s", error.message); return;
+            }
         }
         DebugTrace.log ("message-list", "reload count=%d mailbox=%s".printf (total, mailbox_id));
         bool unread_only = unread_filter.active;
         string current_query = query;
         string current_mailbox = mailbox_id;
         MessageSortMode current_sort = sort_mode;
-        model = new VirtualMessageModel (total, (limit, offset) => {
-            try {
-                return current_query == "" ? repository.list_messages (current_mailbox, "",
-                    limit, offset, unread_only, current_sort) :
-                    search_service.search (current_query, limit, offset, unread_only, current_sort);
-            } catch (Error error) {
-                warning ("Could not load a virtual mail page: %s", error.message);
-                return new Gee.ArrayList<Message> ();
+        if (use_cached) model = cached_models[mailbox_id];
+        else {
+            model = new VirtualMessageModel (total, (limit, offset) => {
+                try {
+                    return current_query == "" ? repository.list_messages (current_mailbox, "",
+                        limit, offset, unread_only, current_sort) :
+                        search_service.search (current_query, limit, offset, unread_only, current_sort);
+                } catch (Error error) {
+                    warning ("Could not load a virtual mail page: %s", error.message);
+                    return new Gee.ArrayList<Message> ();
+                }
+            });
+        }
+        if (cacheable) {
+            cached_models[mailbox_id] = model;
+            cached_counts[mailbox_id] = total;
+            dirty_cached_mailboxes.remove (mailbox_id);
+        }
+        if (use_cached && cached_lists.has_key (mailbox_id)) {
+            list = cached_lists[mailbox_id];
+            list_stack.set_visible_child (list);
+        } else if (cacheable) {
+            if (cached_lists.has_key (mailbox_id)) list = cached_lists[mailbox_id];
+            else {
+                list = create_list_view ();
+                cached_lists[mailbox_id] = list;
+                list_stack.add_named (list, mailbox_id);
             }
-        });
+            list_stack.set_visible_child (list);
+        } else {
+            if (transient_list != null) list_stack.remove (transient_list);
+            list = create_list_view ();
+            transient_list = list;
+            list_stack.add_named (list, "transient");
+            list_stack.set_visible_child (list);
+        }
         mailbox_loaded = true;
         mailbox_title.label = query == "" ? mailbox_name : "Search Results";
         message_count.label = total == 1 ? "1 message" : "%d messages".printf (total);
         local_queue = mailbox_id == CachedMailRepository.LOCAL_DRAFTS_ID ||
             mailbox_id == CachedMailRepository.LOCAL_OUTBOX_ID || mailbox_id == "drafts";
         suppress_selection = !notify_selection || local_queue || preserve_id != "";
-        configure_selection (notify_selection && !local_queue && preserve_id == "");
+        if (use_cached && cached_selections.has_key (mailbox_id)) {
+            // Reattach the existing selection model with its already-loaded
+            // rows. Switching favorites should not blank and rebuild the list.
+            selection = cached_selections[mailbox_id];
+        } else {
+            configure_selection (notify_selection && !local_queue && preserve_id == "", preserve_id,
+                notify_selection && !local_queue && preserve_id == "");
+            if (cacheable && selection != null) cached_selections[mailbox_id] = selection;
+        }
         if (total > 0) {
             content_stack.visible_child_name = "messages";
-            if (preserve_id != "" && selection != null) {
-                for (uint position = 0; position < model.get_n_items (); position++) {
-                    var message = model.get_item (position) as Message;
-                    if (message != null && message.id == preserve_id) {
-                        selection.select_item (position, true);
-                        list.scroll_to (position, Gtk.ListScrollFlags.NONE, null);
-                        break;
-                    }
-                }
-            } else if (notify_selection && !local_queue && selection != null)
-                selection.select_item (0, true);
         } else {
             show_status (unread_filter.active ? "No Unread Messages" : "No Messages",
                 unread_filter.active ? "All messages here have been read." :
@@ -306,20 +422,44 @@ public class MessageList : Gtk.Box {
         DebugTrace.duration ("message-list", "reload complete", started);
     }
 
-    private void configure_selection (bool select_first = false) {
+    private void configure_selection (bool select_first = false, string preserve_id = "",
+                                      bool announce = false) {
         if (model == null) return;
-        selection = new Gtk.MultiSelection (model);
-        selection.selection_changed.connect ((position, count) => {
+        var next_model = model;
+        var next_selection = new Gtk.MultiSelection (next_model);
+        selection = next_selection;
+        next_selection.selection_changed.connect ((position, count) => {
             if (suppress_selection) return;
             var selected = selected_messages ();
             selection_changed (selected);
-            if (!select_multiple.active && !local_queue && selected.size == 1)
+            // Local drafts/outbox messages do not need read-state handling,
+            // but they still must announce selection so the reading pane
+            // follows the row the user clicked.
+            if (!select_multiple.active && selected.size == 1)
                 message_selected (selected[0]);
         });
-        list.model = selection;
-        if (select_first && model.get_n_items () > 0) selection.select_item (0, true);
-        else selection.unselect_all ();
-        if (!suppress_selection) selection_changed (selected_messages ());
+        list.model = null;
+        Idle.add (() => {
+            if (model != next_model || selection != next_selection) return Source.REMOVE;
+            list.model = next_selection;
+            suppress_selection = !announce;
+            if (preserve_id != "") {
+                for (uint position = 0; position < next_model.get_n_items (); position++) {
+                    var message = next_model.get_item (position) as Message;
+                    if (message != null && message.id == preserve_id) {
+                        next_selection.select_item (position, true);
+                        list.scroll_to (position, Gtk.ListScrollFlags.NONE, null);
+                        break;
+                    }
+                }
+            } else if (select_first && next_model.get_n_items () > 0)
+                next_selection.select_item (0, true);
+            else
+                next_selection.unselect_all ();
+            suppress_selection = false;
+            if (announce) selection_changed (selected_messages ());
+            return Source.REMOVE;
+        });
     }
 
     private void refresh_row_widgets () {

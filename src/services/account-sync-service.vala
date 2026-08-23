@@ -19,6 +19,7 @@ public class AccountSyncService : Object {
     public signal void new_message (Message message);
     public signal void mail_available (string account_id);
     public signal void pass_completed (string account_id);
+    public signal void mail_check_completed (string account_id, int messages_downloaded);
     public signal void progress_changed (string account_id, double fraction, string detail);
     private signal void pending_flush_finished (string account_id);
     private signal void account_sync_finished (string account_id);
@@ -77,12 +78,14 @@ public class AccountSyncService : Object {
         sync_cancellables[account.id] = effective_cancellable;
         SyncPassOutcome? last_outcome = null;
         var progress_context = new SyncProgressContext ();
+        int messages_downloaded_this_check = 0;
         bool allow_notifications = true;
         do {
             sync_again.remove (account.id);
             last_outcome = new SyncPassOutcome ();
             yield perform_sync (account, effective_cancellable, allow_notifications,
                 progress_context, last_outcome);
+            messages_downloaded_this_check += last_outcome.messages_downloaded;
             progress_context.messages_completed += last_outcome.messages_downloaded;
             if (last_outcome.more_messages_available) {
                 // A bounded pass keeps Get Mail responsive. Continue older
@@ -99,6 +102,7 @@ public class AccountSyncService : Object {
         } while (!suppressed_accounts.contains (account.id) && sync_again.contains (account.id));
         if (!suppressed_accounts.contains (account.id) && last_outcome != null && last_outcome.completed) {
             synchronized (account.id);
+            mail_check_completed (account.id, messages_downloaded_this_check);
             if (last_outcome.warning != null) failed (account.id, last_outcome.warning);
         } else if (!suppressed_accounts.contains (account.id) && last_outcome != null &&
                    last_outcome.cancelled) {

@@ -89,6 +89,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private MailboxSidebar sidebar;
     private bool marking_selected_message_read;
     private bool repository_refresh_pending;
+    private bool local_removal_refresh_pending;
     private uint repository_refresh_source;
     private string last_selected_mailbox_id = "";
     private string preserve_unread_selection_id = "";
@@ -227,7 +228,10 @@ public class MailWindow : Adw.ApplicationWindow {
             show_reader_empty_state ();
         });
         reader.vip_toggled.connect ((message, vip) => {
-            try { repository.set_sender_vip (message, vip); display_message (message); }
+            try {
+                message_list.invalidate_cached_view ("unified-vip");
+                repository.set_sender_vip (message, vip); display_message (message);
+            }
             catch (Error error) { show_operation_error (error); }
         });
         reader.attachment_saved.connect ((filename) =>
@@ -325,7 +329,15 @@ public class MailWindow : Adw.ApplicationWindow {
             if (marking_selected_message_read) {
                 // Keep the selected message/list snapshot in place, but the
                 // sidebar still needs the new unread totals immediately.
-                sidebar.reload (false);
+                sidebar.refresh_counts ();
+                return;
+            }
+            if (local_removal_refresh_pending) {
+                // The action already removes its rows from the visible virtual
+                // model. Refresh only the sidebar totals; rebuilding the Inbox
+                // here would undo the fast in-place removal.
+                local_removal_refresh_pending = false;
+                sidebar.refresh_counts ();
                 return;
             }
             repository_refresh_pending = true;
@@ -338,15 +350,22 @@ public class MailWindow : Adw.ApplicationWindow {
                 queue_sync_progress (fraction, detail);
             });
             sync_service.pass_completed.connect ((account_id) => {
-                repository.reload ();
+                sidebar.refresh_counts ();
             });
             // Batches are committed immediately, but rebuilding every message
             // row after each database batch multiplies work on large
             // imports. Reload once after each bounded backend session instead.
             sync_service.synchronized.connect ((account_id) => {
-                repository.reload (); refresh_button.sensitive = true;
+                sidebar.refresh_counts (); refresh_button.sensitive = true;
                 sync_cancel_requested = false; sync_cancel_button.sensitive = false;
                 finish_sync_progress ("Mail is up to date");
+            });
+            sync_service.mail_check_completed.connect ((account_id, messages_downloaded) => {
+                if (messages_downloaded > 0) {
+                    message_list.invalidate_cached_views ();
+                    message_list.refresh_after_mail_check ();
+                }
+                sidebar.refresh_counts ();
             });
             sync_service.failed.connect ((account_id, error) => {
                 refresh_button.sensitive = true;
@@ -356,6 +375,7 @@ public class MailWindow : Adw.ApplicationWindow {
                 toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (error.title, error.suggestion)));
             });
             sync_service.cancelled.connect ((account_id) => {
+                message_list.invalidate_cached_views ();
                 repository.reload (); refresh_button.sensitive = true;
                 sync_cancel_requested = false; sync_cancel_button.sensitive = false;
                 finish_sync_progress ("Mail check cancelled");
@@ -1365,6 +1385,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void transfer_selected_to (string mailbox_id, bool copy) {
         var messages = action_messages (); if (messages.size == 0) return;
+        message_list.invalidate_cached_view (mailbox_id);
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
         repository.begin_batch ();
         try {
@@ -1395,7 +1416,9 @@ public class MailWindow : Adw.ApplicationWindow {
         Idle.add (() => {
             marking_selected_message_read = true;
             message_list.mark_read_in_place (message_id);
+            message_list.invalidate_current_view ();
             repository.mark_read (message_id, true);
+            message_list.mark_current_view_clean ();
             marking_selected_message_read = false;
             return Source.REMOVE;
         });
@@ -1455,7 +1478,7 @@ public class MailWindow : Adw.ApplicationWindow {
             repository_refresh_pending = false;
             string selected_id = selected_message == null ? "" : selected_message.id;
             DebugTrace.log ("refresh", "reload sidebar and message list selected=%s".printf (selected_id));
-            sidebar.reload (false);
+            sidebar.refresh_counts ();
             message_list.refresh_preserving_selection (selected_id);
             if (selected_message != null) {
                 var refreshed = repository.find_message (selected_message.id);
@@ -1471,7 +1494,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.2.4"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.2.5"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -1555,6 +1578,8 @@ public class MailWindow : Adw.ApplicationWindow {
     private void toggle_selected_flag () {
         var messages = action_messages (); if (messages.size == 0) return;
         bool flag = false; foreach (var message in messages) if (!message.flagged) flag = true;
+        message_list.invalidate_cached_view ("unified-flagged");
+        message_list.invalidate_current_view ();
         repository.begin_batch ();
         try {
             foreach (var message in messages) { message.flagged = flag; repository.set_flagged (message.id, flag); }
@@ -1564,6 +1589,8 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void clear_selected_flags () {
         var messages = action_messages (); if (messages.size == 0) return;
+        message_list.invalidate_cached_view ("unified-flagged");
+        message_list.invalidate_current_view ();
         repository.begin_batch ();
         try {
             foreach (var message in messages) {
@@ -1576,6 +1603,8 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void set_selected_flag_color (string color) {
         var messages = action_messages (); if (messages.size == 0) return;
+        message_list.invalidate_cached_view ("unified-flagged");
+        message_list.invalidate_current_view ();
         repository.begin_batch ();
         try {
             foreach (var message in messages) {
@@ -1601,6 +1630,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void toggle_selected_read () {
         var messages = action_messages (); if (messages.size == 0) return;
         bool read = false; foreach (var message in messages) if (message.unread) read = true;
+        message_list.invalidate_current_view ();
         if (!read && messages.size == 1) preserve_unread_selection_id = messages[0].id;
         repository.begin_batch ();
         try {
@@ -1618,6 +1648,11 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void move_selected (MailboxRole role) {
         var messages = action_messages (); if (messages.size == 0) return;
+        if (role == MailboxRole.ARCHIVE) message_list.invalidate_cached_view ("unified-archive");
+        if (role == MailboxRole.JUNK) message_list.invalidate_cached_view ("unified-junk");
+        if (role == MailboxRole.TRASH) message_list.invalidate_cached_view ("unified-trash");
+        if (role == MailboxRole.JUNK || role == MailboxRole.TRASH)
+            message_list.invalidate_cached_view ("unified-archive");
         string next_message_id = message_list.adjacent_message_id_after_selection ();
         if (role == MailboxRole.TRASH) {
             bool has_local = false;
@@ -1632,6 +1667,7 @@ public class MailWindow : Adw.ApplicationWindow {
             prompt_permanent_delete.begin (next_message_id); return;
         }
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
+        local_removal_refresh_pending = true;
         repository.begin_batch ();
         try {
             foreach (var message in messages) {
@@ -1645,6 +1681,7 @@ public class MailWindow : Adw.ApplicationWindow {
                 }
             }
         } finally { repository.end_batch (); }
+        if (completed == 0) local_removal_refresh_pending = false;
         select_after_removal (next_message_id, completed);
         string action = role == MailboxRole.TRASH ? "moved to Trash" : "archived";
         show_transfer_undo (completed == 1 ? "Message %s".printf (action) :
@@ -1708,7 +1745,10 @@ public class MailWindow : Adw.ApplicationWindow {
         var messages = action_messages (); if (messages.size == 0) return;
         string next_message_id = message_list.adjacent_message_id_after_selection ();
         bool mark_junk = !selected_is_junk ();
+        message_list.invalidate_cached_view (mark_junk ? "unified-junk" : "unified-inbox");
+        message_list.invalidate_cached_view ("unified-archive");
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
+        local_removal_refresh_pending = true;
         repository.begin_batch ();
         try {
             foreach (var message in messages) {
@@ -1722,6 +1762,7 @@ public class MailWindow : Adw.ApplicationWindow {
                 }
             }
         } finally { repository.end_batch (); }
+        if (completed == 0) local_removal_refresh_pending = false;
         select_after_removal (next_message_id, completed);
         show_transfer_undo (completed == 1 ? (mark_junk ? "Marked as junk" : "Returned to Inbox") :
             (mark_junk ? "%d messages marked as junk".printf (completed) :

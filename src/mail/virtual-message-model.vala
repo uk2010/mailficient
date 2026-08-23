@@ -4,7 +4,10 @@ internal delegate Gee.List<Message> MessagePageLoader (int limit, int offset);
 // Represents the entire logical mailbox while retaining only a few database
 // pages. Gtk.ListView independently recycles visible row widgets.
 internal class VirtualMessageModel : Object, GLib.ListModel {
-    internal const int PAGE_SIZE = 100;
+    // Load a small first page so switching from an empty smart mailbox can
+    // paint the Inbox promptly. Additional rows are fetched as the user
+    // scrolls, while the bounded page cache still keeps scrolling smooth.
+    internal const int PAGE_SIZE = 40;
     internal const int MAX_CACHED_PAGES = 3;
     private uint item_count;
     private MessagePageLoader loader;
@@ -38,5 +41,49 @@ internal class VirtualMessageModel : Object, GLib.ListModel {
 
     public Type get_item_type () { return typeof (Message); }
     public uint get_n_items () { return item_count; }
+
+    // Remove rows whose backing messages were moved or deleted. Only the
+    // affected portion of the virtual list is invalidated; the rest of a
+    // large mailbox stays painted and its pages remain available.
+    public int remove_messages (Gee.Collection<string> ids) {
+        if (ids.size == 0) return 0;
+        var wanted = new Gee.HashSet<string> (); wanted.add_all (ids);
+        var positions = new Gee.ArrayList<int> ();
+        foreach (var page_number in pages.keys) {
+            var page = pages[page_number];
+            for (int offset = 0; offset < page.size; offset++) {
+                var message = page[offset];
+                if (message != null && wanted.contains (message.id))
+                    positions.add (page_number * PAGE_SIZE + offset);
+            }
+        }
+        if (positions.size != wanted.size) return 0;
+        positions.sort ((left, right) => right - left);
+        foreach (var position in positions) {
+            item_count--;
+            int affected_page = position / PAGE_SIZE;
+            var expired_pages = new Gee.ArrayList<int> ();
+            foreach (var page_number in pages.keys)
+                if (page_number >= affected_page) expired_pages.add (page_number);
+            foreach (var page_number in expired_pages) {
+                pages.unset (page_number);
+                page_usage.remove (page_number);
+            }
+            items_changed ((uint) position, 1, 0);
+        }
+        return positions.size;
+    }
+
+    // A successful mail check can add newer rows at the front of a mailbox.
+    // Drop only the page cache; the list model keeps its existing items and
+    // asks the loader for the new first page when GTK needs it.
+    public bool add_new_items (int new_count) {
+        if (new_count <= (int) item_count) return false;
+        uint added = (uint) (new_count - (int) item_count);
+        item_count = (uint) new_count;
+        pages.clear (); page_usage.clear ();
+        items_changed (0, 0, added);
+        return true;
+    }
 }
 }

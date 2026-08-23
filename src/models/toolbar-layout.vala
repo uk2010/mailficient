@@ -1,7 +1,7 @@
 namespace Mailficient {
 public class ToolbarLayout : Object {
     public const string DEFAULT_LAYOUT =
-        "sidebar,compose,flex,flex,flex,flex,flex,flex,refresh,reply-group,mail-actions,move,flag,flex,search,sort";
+        "sidebar,compose,flex,flex,flex,flex,flex,flex,refresh,flex:0,reply-group,flex:0,mail-actions,flex:0,move,flex:0,flag,flex,search,sort";
 
     public static Gee.ArrayList<string> parse (string serialized) {
         var result = new Gee.ArrayList<string> ();

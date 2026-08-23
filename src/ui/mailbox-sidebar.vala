@@ -66,9 +66,7 @@ public class MailboxSidebar : Gtk.Box {
         reload ();
     }
 
-    private Gtk.ListBoxRow create_row (Mailbox mailbox) {
-        var row = new Gtk.ListBoxRow ();
-        row.set_data<Mailbox> ("mailbox", mailbox);
+    private Gtk.Box row_content (Mailbox mailbox) {
         var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
         box.set_margin_start (8); box.set_margin_end (8); box.set_margin_top (6); box.set_margin_bottom (6);
         box.append (new Gtk.Image.from_icon_name (mailbox.icon_name));
@@ -82,7 +80,13 @@ public class MailboxSidebar : Gtk.Box {
                 mailbox.unread_count == 1 ? "" : "s");
             box.append (count);
         }
-        row.set_child (box);
+        return box;
+    }
+
+    private Gtk.ListBoxRow create_row (Mailbox mailbox) {
+        var row = new Gtk.ListBoxRow ();
+        row.set_data<Mailbox> ("mailbox", mailbox);
+        row.set_child (row_content (mailbox));
         if (mailbox.account_id != "" || mailbox.role == MailboxRole.TRASH ||
             mailbox.role == MailboxRole.JUNK) {
             var context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
@@ -408,6 +412,19 @@ public class MailboxSidebar : Gtk.Box {
         var first = list.get_row_at_index (0); if (first != null) list.select_row (first);
         suppress_announcement = false;
         DebugTrace.duration ("sidebar", "reload complete", started);
+    }
+
+    // Repository changes usually alter unread totals, not the mailbox/favorite
+    // layout. Update the existing favorite rows in place so unrelated views do
+    // not disappear and get rebuilt after every message action.
+    public void refresh_counts () {
+        var current = new Gee.HashMap<string, Mailbox> ();
+        foreach (var mailbox in repository.list_mailboxes ()) current[mailbox.id] = mailbox;
+        foreach (var id in mailbox_rows.keys) {
+            var mailbox = current[id];
+            var row = mailbox_rows[id];
+            if (mailbox != null && row != null) row.set_child (row_content (mailbox));
+        }
     }
 
     public bool select_mailbox (string id) {

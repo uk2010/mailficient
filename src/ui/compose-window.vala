@@ -65,6 +65,7 @@ public class ComposeWindow : Adw.Window {
                 default_width: child_window_dimension (720, parent.get_width (), 480),
                 default_height: child_window_dimension (620, parent.get_height (), 420));
         add_css_class ("compose-window");
+        set_deletable (false);
         this.cache = cache;
         this.attachment_service = attachment_service;
         this.received_attachment_service = received_attachment_service;
@@ -88,7 +89,7 @@ public class ComposeWindow : Adw.Window {
             delete_queued_button.clicked.connect (() => delete_queued_message.begin ());
             header.pack_start (delete_queued_button);
         }
-        send_button = new Gtk.Button.with_label ("Send"); send_button.add_css_class ("suggested-action"); send_button.clicked.connect (() => send_message.begin ()); header.pack_end (send_button);
+        send_button = new Gtk.Button.with_label ("Send"); send_button.add_css_class ("compose-send-button"); send_button.clicked.connect (() => send_message.begin ()); header.pack_end (send_button);
         var send_later = new Gtk.Button.from_icon_name ("alarm-symbolic"); send_later.tooltip_text = "Send later";
         Accessibility.label (send_later, "Schedule message to send later"); send_later.clicked.connect (() => schedule_send.begin ()); header.pack_end (send_later);
         toolbar.add_top_bar (header);
@@ -221,7 +222,7 @@ public class ComposeWindow : Adw.Window {
 
     protected override bool close_request () {
         if (sending) { overlay.add_toast (new Adw.Toast ("Wait for the current send attempt to finish.")); return true; }
-        if (force_close || !has_content ()) {
+        if (force_close) {
             attachment_operations.cancel ();
             disconnect_signature_settings ();
             return false;
@@ -231,9 +232,16 @@ public class ComposeWindow : Adw.Window {
 
     private void populate_draft () {
         to_entry.text = draft.to; cc_entry.text = draft.cc; bcc_entry.text = draft.bcc;
-        subject_entry.text = draft.subject; body.buffer.text = draft.body_text;
+        subject_entry.text = draft.subject;
+        string body_text = draft.body_text;
+        // Older drafts can retain their HTML body while the plain-text column
+        // is empty. Reconstruct readable editor text instead of opening a
+        // blank compose window.
+        if (body_text.strip () == "" && draft.body_html.strip () != "")
+            body_text = HtmlSanitizer.to_plain_text (draft.body_html);
+        body.buffer.text = body_text;
         RichTextBuffer.restore (body.buffer, draft.body_format); render_attachments ();
-        loaded_body_text = draft.body_text; loaded_body_html = draft.body_html;
+        loaded_body_text = body_text; loaded_body_html = draft.body_html;
         loaded_draft_snapshot = true;
     }
 
@@ -852,7 +860,6 @@ public class ComposeWindow : Adw.Window {
     private async void confirm_close () {
         if (sending) { overlay.add_toast (new Adw.Toast ("Wait for the current send attempt to finish.")); return; }
         if (accepted_pending_cleanup) { force_close = true; close (); return; }
-        if (!has_content ()) { force_close = true; attachment_operations.cancel (); close (); return; }
         var dialog = new Adw.AlertDialog ("Save this draft?", "You can reopen saved drafts from the Drafts mailbox.");
         dialog.add_response ("cancel", "Keep Editing"); dialog.add_response ("discard", "Discard"); dialog.add_response ("save", "Save Draft");
         dialog.close_response = "cancel"; dialog.default_response = "save";

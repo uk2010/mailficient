@@ -134,6 +134,9 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Sun Aug 23 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.5-1
+- Improve favorite switching and update move and copy destinations immediately.
+
 * Sun Aug 23 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.4-1
 - Improve responsive toolbar spacing and compact-toolbar hover rendering.
 

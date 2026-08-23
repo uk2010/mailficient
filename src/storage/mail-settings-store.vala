@@ -49,27 +49,27 @@ public class MailSettingsStore : Object {
     }
 
     public double mailbox_pane_width {
-        get { return clamp_double (get_double ("mailbox-pane-width", 240), 190, 420); }
+        get { return clamp_double (get_double ("mailbox-pane-width", 282), 190, 420); }
         set { set_double ("mailbox-pane-width", clamp_double (value, 190, 420)); }
     }
 
     public double message_pane_width {
-        get { return clamp_double (get_double ("message-pane-width", 380), 300, 620); }
+        get { return clamp_double (get_double ("message-pane-width", 558), 300, 620); }
         set { set_double ("message-pane-width", clamp_double (value, 300, 620)); }
     }
 
     public int window_width {
-        get { return clamp_int ((int) get_double ("window-width", 1320), 640, 3840); }
+        get { return clamp_int ((int) get_double ("window-width", 640), 640, 3840); }
         set { set_double ("window-width", clamp_int (value, 640, 3840)); }
     }
 
     public int window_height {
-        get { return clamp_int ((int) get_double ("window-height", 820), 480, 2160); }
+        get { return clamp_int ((int) get_double ("window-height", 480), 480, 2160); }
         set { set_double ("window-height", clamp_int (value, 480, 2160)); }
     }
 
     public bool window_maximized {
-        get { return get_bool ("window-maximized", false); }
+        get { return get_bool ("window-maximized", true); }
         set { set_bool ("window-maximized", value); }
     }
 

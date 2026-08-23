@@ -43,10 +43,10 @@ public class ContactPickerWindow : Adw.Window {
         clear_results ();
         string query = search.text.strip ();
         if (query.length == 1) {
-            status.label = "Type at least two characters to search GNOME Contacts.";
+            set_status ("Type at least two characters to search GNOME Contacts.");
             status.visible = true; return;
         }
-        status.label = query == "" ? "Loading contacts…" : "Searching contacts…";
+        set_status (query == "" ? "Loading contacts…" : "Searching contacts…");
         status.visible = true;
         uint generation = search_generation; search_cancellable = new Cancellable ();
         var cancellable = search_cancellable;
@@ -60,11 +60,22 @@ public class ContactPickerWindow : Adw.Window {
         try {
             var contacts = yield provider.suggest (query, 50, cancellable);
             if (generation != search_generation || cancellable.is_cancelled ()) return;
-            render (contacts);
+            // Evolution Data Server may complete on a worker context. GTK
+            // widgets must only be touched from the main UI context.
+            Idle.add (() => {
+                if (generation == search_generation && !cancellable.is_cancelled ())
+                    render (contacts);
+                return Source.REMOVE;
+            });
         } catch (Error error) {
             if (error is IOError.CANCELLED) return;
             if (generation == search_generation) {
-                status.label = "GNOME Contacts could not be searched."; status.visible = true;
+                Idle.add (() => {
+                    if (generation == search_generation) {
+                        set_status ("GNOME Contacts could not be searched."); status.visible = true;
+                    }
+                    return Source.REMOVE;
+                });
             }
             warning ("Could not search GNOME Contacts picker: %s", error.message);
         }
@@ -72,8 +83,17 @@ public class ContactPickerWindow : Adw.Window {
 
     private void render (Gee.List<Recipient> contacts) {
         clear_results ();
-        status.label = contacts.size == 0 ? "No matching contacts." :
-            (contacts.size == 1 ? "1 contact" : "%d contacts".printf (contacts.size));
+        // Assign each case separately. A conditional expression containing a
+        // newly allocated string can be freed too early by the Vala-generated
+        // temporary cleanup, leaving GTK with a dangling label string.
+        string result_status;
+        if (contacts.size == 0)
+            result_status = "No matching contacts.";
+        else if (contacts.size == 1)
+            result_status = "1 contact";
+        else
+            result_status = contacts.size.to_string () + " contacts";
+        set_status (result_status);
         status.visible = true;
         foreach (var recipient in contacts) {
             var row = new Gtk.ListBoxRow (); row.set_data<Recipient> ("recipient", recipient);
@@ -90,6 +110,12 @@ public class ContactPickerWindow : Adw.Window {
             row.child = box; Accessibility.label (row, "Choose %s".printf (recipient.formatted ()));
             results.append (row);
         }
+    }
+
+    private void set_status (string value) {
+        // Address-book data can contain malformed legacy text. GTK/Pango
+        // expects valid UTF-8; replace invalid bytes before updating the label.
+        status.set_text (value.make_valid ());
     }
 
     private void clear_results () {

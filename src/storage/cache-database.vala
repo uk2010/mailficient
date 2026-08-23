@@ -1216,7 +1216,19 @@ public class CacheDatabase : Object, AccountStore {
         case "unified-vip": predicate = "EXISTS(SELECT 1 FROM vip_senders v WHERE v.address=m.sender_address COLLATE NOCASE)"; break;
         case "unified-flagged": predicate = "m.flagged=1"; break;
         case "unified-sent": predicate = "b.role=4"; break;
-        case "unified-archive": predicate = "b.role=7"; break;
+        case "unified-archive":
+            // Gmail exposes All Mail as a separate folder, so one message can
+            // have an All Mail row while it also has an Inbox, Junk, or Trash
+            // row. Archive is the user's filing view, not a raw copy of All
+            // Mail: suppress those copies when the same message is present in
+            // a mailbox that owns it instead.
+            predicate = "b.role=7 AND NOT EXISTS(" +
+                "SELECT 1 FROM cached_messages other " +
+                "JOIN cached_mailboxes other_box ON other_box.id=other.mailbox_id " +
+                "WHERE other.account_id=m.account_id AND m.internet_message_id<>'' " +
+                "AND other.internet_message_id=m.internet_message_id " +
+                "AND other_box.role IN (0,5,6))";
+            break;
         case "unified-junk": predicate = "b.role=5"; break;
         case "unified-trash": predicate = "b.role=6"; break;
         case "unified-snoozed": predicate = "EXISTS(SELECT 1 FROM snoozed_messages s WHERE s.message_id=m.id AND s.until_unix>strftime('%s','now'))"; break;
@@ -1689,21 +1701,92 @@ public class CacheDatabase : Object, AccountStore {
         string account_id;
         try {
             Sqlite.Statement statement;
-            const string lookup = "SELECT m.account_id,source.remote_name,m.remote_uid,destination.remote_name FROM cached_messages m JOIN cached_mailboxes source ON source.id=m.mailbox_id JOIN cached_mailboxes destination ON destination.id=? AND destination.account_id=m.account_id WHERE m.id=? LIMIT 1";
+            const string lookup = "SELECT m.account_id,source.id,source.remote_name,m.remote_uid,destination.remote_name,m.unread FROM cached_messages m JOIN cached_mailboxes source ON source.id=m.mailbox_id JOIN cached_mailboxes destination ON destination.id=? AND destination.account_id=m.account_id WHERE m.id=? LIMIT 1";
             if (database.prepare_v2 (lookup, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare a message transfer");
             statement.bind_text (1, destination_id); statement.bind_text (2, message_id);
             if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("The destination mailbox is unavailable for this account");
-            account_id = statement.column_text (0); string source_name = statement.column_text (1); string remote_uid = statement.column_text (2);
-            string destination_name = statement.column_text (3);
+            account_id = statement.column_text (0); string source_id = statement.column_text (1);
+            string source_name = statement.column_text (2); string remote_uid = statement.column_text (3);
+            string destination_name = statement.column_text (4); bool unread = statement.column_int (5) != 0;
             const string insert = "INSERT INTO pending_transfers(message_id,account_id,source_mailbox,destination_mailbox,remote_uid,copy,created_at) VALUES(?,?,?,?,?,?,strftime('%s','now')) ON CONFLICT(message_id) DO UPDATE SET destination_mailbox=excluded.destination_mailbox,copy=excluded.copy,created_at=excluded.created_at";
             if (database.prepare_v2 (insert, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not preserve the message move");
             statement.bind_text (1, message_id); statement.bind_text (2, account_id); statement.bind_text (3, source_name); statement.bind_text (4, destination_name);
             statement.bind_text (5, remote_uid); statement.bind_int (6, copy ? 1 : 0);
             if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not preserve the message move");
-            if (!copy) {
+            if (copy) {
+                // A copy has no destination row until the server operation is
+                // flushed. Keep a local optimistic copy so the destination
+                // favorite reflects the action immediately. The synthetic id
+                // is replaced naturally when the next sync sees the server's
+                // destination UID.
+                string copy_id = "%s:copy:%s".printf (message_id, Uuid.string_random ());
+                const string copy_message = "INSERT INTO cached_messages(" +
+                    "id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged," +
+                    "has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id," +
+                    "in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted) " +
+                    "SELECT ?,?,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment," +
+                    "conversation_count,has_remote_content,body_html,account_id,remote_uid," +
+                    "internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted " +
+                    "FROM cached_messages WHERE id=?";
+                if (database.prepare_v2 (copy_message, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the local message copy");
+                statement.bind_text (1, copy_id); statement.bind_text (2, destination_id); statement.bind_text (3, message_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not create the local message copy");
+
+                const string copy_index = "INSERT INTO message_fts(id,sender,recipients,subject,body) " +
+                    "SELECT ?,sender,recipients,subject,body FROM message_fts WHERE id=?";
+                if (database.prepare_v2 (copy_index, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the copied search index");
+                statement.bind_text (1, copy_id); statement.bind_text (2, message_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not copy the search index");
+
+                const string copy_headers = "INSERT INTO message_header_index(message_id,account_id,header_id) " +
+                    "SELECT ?,account_id,header_id FROM message_header_index WHERE message_id=?";
+                if (database.prepare_v2 (copy_headers, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare copied conversation indexing");
+                statement.bind_text (1, copy_id); statement.bind_text (2, message_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not copy conversation indexing");
+
+                const string copy_attachments = "INSERT INTO message_attachments(message_id,id,path,name,size,content_type,content_id,remote_part_index) " +
+                    "SELECT ?,id,path,name,size,content_type,content_id,remote_part_index FROM message_attachments WHERE message_id=?";
+                if (database.prepare_v2 (copy_attachments, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare copied attachments");
+                statement.bind_text (1, copy_id); statement.bind_text (2, message_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not copy attachments");
+
+                if (database.prepare_v2 ("UPDATE pending_transfers SET message_id=? WHERE message_id=?", -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not associate the local message copy");
+                statement.bind_text (1, copy_id); statement.bind_text (2, message_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not associate the local message copy");
+            } else {
                 if (database.prepare_v2 ("UPDATE cached_messages SET mailbox_id=? WHERE id=?", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare the local message move");
                 statement.bind_text (1, destination_id); statement.bind_text (2, message_id);
                 if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update the local message move");
+            }
+            if (unread) {
+                if (copy) {
+                    if (database.prepare_v2 ("UPDATE cached_mailboxes SET unread_count=unread_count+1 WHERE id=?", -1, out statement) != Sqlite.OK)
+                        throw new MailError.STORAGE ("Could not update the copied mailbox count");
+                    statement.bind_text (1, destination_id);
+                    if (statement.step () != Sqlite.DONE)
+                        throw new MailError.STORAGE ("Could not update the copied mailbox count");
+                } else if (source_id != destination_id) {
+                    if (database.prepare_v2 ("UPDATE cached_mailboxes SET unread_count=MAX(0,unread_count-1) WHERE id=?", -1, out statement) != Sqlite.OK)
+                        throw new MailError.STORAGE ("Could not update the source mailbox count");
+                    statement.bind_text (1, source_id);
+                    if (statement.step () != Sqlite.DONE)
+                        throw new MailError.STORAGE ("Could not update the source mailbox count");
+                    if (database.prepare_v2 ("UPDATE cached_mailboxes SET unread_count=unread_count+1 WHERE id=?", -1, out statement) != Sqlite.OK)
+                        throw new MailError.STORAGE ("Could not update the destination mailbox count");
+                    statement.bind_text (1, destination_id);
+                    if (statement.step () != Sqlite.DONE)
+                        throw new MailError.STORAGE ("Could not update the destination mailbox count");
+                }
             }
             execute ("COMMIT");
         } catch (MailError error) { try { execute ("ROLLBACK"); } catch (MailError ignored) { } throw error; }
@@ -1898,6 +1981,28 @@ public class CacheDatabase : Object, AccountStore {
                 statement.bind_text (1, transfer.destination_mailbox); statement.bind_text (2, destination_uid);
                 statement.bind_text (3, transfer.message_id); statement.bind_text (4, transfer.destination_mailbox);
                 if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not preserve a chained message move");
+            }
+            if (transfer.copy && destination_uid != null && destination_uid != "") {
+                if (database.prepare_v2 ("UPDATE cached_messages SET remote_uid=? WHERE id=?", -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the copied message identity");
+                statement.bind_text (1, destination_uid); statement.bind_text (2, transfer.message_id);
+                if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not preserve the copied message identity");
+            } else if (transfer.copy) {
+                // Without UIDPLUS the accepted copy has no stable destination
+                // identity yet. Let the next mailbox sync install the server
+                // row instead of retaining a duplicate optimistic row.
+                foreach (var sql in new string[] {
+                    "DELETE FROM message_fts WHERE id=?",
+                    "DELETE FROM message_header_index WHERE message_id=?",
+                    "DELETE FROM message_attachments WHERE message_id=?",
+                    "DELETE FROM cached_messages WHERE id=?"
+                }) {
+                    if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                        throw new MailError.STORAGE ("Could not remove the temporary message copy");
+                    statement.bind_text (1, transfer.message_id);
+                    if (statement.step () != Sqlite.DONE)
+                        throw new MailError.STORAGE ("Could not remove the temporary message copy");
+                }
             }
             if (database.prepare_v2 ("DELETE FROM pending_transfers WHERE message_id=? AND destination_mailbox=? AND copy=?", -1, out statement) != Sqlite.OK)
                 throw new MailError.STORAGE ("Could not prepare message move completion");

@@ -63,7 +63,10 @@ public class GnomeAddressBookProvider : Object, ContactSuggestionProvider {
                 var attempt = new Cancellable ();
                 bool timed_out = false;
                 uint timeout_source = 0;
-                timeout_source = Timeout.add (5000, () => {
+                // A disabled or unreachable address book must not hold the
+                // Contacts picker behind several sequential five-second
+                // connection attempts.
+                timeout_source = Timeout.add (1500, () => {
                     timeout_source = 0; timed_out = true; attempt.cancel (); return Source.REMOVE;
                 });
                 try {

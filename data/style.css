@@ -893,6 +893,80 @@ menubutton.app-menu-button > button {
   font-size: .94em;
 }
 
+/* Compose controls use the same quiet neutral treatment as the rest of the
+ * window. Keep the application accent out of sender selection, recipient
+ * helpers, and the primary Send action. */
+.compose-window headerbar button.compose-send-button {
+  min-width: 66px;
+  color: inherit;
+  background: alpha(currentColor, .08);
+  border: 1px solid alpha(currentColor, .13);
+  box-shadow: inset 0 1px alpha(white, .16);
+}
+
+.compose-window headerbar button.compose-send-button:hover {
+  color: inherit;
+  background: alpha(currentColor, .14);
+  border-color: alpha(currentColor, .19);
+  box-shadow: inset 0 1px alpha(white, .22), 0 2px 6px alpha(black, .06);
+}
+
+.compose-window headerbar button.compose-send-button:active,
+.compose-window headerbar button.compose-send-button:checked {
+  color: inherit;
+  background: alpha(currentColor, .18);
+  border-color: alpha(currentColor, .22);
+  box-shadow: inset 0 1px 3px alpha(black, .10);
+}
+
+.compose-window .compose-field-row:focus-within {
+  background: alpha(currentColor, .025);
+}
+
+.compose-window .compose-line-entry:focus,
+.compose-window .compose-line-entry:focus-within {
+  box-shadow: 0 0 0 3px alpha(currentColor, .07),
+              inset 0 0 0 1px alpha(currentColor, .18);
+}
+
+.compose-window .compose-recipient-reveal {
+  color: inherit;
+  background: alpha(currentColor, .055);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, .11);
+}
+
+.compose-window .compose-recipient-reveal:hover {
+  color: inherit;
+  background: alpha(currentColor, .11);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, .17);
+}
+
+.compose-window .compose-recipient-reveal:active,
+.compose-window .compose-recipient-reveal:checked {
+  color: inherit;
+  background: alpha(currentColor, .15);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, .20);
+}
+
+.compose-window .compose-from-selector button,
+.compose-window .compose-from-selector button:focus,
+.compose-window .compose-from-selector button:focus-visible {
+  color: inherit;
+  outline: none;
+  box-shadow: inset 0 0 0 1px alpha(currentColor, .12);
+}
+
+.compose-window popover listview row:selected {
+  color: inherit;
+  background: alpha(currentColor, .12);
+}
+
+.compose-window entry selection,
+.compose-window textview text selection {
+  background-color: alpha(currentColor, .18);
+  color: inherit;
+}
+
 /* Compact main toolbar: preserve every control while reducing its vertical
  * footprint by roughly one fifth. */
 .mail-header-bar {

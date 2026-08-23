@@ -1,3 +1,7 @@
+# Mailficient 0.2.5
+
+The 0.2.5 build improves favorite switching and updates move and copy destinations immediately.
+
 # Mailficient 0.2.4
 
 Mailficient 0.2.4 improves responsive toolbar spacing and fixes compact-toolbar
