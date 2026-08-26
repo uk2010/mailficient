@@ -4,6 +4,7 @@ public class AccountSettingsPage : Adw.PreferencesPage {
     public signal void accounts_changed ();
 
     private CacheDatabase cache;
+    private MailSettingsStore settings;
     private CredentialCleanupService credential_cleanup;
     private AccountProvisioningService? account_provisioner;
     private MailEngine? engine;
@@ -20,6 +21,7 @@ public class AccountSettingsPage : Adw.PreferencesPage {
                                 AccountSyncService? sync_service,
                                 OnlineAccountService online_accounts) {
         this.cache = cache;
+        this.settings = new MailSettingsStore (cache);
         this.credential_cleanup = credential_cleanup;
         this.account_provisioner = account_provisioner;
         this.engine = engine;
@@ -198,10 +200,12 @@ public class AccountSettingsPage : Adw.PreferencesPage {
         filters.append (filter);
         dialog.filters = filters;
         dialog.default_filter = filter;
+        dialog.initial_folder = settings.file_dialog_initial_folder ();
         try {
             var root_window = get_root () as Gtk.Window;
             if (root_window == null) return;
             var file = yield dialog.open (root_window, null);
+            settings.remember_file_dialog_selection (file);
             var info = yield file.query_info_async (
                 FileAttribute.STANDARD_SIZE + "," + FileAttribute.STANDARD_TYPE,
                 FileQueryInfoFlags.NOFOLLOW_SYMLINKS, Priority.DEFAULT, null);
@@ -223,7 +227,7 @@ public class AccountSettingsPage : Adw.PreferencesPage {
             account_dialog.present (this);
             status.visible = false;
         } catch (Error error) {
-            if (!(error is IOError.CANCELLED)) show_profile_error (error);
+            if (!DialogErrors.was_cancelled (error)) show_profile_error (error);
         }
     }
 

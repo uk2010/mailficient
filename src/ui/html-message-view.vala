@@ -292,7 +292,7 @@ public class HtmlMessageView : Gtk.Box {
         });
     }
 
-    public void shutdown () {
+    public void shutdown (bool terminate_process = false) {
         var view = web_view;
         if (view == null) return;
         display_generation++;
@@ -316,6 +316,11 @@ public class HtmlMessageView : Gtk.Box {
         }
         resource_signals.clear ();
         view.stop_loading ();
+        // During application shutdown, ask WebKit to terminate its sandboxed
+        // renderer before GTK releases the last WebView. Leaving pooled views
+        // for object finalization can make the WebProcess run its teardown
+        // after the UI process has already exited.
+        if (terminate_process) view.terminate_web_process ();
         remove (view);
         web_view = null;
     }

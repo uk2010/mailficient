@@ -14,8 +14,9 @@ public interface MailEngine : Object {
     // when the provider does not advertise a writable Drafts mailbox.
     public abstract async RemoteDraftLocation? save_remote_draft (
         Draft draft, Cancellable? cancellable = null) throws Error;
-    // Implementations verify expected_message_id before changing server state.
-    // A missing copy is successful cleanup; an identity mismatch is not.
+    // Implementations verify the expected identity before changing server state.
+    // Missing or mismatched content means this exact deletion target no longer
+    // exists, so cleanup completes successfully without modifying the candidate.
     public abstract async bool delete_remote_draft (
         PendingDraftDeletion deletion, Cancellable? cancellable = null) throws Error;
     public abstract async void save_remote_attachment (string account_id, string mailbox_name,

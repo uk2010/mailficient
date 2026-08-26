@@ -8,7 +8,15 @@ public class RemoteContentPolicy : Object {
     }
 
     public bool is_sender_trusted (string address) {
-        try { return cache.is_remote_sender_trusted (address); }
+        try {
+            // "Safe Sender" is the stronger, user-facing trust decision. It
+            // therefore includes the narrower permission to load that
+            // sender's remote images. Keep the dedicated remote-content list
+            // for people who only want to allow images while retaining the
+            // automatic sender-warning card.
+            return cache.is_safe_sender (address) ||
+                cache.is_remote_sender_trusted (address);
+        }
         catch (Error error) {
             warning ("Could not inspect the remote-content sender policy: %s", error.message);
             return false;

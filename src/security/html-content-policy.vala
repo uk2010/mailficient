@@ -14,14 +14,12 @@ public class HtmlContentPolicy : Object {
             "html,body{min-width:0}" +
             "body{box-sizing:border-box;width:100%;min-width:0;max-width:100%;font:16px system-ui;margin:0;" +
             "padding:clamp(12px,4vw,24px);" +
-            "line-height:1.5;overflow-wrap:anywhere;word-break:break-word;background:#fff;color:#000}" +
-            "body *{box-sizing:border-box;min-width:0!important;max-width:100%!important;overflow-wrap:anywhere;word-break:break-word}" +
+            "line-height:1.5;overflow-wrap:break-word;background:#fff;color:#000}" +
+            "body>*{max-width:100%}" +
             "img,svg,video{max-width:100%!important;height:auto!important;object-fit:contain}" +
-            "table{border-collapse:collapse;width:100%!important;max-width:100%!important;table-layout:fixed!important}" +
-            "table[width='100%'],table[style*='width:100%'],table.email-content-wrapper," +
-            "table[width='600']{width:100%!important;max-width:100%!important;table-layout:fixed!important}" +
-            "td,th{min-width:0!important;max-width:100%!important;overflow-wrap:anywhere;word-break:break-word;white-space:normal!important}" +
-            "h1,h2,h3,h4,h5,h6,p,div,span,a{max-width:100%;overflow-wrap:anywhere;word-break:break-word}" +
+            "table{max-width:100%}" +
+            "td,th{overflow-wrap:break-word}" +
+            "h1,h2,h3,h4,h5,h6,p,div,span,a{max-width:100%;overflow-wrap:break-word}" +
             "pre,code{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}" +
             "blockquote{max-width:100%;margin-inline:1em;border-inline-start:3px solid currentColor;" +
             "padding-inline-start:1em;opacity:.85}" +

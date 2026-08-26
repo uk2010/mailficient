@@ -42,6 +42,26 @@ internal class VirtualMessageModel : Object, GLib.ListModel {
     public Type get_item_type () { return typeof (Message); }
     public uint get_n_items () { return item_count; }
 
+    // State-only actions must never call get_item() for every logical row:
+    // doing so turns a one-bit change into a synchronous load of the entire
+    // mailbox. Update the bounded page cache only; unloaded pages will read
+    // the durable value when GTK asks for them later.
+    public void set_cached_read_state (string id, bool read) {
+        foreach (var page in pages.values)
+            foreach (var message in page)
+                if (message.id == id) message.unread = !read;
+    }
+
+    public void set_cached_flag_state (string id, bool flagged, string color = "") {
+        foreach (var page in pages.values) {
+            foreach (var message in page) {
+                if (message.id != id) continue;
+                message.flagged = flagged;
+                if (color != "") message.flag_color = color;
+            }
+        }
+    }
+
     // Remove rows whose backing messages were moved or deleted. Only the
     // affected portion of the virtual list is invalidated; the rest of a
     // large mailbox stays painted and its pages remain available.

@@ -49,13 +49,160 @@ private class MisreportedOversizedAttachmentData : Camel.DataWrapper {
 
 private void test_sync_memory_bounds () {
     assert (CamelMailEngine.SYNC_BATCH_SIZE > 0);
-    assert (CamelMailEngine.UID_SCAN_YIELD_INTERVAL > CamelMailEngine.SYNC_BATCH_SIZE);
+    assert (CamelMailEngine.INBOX_PREFETCH_LIMIT > 0);
+    assert (CamelMailEngine.INBOX_PREFETCH_LIMIT <= CamelMailEngine.SYNC_BATCH_SIZE);
+    assert (CamelMailEngine.UID_TRAVERSAL_TIME_SLICE_USEC > 0);
+    assert (CamelMailEngine.UID_TRAVERSAL_TIME_SLICE_USEC < 16 * 1000);
 
     Error? failure = null;
     try {
         CamelMailEngine.decode_text (new MisreportedOversizedAttachmentData (), 32);
     } catch (Error error) { failure = error; }
     assert (failure is IOError.MESSAGE_TOO_LARGE);
+}
+
+private void test_inbox_prefetch_is_ordered_bounded_and_unique () {
+    var source = new Gee.ArrayList<Mailbox> ();
+    var archive = new Mailbox ("a:archive", "Archive", "folder-symbolic",
+        MailboxRole.ARCHIVE, 0, "a", "Archive");
+    var inbox = new Mailbox ("a:inbox", "Inbox", "mail-inbox-symbolic",
+        MailboxRole.INBOX, 0, "a", "INBOX");
+    var secondary_inbox = new Mailbox ("a:inbox-2", "Other Inbox",
+        "mail-inbox-symbolic", MailboxRole.INBOX, 0, "a", "Inbox-2");
+    var sent = new Mailbox ("a:sent", "Sent", "mail-sent-symbolic",
+        MailboxRole.SENT, 0, "a", "Sent");
+    source.add (archive); source.add (inbox); source.add (sent);
+    source.add (secondary_inbox);
+    var ordered = CamelMailEngine.inbox_first_mailboxes (source);
+    assert (ordered.size == 4);
+    assert (ordered[0] == inbox); assert (ordered[1] == secondary_inbox);
+    assert (ordered[2] == archive); assert (ordered[3] == sent);
+    // The provider-facing inventory order is not mutated merely to prioritize
+    // network work.
+    assert (source[0] == archive); assert (source[1] == inbox);
+
+    var candidates = new Gee.ArrayList<string> ();
+    for (int index = 0; index < 8; index++) candidates.add (index.to_string ());
+    var prefetched = CamelMailEngine.take_inbox_prefetch_uids (candidates, 0);
+    assert (prefetched.size == CamelMailEngine.INBOX_PREFETCH_LIMIT);
+    assert (candidates.size == 8 - CamelMailEngine.INBOX_PREFETCH_LIMIT);
+    assert (prefetched[0] == "7"); assert (prefetched[1] == "6");
+    assert (candidates[0] == "0"); assert (candidates[candidates.size - 1] == "2");
+    foreach (var uid in prefetched) assert (!candidates.contains (uid));
+    assert (CamelMailEngine.bounded_inbox_prefetch_count (
+        candidates.size, prefetched.size) == 0);
+
+    var first_inbox = new Gee.ArrayList<string> ();
+    first_inbox.add ("1"); first_inbox.add ("2"); first_inbox.add ("3");
+    var second_inbox = new Gee.ArrayList<string> ();
+    second_inbox.add ("10"); second_inbox.add ("11");
+    second_inbox.add ("12"); second_inbox.add ("13");
+    second_inbox.add ("14");
+    var first_selected = CamelMailEngine.take_inbox_prefetch_uids (
+        first_inbox, 0);
+    var second_selected = CamelMailEngine.take_inbox_prefetch_uids (
+        second_inbox, first_selected.size);
+    assert (first_selected.size == 3); assert (second_selected.size == 2);
+    assert (first_selected.size + second_selected.size ==
+        CamelMailEngine.INBOX_PREFETCH_LIMIT);
+    assert (second_selected[0] == "14"); assert (second_selected[1] == "13");
+
+    // Prefetch consumes, rather than expands, the existing 250-message pass.
+    int later = CamelMailEngine.bounded_folder_download_count (
+        CamelMailEngine.MAX_MESSAGES_PER_SYNC_SESSION,
+        prefetched.size);
+    assert (prefetched.size + later ==
+        CamelMailEngine.MAX_MESSAGES_PER_SYNC_SESSION);
+}
+
+private void test_uid_traversal_uses_elapsed_time_slice () {
+    int64 started = 1000000;
+    int64 slice = CamelMailEngine.UID_TRAVERSAL_TIME_SLICE_USEC;
+    assert (!CamelMailEngine.uid_traversal_time_slice_expired (started, started));
+    assert (!CamelMailEngine.uid_traversal_time_slice_expired (
+        started, started + slice - 1));
+    assert (CamelMailEngine.uid_traversal_time_slice_expired (
+        started, started + slice));
+    assert (CamelMailEngine.uid_traversal_time_slice_expired (
+        started, started + (slice * 4)));
+    assert (!CamelMailEngine.uid_traversal_time_slice_expired (started, started - 1));
+}
+
+private void test_cache_namespace_tracks_eds_branch () {
+    assert (CamelCacheNamespace.leaf_for_version (3, 56) == "camel-cache-eds-3-56");
+    assert (CamelCacheNamespace.leaf_for_version (3, 60) == "camel-cache-eds-3-60");
+    assert (CamelCacheNamespace.leaf_for_version (-1, -1) == "camel-cache-eds-0-0");
+
+    string root = Path.build_filename (Environment.get_tmp_dir (), "mailficient-cache-root");
+    string path = CamelCacheNamespace.path_for (root);
+    assert (Path.get_dirname (path) == root);
+    assert (Path.get_basename (path) == CamelCacheNamespace.leaf_for_version (
+        E.EDS_MAJOR_VERSION, E.EDS_MINOR_VERSION));
+}
+
+private void test_zero_byte_cache_repair_is_narrow () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-zero-cache-%s".printf (Uuid.string_random ()));
+    string empty_path = Path.build_filename (root, "empty");
+    string nonempty_path = Path.build_filename (root, "nonempty");
+    string target_path = Path.build_filename (root, "target");
+    string link_path = Path.build_filename (root, "link");
+    string directory_path = Path.build_filename (root, "directory");
+    try {
+        assert (DirUtils.create_with_parents (directory_path, 0700) == 0);
+        FileUtils.set_contents (empty_path, "");
+        FileUtils.set_contents (nonempty_path, "mail");
+        FileUtils.set_contents (target_path, "");
+        File.new_for_path (link_path).make_symbolic_link (target_path);
+
+        assert (CamelMailEngine.remove_zero_byte_cache_file (
+            File.new_for_path (empty_path)));
+        assert (!File.new_for_path (empty_path).query_exists ());
+
+        assert (!CamelMailEngine.remove_zero_byte_cache_file (
+            File.new_for_path (nonempty_path)));
+        assert (File.new_for_path (nonempty_path).query_exists ());
+
+        assert (!CamelMailEngine.remove_zero_byte_cache_file (
+            File.new_for_path (link_path)));
+        assert (File.new_for_path (link_path).query_exists ());
+        assert (File.new_for_path (target_path).query_exists ());
+
+        assert (!CamelMailEngine.remove_zero_byte_cache_file (
+            File.new_for_path (directory_path)));
+        assert (!CamelMailEngine.remove_zero_byte_cache_file (
+            File.new_for_path (Path.build_filename (root, "missing"))));
+    } catch (Error error) {
+        GLib.error ("Zero-byte Camel cache repair test failed: %s", error.message);
+    } finally {
+        FileUtils.unlink (link_path);
+        FileUtils.unlink (nonempty_path);
+        FileUtils.unlink (target_path);
+        DirUtils.remove (directory_path);
+        DirUtils.remove (root);
+    }
+}
+
+private void test_sync_result_can_forget_vanished_uid () {
+    var result = new MailSyncResult ("vanished-account");
+    var inbox = new Mailbox ("vanished-account:inbox", "Inbox",
+        "mail-inbox-symbolic", MailboxRole.INBOX, 2,
+        "vanished-account", "INBOX");
+    result.record_remote_uid (inbox.id, "41");
+    result.record_remote_uid (inbox.id, "42");
+    var unread_uids = new Gee.HashSet<string> ();
+    unread_uids.add ("41"); unread_uids.add ("42");
+    CamelMailEngine.forget_vanished_uid (result, inbox, unread_uids, "41");
+    result.forget_remote_uid ("vanished-account:missing", "1");
+    var inventory = result.remote_uids_for (inbox.id);
+    assert (inventory != null);
+    assert (!inventory.contains ("41"));
+    assert (inventory.contains ("42"));
+    assert (inbox.unread_count == 1);
+    // A vanished message which was already read must not change the unread
+    // total, even when the provider repeats the disappearance.
+    CamelMailEngine.forget_vanished_uid (result, inbox, unread_uids, "99");
+    assert (inbox.unread_count == 1);
 }
 
 private void test_sync_session_message_limit_preserves_inventory () {
@@ -166,6 +313,48 @@ private void test_html_only_remote_draft_plain_fidelity () {
     assert (CamelMailEngine.remote_draft_plain_body ("", "") == "");
 }
 
+private void test_managed_remote_draft_identity_without_message_id () {
+    string id = "8d3b6d0a-8ca1-4b44-a850-a8f86f6f4e42";
+    string expected = Draft.remote_message_id_for (id, 7);
+    int64 revision;
+    assert (CamelMailEngine.is_managed_remote_draft_identity (
+        id, "7", expected, out revision));
+    assert (revision == 7);
+    assert (CamelMailEngine.is_managed_remote_draft_identity (
+        id, "7", "", out revision));
+    assert (revision == 7);
+    assert (!CamelMailEngine.is_managed_remote_draft_identity (
+        id, "7", "different@example.net", out revision));
+    assert (!CamelMailEngine.is_managed_remote_draft_identity (
+        "not-a-uuid", "7", "", out revision));
+
+    var stripped = new Camel.MimeMessage ();
+    stripped.set_header ("X-Mailficient-Draft-ID", id);
+    stripped.set_header ("X-Mailficient-Draft-Revision", "7");
+    assert (CamelMailEngine.remote_draft_matches_expected_identity (
+        stripped, expected));
+    assert (!CamelMailEngine.remote_draft_matches_expected_identity (
+        stripped, Draft.remote_message_id_for (id, 8)));
+    stripped.set_message_id ("different@example.net");
+    assert (!CamelMailEngine.remote_draft_matches_expected_identity (
+        stripped, expected));
+
+    var no_id_draft = new Draft ("fingerprint-account", "provider-no-id");
+    no_id_draft.subject = "No Message-ID";
+    no_id_draft.body_text = "Exact provider content";
+    string fingerprint = DraftFingerprint.calculate (no_id_draft, "41");
+    var no_id_snapshot = new RemoteDraftSnapshot (no_id_draft, "Drafts", "41",
+        "", false, fingerprint);
+    assert (CamelMailEngine.remote_draft_matches_expected_fingerprint (
+        no_id_snapshot, fingerprint));
+    assert (!CamelMailEngine.remote_draft_matches_expected_fingerprint (
+        no_id_snapshot, "different-fingerprint"));
+    var identified_snapshot = new RemoteDraftSnapshot (no_id_draft, "Drafts",
+        "41", "present@example.net", false, fingerprint);
+    assert (!CamelMailEngine.remote_draft_matches_expected_fingerprint (
+        identified_snapshot, fingerprint));
+}
+
 private void test_malformed_text_charset_falls_back_safely () {
     try {
         string source = "Malformed bulk-mail body";
@@ -176,13 +365,98 @@ private void test_malformed_text_charset_falls_back_safely () {
         assert (CamelMailEngine.decode_text (content) == source);
         unowned Camel.ContentType? content_type = content.get_mime_type_field ();
         assert (content_type != null);
-        assert (content_type.param ("charset").ascii_casecmp ("UTF-8") == 0);
+        // Repair the label for decoding without mutating Camel's borrowed
+        // MIME metadata object.
+        assert (content_type.param ("charset").ascii_casecmp ("3DUTF-8") == 0);
 
         content_type.set_param ("charset", "definitely-not-a-real-charset");
         assert (CamelMailEngine.decode_text (content) == source);
-        assert (content_type.param ("charset").ascii_casecmp ("UTF-8") == 0);
+        // Unsupported metadata must not be relabelled as UTF-8 without
+        // converting the bytes. Valid UTF-8 content is still preserved.
+        assert (content_type.param ("charset").ascii_casecmp (
+            "definitely-not-a-real-charset") == 0);
     } catch (Error error) {
         GLib.error ("Malformed text charset fallback test failed: %s", error.message);
+    }
+}
+
+private static string decode_raw_text (uint8[] bytes, string mime_type) throws Error {
+    var message = new Camel.MimeMessage ();
+    message.set_content (bytes, mime_type);
+    var content = ((Camel.Medium) message).get_content ();
+    assert (content != null);
+    return CamelMailEngine.decode_text (content);
+}
+
+private void test_text_charsets_are_converted_to_utf8 () {
+    try {
+        uint8[] latin1 = { 'c', 'a', 'f', 0xe9 };
+        assert (decode_raw_text (latin1,
+            "text/plain; charset=iso-8859-1") == "café");
+
+        uint8[] windows_mislabelled = {
+            0x93, 'Q', 'u', 'o', 't', 'e', 'd', 0x94
+        };
+        assert (decode_raw_text (windows_mislabelled,
+            "text/plain; charset=iso-8859-1") == "“Quoted”");
+
+        // A supported, explicit MIME charset is authoritative even when its
+        // bytes also happen to form valid UTF-8.
+        uint8[] valid_utf8_but_windows = { 0xc3, 0xa9 };
+        assert (decode_raw_text (valid_utf8_but_windows,
+            "text/plain; charset=windows-1252") == "Ã©");
+
+        // Invalid input in a supported charset must remain visible rather
+        // than being silently dropped by a permissive streaming filter.
+        uint8[] malformed_utf8 = { 'A', 0xc3, 'B' };
+        assert (decode_raw_text (malformed_utf8,
+            "text/plain; charset=utf-8") == "A�B");
+
+        uint8[] utf16le = {
+            0xff, 0xfe, 'H', 0x00, 'i', 0x00, ' ', 0x00, 0x13, 0x27
+        };
+        assert (decode_raw_text (utf16le,
+            "text/plain; charset=us-ascii") == "Hi ✓");
+
+        uint8[] nul_html = {
+            '<', 'p', '>', 'A', 0x00, 'B', '<', '/', 'p', '>'
+        };
+        string nul_result = decode_raw_text (nul_html,
+            "text/html; charset=utf-8");
+        assert (nul_result == "<p>A�B</p>");
+        assert (nul_result.length > 8);
+
+        uint8[] meta_prefix = "<meta charset=windows-1252><p>caf".data;
+        uint8[] meta_suffix = "</p>".data;
+        var meta = new ByteArray ();
+        meta.append (meta_prefix); uint8[] accent = { 0xe9 }; meta.append (accent);
+        meta.append (meta_suffix);
+        assert (decode_raw_text (meta.data,
+            "text/html") == "<meta charset=windows-1252><p>café</p>");
+    } catch (Error error) {
+        GLib.error ("Text charset conversion test failed: %s", error.message);
+    }
+}
+
+private void test_quoted_printable_charset_is_decoded_once () {
+    try {
+        string wire =
+            "Content-Type: text/html; charset=iso-8859-1\r\n" +
+            "Content-Transfer-Encoding: quoted-printable\r\n\r\n" +
+            "<p>caf=E9</p><a href=3D\"https://example.net/read?a=3D1\">Open</a>";
+        var parser = new Camel.MimeParser ();
+        parser.init_with_bytes (new Bytes (wire.data));
+        var part = new Camel.MimePart ();
+        assert (part.construct_from_parser_sync (parser));
+        var content = part.get_content ();
+        assert (content != null);
+        string decoded = CamelMailEngine.decode_text (content);
+        assert (decoded ==
+            "<p>café</p><a href=\"https://example.net/read?a=1\">Open</a>");
+        assert (!decoded.contains ("=E9"));
+        assert (!decoded.contains ("=3D"));
+    } catch (Error error) {
+        GLib.error ("Quoted-printable charset test failed: %s", error.message);
     }
 }
 
@@ -202,6 +476,24 @@ private void test_sync_cooperatively_yields () {
     loop.run ();
     assert (completed);
     assert (failure == null);
+}
+
+private void test_cooperative_yield_honors_cancellation () {
+    bool completed = false;
+    Error? failure = null;
+    var cancellable = new Cancellable ();
+    cancellable.cancel ();
+    var loop = new MainLoop ();
+    CamelMailEngine.yield_to_main_context.begin (cancellable, (object, result) => {
+        try { CamelMailEngine.yield_to_main_context.end (result); }
+        catch (Error error) { failure = error; }
+        completed = true;
+        loop.quit ();
+    });
+    assert (!completed);
+    loop.run ();
+    assert (completed);
+    assert (failure is IOError.CANCELLED);
 }
 
 private async void exercise_failed_retries (CamelMailEngine engine, AccountSettings account) {
@@ -785,6 +1077,16 @@ int main (string[] args) {
     Test.add_func ("/camel/failed-attachment-decode-is-atomic", Mailficient.test_failed_attachment_decode_is_atomic);
     Test.add_func ("/camel/misreported-attachment-is-bounded", Mailficient.test_misreported_attachment_is_bounded);
     Test.add_func ("/camel/sync-memory-bounds", Mailficient.test_sync_memory_bounds);
+    Test.add_func ("/camel/inbox-prefetch-is-ordered-bounded-and-unique",
+        Mailficient.test_inbox_prefetch_is_ordered_bounded_and_unique);
+    Test.add_func ("/camel/uid-traversal-uses-elapsed-time-slice",
+        Mailficient.test_uid_traversal_uses_elapsed_time_slice);
+    Test.add_func ("/camel/cache-namespace-tracks-eds-branch",
+        Mailficient.test_cache_namespace_tracks_eds_branch);
+    Test.add_func ("/camel/zero-byte-cache-repair-is-narrow",
+        Mailficient.test_zero_byte_cache_repair_is_narrow);
+    Test.add_func ("/camel/sync-result-can-forget-vanished-uid",
+        Mailficient.test_sync_result_can_forget_vanished_uid);
     Test.add_func ("/camel/sync-session-message-limit-preserves-inventory",
         Mailficient.test_sync_session_message_limit_preserves_inventory);
     Test.add_func ("/camel/top-level-html-body", Mailficient.test_top_level_html_body);
@@ -792,8 +1094,16 @@ int main (string[] args) {
         Mailficient.test_unnamed_inline_calendar_is_extracted);
     Test.add_func ("/camel/html-only-remote-draft-plain-fidelity",
         Mailficient.test_html_only_remote_draft_plain_fidelity);
+    Test.add_func ("/camel/managed-remote-draft-identity-without-message-id",
+        Mailficient.test_managed_remote_draft_identity_without_message_id);
     Test.add_func ("/camel/malformed-text-charset-falls-back-safely", Mailficient.test_malformed_text_charset_falls_back_safely);
+    Test.add_func ("/camel/text-charsets-are-converted-to-utf8",
+        Mailficient.test_text_charsets_are_converted_to_utf8);
+    Test.add_func ("/camel/quoted-printable-charset-decoded-once",
+        Mailficient.test_quoted_printable_charset_is_decoded_once);
     Test.add_func ("/camel/sync-cooperatively-yields", Mailficient.test_sync_cooperatively_yields);
+    Test.add_func ("/camel/cooperative-yield-honors-cancellation",
+        Mailficient.test_cooperative_yield_honors_cancellation);
     Test.add_func ("/camel/remote-attachment-part-addressing", Mailficient.test_remote_attachment_part_addressing);
     Test.add_func ("/camel/received-inline-content-id", Mailficient.test_received_inline_content_id);
     Test.add_func ("/camel/mime-privacy-and-binary-attachment", Mailficient.test_mime_privacy_and_binary_attachment);

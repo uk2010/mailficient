@@ -5,6 +5,10 @@ public class MailSyncResult : Object {
     public Gee.ArrayList<Message> messages { get; private set; default = new Gee.ArrayList<Message> (); }
     public Gee.ArrayList<RemoteMessageState> states { get; private set; default = new Gee.ArrayList<RemoteMessageState> (); }
     public Gee.ArrayList<RemoteDraftSnapshot> remote_drafts { get; private set; default = new Gee.ArrayList<RemoteDraftSnapshot> (); }
+    // Verified Mailficient draft identities from provider container folders
+    // such as Gmail All Mail. These are cache-filtering metadata only: unlike
+    // remote_drafts, AccountSyncService must never import them as composers.
+    public Gee.ArrayList<RemoteDraftSnapshot> verified_draft_copies { get; private set; default = new Gee.ArrayList<RemoteDraftSnapshot> (); }
     public Gee.ArrayList<string> issues { get; private set; default = new Gee.ArrayList<string> (); }
     public bool folder_inventory_complete { get; set; default = false; }
     public bool more_messages_available { get; set; default = false; }
@@ -25,6 +29,11 @@ public class MailSyncResult : Object {
         begin_remote_inventory (mailbox_id);
         var inventory = remote_uids[mailbox_id];
         inventory.add (uid);
+    }
+
+    public void forget_remote_uid (string mailbox_id, string uid) {
+        var inventory = remote_uids[mailbox_id];
+        if (inventory != null) inventory.remove (uid);
     }
 
     public void begin_remote_inventory (string mailbox_id) {

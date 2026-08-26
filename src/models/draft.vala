@@ -18,7 +18,7 @@ public class Draft : Object {
     public bool sign_message { get; set; default = false; }
     public bool encrypt_message { get; set; default = false; }
     public string security_identity { get; set; default = ""; }
-    public int64 modified_at { get; set; default = new DateTime.now_utc ().to_unix (); }
+    public int64 modified_at { get; set; default = 0; }
     // Revision is monotonic even when several autosaves happen within the same
     // second.  Remote Drafts use it as an idempotency key; modified_at remains
     // the human-facing sort timestamp.
@@ -34,9 +34,15 @@ public class Draft : Object {
     public bool dirty { get; private set; default = true; }
     public Gee.ArrayList<Attachment> attachments { get; private set; default = new Gee.ArrayList<Attachment> (); }
 
-    public Draft (string account_id, string? id = null) { Object (account_id: account_id, id: id ?? Uuid.string_random ()); }
+    public Draft (string account_id, string? id = null) {
+        Object (account_id: account_id, id: id ?? Uuid.string_random ());
+        // Dynamic object-valued property defaults are initialized once by
+        // Vala's class machinery and retain their temporary DateTime. Set the
+        // per-instance scalar explicitly instead.
+        modified_at = GLib.get_real_time () / TimeSpan.SECOND;
+    }
     public void touch () {
-        modified_at = new DateTime.now_utc ().to_unix ();
+        modified_at = GLib.get_real_time () / TimeSpan.SECOND;
         revision = int64.max (1, revision + 1);
         dirty = true;
     }

@@ -149,11 +149,15 @@ private class RecordingMailEngine : Object, MailEngine {
     public MailSyncResult snapshot { get; set; }
     public bool delay_changes { get; set; }
     public bool delay_synchronization { get; set; }
+    public bool delay_folder_empty { get; set; }
+    public bool publish_connection_progress { get; set; }
     public int connect_calls;
     public int disconnect_calls;
     public int synchronize_calls;
     public int active_synchronizations;
+    public int active_folder_empties;
     public int maximum_active_synchronizations;
+    public bool remote_operations_overlapped;
     public int send_calls;
     public string last_sent_subject = "";
     public string last_sent_body = "";
@@ -172,6 +176,7 @@ private class RecordingMailEngine : Object, MailEngine {
     public Gee.ArrayList<string> lifecycle = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> permanent_deletions = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> emptied_folders = new Gee.ArrayList<string> ();
+    public Gee.ArrayList<string> remote_operation_lifecycle = new Gee.ArrayList<string> ();
     public Gee.ArrayList<MailSyncResult> batches = new Gee.ArrayList<MailSyncResult> ();
     public Gee.ArrayList<MailSyncResult> queued_snapshots = new Gee.ArrayList<MailSyncResult> ();
     private Gee.HashMap<string, SyncState> states = new Gee.HashMap<string, SyncState> ();
@@ -194,6 +199,15 @@ private class RecordingMailEngine : Object, MailEngine {
             }
         }
         if (cancellable != null) cancellable.set_error_if_cancelled ();
+        if (publish_connection_progress) {
+            // Match Camel's ordering: connection detail/progress is published
+            // before synchronize() clears the previous pass's counters.
+            var state = state_for (settings.id);
+            state.phase = SyncPhase.CONNECTING;
+            state.detail = "Connecting securely…"; state.progress = 0;
+            state.phase = SyncPhase.IDLE;
+            state.detail = "Connected"; state.progress = 1;
+        }
         connect_calls++; lifecycle.add ("connect");
     }
     public async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
@@ -205,6 +219,8 @@ private class RecordingMailEngine : Object, MailEngine {
     public async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
                                               Cancellable? cancellable = null) throws Error {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
+        if (active_folder_empties > 0) remote_operations_overlapped = true;
+        remote_operation_lifecycle.add ("synchronize-start");
         synchronize_calls++; active_synchronizations++; lifecycle.add ("synchronize");
         if (synchronize_failure != null) {
             active_synchronizations--;
@@ -234,6 +250,7 @@ private class RecordingMailEngine : Object, MailEngine {
         state.progress = state.messages_to_download > 0 ?
             state.messages_downloaded / (double) state.messages_to_download : 1;
         active_synchronizations--;
+        remote_operation_lifecycle.add ("synchronize-finish");
         state.detail = "Mail is up to date"; state.progress = 1; state.phase = SyncPhase.IDLE;
         return current_snapshot;
     }
@@ -314,7 +331,16 @@ private class RecordingMailEngine : Object, MailEngine {
     }
     public async void empty_folder (string account_id, string folder_name,
                                     Cancellable? cancellable = null) throws Error {
+        if (active_synchronizations > 0) remote_operations_overlapped = true;
+        active_folder_empties++;
+        remote_operation_lifecycle.add ("empty-start");
         emptied_folders.add (folder_name); operations.add ("empty:" + folder_name);
+        if (delay_folder_empty) {
+            Timeout.add (50, () => { empty_folder.callback (); return Source.REMOVE; });
+            yield;
+        }
+        active_folder_empties--;
+        remote_operation_lifecycle.add ("empty-finish");
     }
     public SyncState state_for (string account_id) {
         if (!states.has_key (account_id)) states[account_id] = new SyncState ();
@@ -440,6 +466,11 @@ private void test_live_mail_coordinator_debounces_and_cancels () {
     coordinator.live_mail_unavailable ("live-account");
     assert (coordinator.has_pending ("live-account"));
     assert (coordinator.reconnect_attempt ("live-account") == 1);
+    coordinator.sync_succeeded ("live-account");
+    assert (!coordinator.has_pending ("live-account"));
+    assert (coordinator.reconnect_attempt ("live-account") == 0);
+
+    coordinator.live_mail_unavailable ("live-account");
     coordinator.suppress_account ("live-account");
     assert (!coordinator.has_pending ("live-account"));
     assert (coordinator.reconnect_attempt ("live-account") == 0);
@@ -486,6 +517,60 @@ private void test_live_arrival_triggers_one_sync () {
         assert (engine.synchronize_calls == 1);
         service.cancel ();
     } catch (Error error) { GLib.error ("live arrival test failed: %s", error.message); }
+}
+
+private void test_live_arrival_during_sync_is_not_lost () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-live-arrival-race-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Live", "live@example.net");
+        account.id = "live-arrival-race";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var engine = new RecordingMailEngine (account.id);
+        engine.delay_synchronization = true;
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
+        int completions = 0;
+        bool timed_out = false;
+        bool arrival_queued = false;
+        var loop = new MainLoop ();
+        uint safety_source = Timeout.add_seconds (2, () => {
+            timed_out = true;
+            loop.quit ();
+            return Source.REMOVE;
+        });
+        service.synchronized.connect ((account_id) => {
+            if (account_id != account.id) return;
+            completions++;
+            if (completions == 2) loop.quit ();
+        });
+
+        // Queue the IDLE event only after the fake engine reports that its
+        // delayed synchronize() call is in flight.
+        service.sync_account.begin (account);
+        Timeout.add (1, () => {
+            if (engine.active_synchronizations != 1) return Source.CONTINUE;
+            arrival_queued = true;
+            engine.live_mail_changed (account.id);
+            return Source.REMOVE;
+        });
+        loop.run ();
+
+        if (!timed_out) Source.remove (safety_source);
+        assert (!timed_out);
+        assert (arrival_queued);
+        assert (completions == 2);
+        assert (engine.synchronize_calls == 2);
+        assert (engine.maximum_active_synchronizations == 1);
+        service.cancel ();
+    } catch (Error error) {
+        GLib.error ("in-flight live arrival test failed: %s", error.message);
+    }
 }
 
 private void test_search () {
@@ -739,6 +824,41 @@ private void test_sanitizer_preserves_safe_mail () {
     assert (!formatted.contains ("Hidden preview title"));
     assert (!formatted.contains ("bad()"));
     assert (!formatted.contains ("evil.test"));
+
+    string legacy = HtmlSanitizer.sanitize (
+        "<center><table bgcolor='#f4f4f4' bordercolor='navy'><tr bgcolor='white'>" +
+        "<td><font face='Arial, sans-serif' color='#2457aa' size='+2'>Legacy newsletter</font></td>" +
+        "</tr></table></center>", false, true);
+    assert (legacy.contains ("<center>")); assert (legacy.contains ("<font"));
+    assert (legacy.contains ("bgcolor=\"#f4f4f4\""));
+    assert (legacy.contains ("bordercolor=\"navy\""));
+    assert (legacy.contains ("face=\"Arial, sans-serif\""));
+    assert (legacy.contains ("color=\"#2457aa\""));
+    string simplified_legacy = HtmlSanitizer.sanitize (
+        "<font face='Arial' color='red'>Readable</font>");
+    assert (simplified_legacy.contains ("Readable"));
+    assert (!simplified_legacy.contains ("face="));
+    assert (!simplified_legacy.contains ("color="));
+    string unsafe_legacy = HtmlSanitizer.sanitize (
+        "<table bgcolor='url(https://tracker.test/pixel)'><tr><td>Safe</td></tr></table>" +
+        "<font color='expression(alert(1))' face='Arial;position:fixed'>Text</font>");
+    assert (!unsafe_legacy.contains ("tracker.test"));
+    assert (!unsafe_legacy.contains ("expression"));
+    assert (!unsafe_legacy.contains ("position:fixed"));
+}
+
+private void test_remote_content_detection () {
+    assert (!HtmlSanitizer.has_remote_content (
+        "<p><a href='https://example.net/read'>Ordinary link</a></p><img src='cid:logo'>"));
+    assert (HtmlSanitizer.has_remote_content ("<img src=https://images.example.net/a.png>"));
+    assert (HtmlSanitizer.has_remote_content (
+        "<img srcset='cid:small 1x, https://images.example.net/large 2x'>"));
+    assert (HtmlSanitizer.has_remote_content (
+        "<table background='https://images.example.net/paper.png'><tr><td>Text</td></tr></table>"));
+    assert (HtmlSanitizer.has_remote_content (
+        "<style>.hero{background-image: url( \"https://images.example.net/hero.jpg\" )}</style>"));
+    assert (HtmlSanitizer.has_remote_content (
+        "<link rel='stylesheet' href='https://styles.example.net/mail.css'>"));
 }
 
 private void test_html_content_policy () {
@@ -751,6 +871,9 @@ private void test_html_content_policy () {
     assert (blocked.contains ("color-scheme:light"));
     assert (blocked.contains ("max-width:100%!important"));
     assert (blocked.contains ("overflow-wrap:anywhere"));
+    assert (!blocked.contains ("table-layout:fixed!important"));
+    assert (!blocked.contains ("table{border-collapse:collapse;width:100%!important"));
+    assert (!blocked.contains ("body *{box-sizing:border-box"));
     assert (blocked.contains ("@media print"));
     string printable = HtmlContentPolicy.document ("<p>Safe</p>", false,
         "<section class='mailficient-print-header'>Header</section>");
@@ -804,6 +927,10 @@ private void test_filename () {
     assert (AttachmentSafety.safe_filename ("../../invoice.pdf") == "_.._invoice.pdf");
     assert (AttachmentSafety.safe_filename ("..") == "attachment");
     assert (AttachmentSafety.safe_filename ("notes.txt") == "notes.txt");
+    string prefix = string.nfill (179, 'a');
+    string truncated_unicode = AttachmentSafety.safe_filename (prefix + "📄.txt");
+    assert (truncated_unicode == prefix);
+    assert (truncated_unicode.validate ());
     assert (AttachmentSafety.preview_kind ("image/png", "photo.png") == AttachmentPreviewKind.IMAGE);
     assert (AttachmentSafety.preview_kind ("application/pdf", "report.pdf") == AttachmentPreviewKind.PDF);
     assert (AttachmentSafety.preview_kind ("text/plain; charset=utf-8", "notes.txt") == AttachmentPreviewKind.TEXT);
@@ -1062,6 +1189,18 @@ private void test_cancelled_attachment_import_leaves_no_copy () {
 private void test_message_initials () {
     var message = new Message ("1", "inbox", "Maya Chen", "m@example.net", "a@example.net", "Hi", "Preview", "Body", "Today");
     assert (message.initials () == "MC");
+    var accented = new Message ("2", "inbox", "Élodie Öztürk", "e@example.net",
+        "a@example.net", "Hi", "", "", "Today");
+    assert (accented.initials () == "ÉÖ");
+    assert (accented.initials ().validate ());
+    var cjk = new Message ("3", "inbox", "山田", "y@example.net", "a@example.net",
+        "Hi", "", "", "Today");
+    assert (cjk.initials () == "山田");
+    assert (cjk.initials ().validate ());
+    var emoji = new Message ("4", "inbox", "📨 Mail", "mail@example.net", "a@example.net",
+        "Hi", "", "", "Today");
+    assert (emoji.initials () == "📨M");
+    assert (emoji.initials ().validate ());
 }
 
 private void test_message_sorting () {
@@ -1480,6 +1619,8 @@ private void test_settings_store () {
         maximized.mailbox_pane_width = 2; maximized.message_pane_width = 9999;
         assert (maximized.window_width == 640); assert (maximized.window_height == 2160);
         assert (maximized.mailbox_pane_width == 190); assert (maximized.message_pane_width == 620);
+        maximized.sync_interval_minutes = 1;
+        assert (maximized.sync_interval_minutes == 1);
         maximized.sync_interval_minutes = 7;
         assert (maximized.sync_interval_minutes == 5);
         maximized.preferences_page = "unknown";
@@ -1490,6 +1631,18 @@ private void test_settings_store () {
         assert (maximized.undo_send_seconds == 5);
         maximized.undo_send_seconds = 60;
         assert (maximized.undo_send_seconds == 30);
+
+        string chooser_folder = DirUtils.make_tmp ("mailficient-chooser-XXXXXX");
+        var chosen_file = File.new_for_path (Path.build_filename (
+            chooser_folder, "message.eml"));
+        maximized.remember_file_dialog_selection (chosen_file);
+        var chooser_reopened = new MailSettingsStore (new CacheDatabase (path));
+        assert (chooser_reopened.file_dialog_initial_folder ().equal (
+            File.new_for_path (chooser_folder)));
+        DirUtils.remove (chooser_folder);
+        // A deleted previous location must not strand the next portal there.
+        assert (!chooser_reopened.file_dialog_initial_folder ().equal (
+            File.new_for_path (chooser_folder)));
     } catch (Error caught) { GLib.error ("settings store test failed: %s", caught.message); }
     FileUtils.unlink (path);
 }
@@ -2205,7 +2358,150 @@ private void test_virtual_message_model_is_bounded () {
     // of retaining every message summary visited while scrolling.
     assert ((model.get_item (50) as Message).id == "virtual-50");
     assert (page_loads == 5); assert (model.cached_page_count == 3);
+    int loads_before_state_change = page_loads;
+    model.set_cached_read_state ("virtual-50", false);
+    model.set_cached_flag_state ("virtual-50", true, "purple");
+    model.set_cached_read_state ("virtual-9999", true);
+    assert (page_loads == loads_before_state_change);
+    var updated = model.get_item (50) as Message;
+    assert (updated != null && updated.unread && updated.flagged &&
+        updated.flag_color == "purple");
+    assert (page_loads == loads_before_state_change);
     assert (model.get_item (10000) == null);
+}
+
+private void test_logical_message_state_updates_all_copies () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-logical-state-%s.sqlite".printf (Uuid.string_random ()));
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "logical-state"; account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 1, account.id, "INBOX");
+        var all_mail = new Mailbox (account.id + ":all", "All Mail",
+            "package-x-generic-symbolic", MailboxRole.ARCHIVE, 1,
+            account.id, "[Gmail]/All Mail");
+        var snapshot = new MailSyncResult (account.id);
+        snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (all_mail);
+        string message_id = "<logical-copy@example.net>";
+        snapshot.messages.add (new Message (account.id + ":inbox:7", inbox.id,
+            "Maya", "maya@example.net", account.email, "One logical message",
+            "", "Body", "Today", true, true, false, 1, false, account.id,
+            "7", message_id));
+        snapshot.messages.add (new Message (account.id + ":all:19", all_mail.id,
+            "Maya", "maya@example.net", account.email, "One logical message",
+            "", "Body", "Today", true, true, false, 1, false, account.id,
+            "19", message_id));
+        cache.store_sync_result (snapshot);
+
+        assert (cache.count_cached_messages ("unified-flagged") == 1);
+        assert (cache.set_cached_flagged (snapshot.messages[0].id, false));
+        assert (!cache.find_cached_message (snapshot.messages[0].id).flagged);
+        assert (!cache.find_cached_message (snapshot.messages[1].id).flagged);
+        assert (cache.count_cached_messages ("unified-flagged") == 0);
+        assert (cache.pending_mutation_count () == 2);
+
+        assert (cache.set_cached_read (snapshot.messages[0].id, true));
+        assert (!cache.find_cached_message (snapshot.messages[0].id).unread);
+        assert (!cache.find_cached_message (snapshot.messages[1].id).unread);
+        assert (cache.unified_unread_count (MailboxRole.INBOX) == 0);
+        assert (cache.unified_unread_count (MailboxRole.ARCHIVE) == 0);
+        assert (cache.pending_mutation_count () == 4);
+    } catch (Error error) {
+        GLib.error ("logical message state test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_archive_views_hide_inbox_copies () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-archive-view-%s.sqlite".printf (Uuid.string_random ()));
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "archive-view"; account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 1, account.id, "INBOX");
+        var sent = new Mailbox (account.id + ":sent", "Sent",
+            "mail-sent-symbolic", MailboxRole.SENT, 1, account.id, "Sent");
+        // Gmail's All Mail unread count includes unread Inbox and Sent copies.
+        // The visible Archive count below must instead describe filtered rows.
+        var all_mail = new Mailbox (account.id + ":all", "All Mail",
+            "package-x-generic-symbolic", MailboxRole.ARCHIVE, 3,
+            account.id, "[Gmail]/All Mail");
+        var snapshot = new MailSyncResult (account.id);
+        snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (sent);
+        snapshot.mailboxes.add (all_mail);
+        string shared_header = "<still-in-inbox@example.net>";
+        snapshot.messages.add (new Message (account.id + ":inbox:1", inbox.id,
+            "Maya", "maya@example.net", account.email, "Still in Inbox", "",
+            "Body", "Today", true, false, false, 1, false, account.id, "1",
+            shared_header));
+        snapshot.messages.add (new Message (account.id + ":all:101", all_mail.id,
+            "Maya", "maya@example.net", account.email, "Still in Inbox", "",
+            "Body", "Today", true, false, false, 1, false, account.id, "101",
+            shared_header));
+        string sent_header = "<already-in-sent@example.net>";
+        snapshot.messages.add (new Message (account.id + ":sent:2", sent.id,
+            "Alex", account.email, account.email, "Already in Sent", "",
+            "Body", "Today", true, false, false, 1, false, account.id, "2",
+            sent_header));
+        snapshot.messages.add (new Message (account.id + ":all:104", all_mail.id,
+            "Alex", account.email, account.email, "Already in Sent", "",
+            "Body", "Today", true, false, false, 1, false, account.id, "104",
+            sent_header));
+        snapshot.messages.add (new Message (account.id + ":all:102", all_mail.id,
+            "Noah", "noah@example.net", account.email, "Actually archived", "",
+            "Body", "Yesterday", true, false, false, 1, false, account.id, "102",
+            "<actually-archived@example.net>"));
+        // A missing Message-ID cannot be matched safely, so it must not vanish.
+        snapshot.messages.add (new Message (account.id + ":all:103", all_mail.id,
+            "Priya", "priya@example.net", account.email, "Headerless archive", "",
+            "Body", "Earlier", false, false, false, 1, false, account.id, "103"));
+        cache.store_sync_result (snapshot);
+
+        assert (cache.count_cached_messages ("unified-archive") == 2);
+        assert (cache.count_cached_messages (all_mail.id) == 2);
+        assert (cache.count_cached_messages ("unified-archive", true) == 1);
+        assert (cache.count_cached_messages (all_mail.id, true) == 1);
+        var unified = cache.list_cached_messages ("unified-archive");
+        var account_archive = cache.list_cached_messages (all_mail.id);
+        assert (unified.size == 2); assert (account_archive.size == 2);
+        foreach (var message in unified)
+            assert (message.id != account.id + ":all:101" &&
+                message.id != account.id + ":all:104");
+        foreach (var message in account_archive)
+            assert (message.id != account.id + ":all:101" &&
+                message.id != account.id + ":all:104");
+        // Pagination and count use the same predicate; a hidden Inbox copy
+        // cannot reappear on a later page.
+        var first_page = cache.list_cached_messages (all_mail.id, 1, 0);
+        var second_page = cache.list_cached_messages (all_mail.id, 1, 1);
+        assert (first_page.size == 1); assert (second_page.size == 1);
+        assert (first_page[0].id != account.id + ":all:101" &&
+            first_page[0].id != account.id + ":all:104");
+        assert (second_page[0].id != account.id + ":all:101" &&
+            second_page[0].id != account.id + ":all:104");
+
+        uint account_badge = uint.MAX; uint unified_badge = uint.MAX;
+        foreach (var mailbox in cache.list_cached_mailboxes ())
+            if (mailbox.id == all_mail.id) account_badge = mailbox.unread_count;
+        var repository = new CachedMailRepository (cache,
+            new DemoMailRepository (), false);
+        foreach (var mailbox in repository.list_mailboxes ()) {
+            if (mailbox.id == "unified-archive")
+                unified_badge = mailbox.unread_count;
+            if (mailbox.id == all_mail.id)
+                account_badge = mailbox.unread_count;
+        }
+        assert (unified_badge == 1); assert (account_badge == 1);
+    } catch (Error error) {
+        GLib.error ("Archive logical-view test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
 }
 
 private void test_pending_state_survives_sync () {
@@ -2327,6 +2623,55 @@ private void test_cached_message_ids_do_not_require_message_loading () {
     FileUtils.unlink (path);
 }
 
+private void test_corrupted_cached_text_is_scheduled_for_reextraction () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-text-migration-%s.sqlite".printf (Uuid.string_random ()));
+    try {
+        CacheDatabase? cache = new CacheDatabase (path);
+        var snapshot = new MailSyncResult ("text-migration-account");
+        var inbox = new Mailbox ("text-migration-account:inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 2,
+            "text-migration-account", "INBOX");
+        snapshot.mailboxes.add (inbox);
+        var intact = new Message ("text-migration-account:inbox:1", inbox.id,
+            "Sender", "sender@example.net", "recipient@example.net", "Intact", "",
+            "Correct text", "Now", false, false, false, 1, false,
+            "text-migration-account", "1");
+        var damaged = new Message ("text-migration-account:inbox:2", inbox.id,
+            "Sender", "sender@example.net", "recipient@example.net", "Damaged", "",
+            "caf�", "Now", false, false, false, 1, false,
+            "text-migration-account", "2");
+        damaged.body_html = "<p>caf�</p>";
+        snapshot.messages.add (intact); snapshot.messages.add (damaged);
+        cache.store_sync_result (snapshot);
+        cache = null;
+
+        Sqlite.Database raw;
+        assert (Sqlite.Database.open (path, out raw) == Sqlite.OK);
+        assert (raw.exec ("UPDATE schema_version SET version=1") == Sqlite.OK);
+        raw = null;
+
+        var reopened = new CacheDatabase (path);
+        var extracted = reopened.cached_extracted_message_ids (
+            "text-migration-account");
+        assert (extracted.contains (intact.id));
+        assert (!extracted.contains (damaged.id));
+
+        // The migration is one-time. A later literal U+FFFD from a valid
+        // sender must not be placed into an endless re-download loop.
+        var repaired_snapshot = new MailSyncResult ("text-migration-account");
+        repaired_snapshot.mailboxes.add (inbox); repaired_snapshot.messages.add (damaged);
+        reopened.store_sync_result (repaired_snapshot);
+        reopened = null;
+        var final_open = new CacheDatabase (path);
+        assert (final_open.cached_extracted_message_ids (
+            "text-migration-account").contains (damaged.id));
+    } catch (Error error) {
+        GLib.error ("Cached text migration test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
 private void test_pending_unread_move_adjusts_server_totals () {
     string path = Path.build_filename (Environment.get_tmp_dir (), "mailficient-unread-move-%s.sqlite".printf (Uuid.string_random ()));
     try {
@@ -2378,17 +2723,45 @@ private void test_sync_pipeline () {
             "Existing", "", "Fresh body", "Earlier", false, false, false, 1, false, account.id, "1"));
         var incoming = new Message (account.id + ":inbox:2", inbox.id, "Noah", "noah@example.org", account.email,
             "New message", "", "New body", "Now", true, false, false, 1, false, account.id, "2");
-        engine.snapshot.messages.add (incoming);
+        // Model Camel's streamed delivery: the durable batch is published
+        // before account-wide Drafts/rules/final-flush work completes.
+        // Camel first publishes an inventory-only batch. It must update the
+        // durable folder metadata without causing an empty message-list wakeup.
+        var inventory_batch = new MailSyncResult (account.id);
+        inventory_batch.folder_inventory_complete = true;
+        inventory_batch.mailboxes.add (inbox);
+        inventory_batch.mailboxes.add (archive);
+        engine.batches.add (inventory_batch);
+        var arrival_batch = new MailSyncResult (account.id);
+        arrival_batch.mailboxes.add (inbox);
+        arrival_batch.messages.add (incoming);
+        engine.batches.add (arrival_batch);
         engine.snapshot.messages_to_download = 2;
         var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
         var outbound = new OutboundService (cache, engine, attachments);
         var service = new AccountSyncService (cache, engine, outbound, new JunkFilterService (cache));
         int synchronized_count = 0; int notification_count = 0; int failure_count = 0;
+        int mail_available_count = 0; bool batch_was_visible_before_completion = false;
         bool saw_download_progress = false;
+        double last_progress = 0; string last_progress_detail = "";
         service.synchronized.connect ((id) => { if (id == account.id) synchronized_count++; });
+        service.mail_available.connect ((id) => {
+            if (id != account.id) return;
+            mail_available_count++;
+            try {
+                batch_was_visible_before_completion = synchronized_count == 0 &&
+                    cache.find_cached_message (incoming.id) != null;
+            } catch (Error error) {
+                batch_was_visible_before_completion = false;
+            }
+        });
         service.new_message.connect ((message) => { if (message.id == incoming.id) notification_count++; });
         service.failed.connect ((id, error) => { failure_count++; });
         service.progress_changed.connect ((id, fraction, detail) => {
+            if (id == account.id) {
+                last_progress = fraction;
+                last_progress_detail = detail;
+            }
             if (id == account.id && fraction == 0.5 && detail == "Downloaded 1 of 2 messages")
                 saw_download_progress = true;
         });
@@ -2398,7 +2771,9 @@ private void test_sync_pipeline () {
         });
         loop.run ();
         assert (failure_count == 0); assert (synchronized_count == 1); assert (notification_count == 1);
+        assert (mail_available_count == 1); assert (batch_was_visible_before_completion);
         assert (saw_download_progress);
+        assert (last_progress == 1); assert (last_progress_detail == "Mail is up to date");
         assert (engine.connect_calls == 2); assert (engine.send_calls == 1); assert (engine.synchronize_calls == 1);
         assert (engine.state_changes.size == 1); assert (engine.transfers.size == 1);
         assert (cache.outbox_count () == 0); assert (cache.pending_mutation_count () == 0); assert (cache.pending_transfer_count () == 0);
@@ -2521,6 +2896,7 @@ private void test_automatic_history_backfill () {
         cache.store_sync_result (initial);
 
         var engine = new RecordingMailEngine (account.id);
+        engine.publish_connection_progress = true;
         int sequence = 0;
         for (int pass = 0; pass < 3; pass++) {
             var snapshot = new MailSyncResult (account.id); snapshot.mailboxes.add (inbox);
@@ -2539,8 +2915,16 @@ private void test_automatic_history_backfill () {
             new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
         int completed = 0; int checkpoints = 0; int notifications = 0; int failures = 0;
         int summaries = 0; int summarized_messages = 0;
+        int mail_checks = 0; int logical_downloads = 0;
         bool saw_initial_total = false; bool saw_background_total = false;
+        bool saw_second_background_total = false;
+        bool progress_went_backwards = false; bool progress_completed_early = false;
+        double previous_progress = 0; int full_progress_events = 0;
         service.synchronized.connect ((id) => completed++);
+        service.mail_check_completed.connect ((id, messages_downloaded) => {
+            mail_checks++;
+            logical_downloads = messages_downloaded;
+        });
         service.pass_completed.connect ((id) => checkpoints++);
         service.new_message.connect ((message) => notifications++);
         service.new_mail_summary.connect ((summary) => {
@@ -2550,23 +2934,44 @@ private void test_automatic_history_backfill () {
         });
         service.failed.connect ((id, error) => failures++);
         service.progress_changed.connect ((id, fraction, detail) => {
+            if (id != account.id) return;
+            if (fraction + 0.0000001 < previous_progress)
+                progress_went_backwards = true;
+            previous_progress = fraction;
+            if (fraction >= 1) {
+                full_progress_events++;
+                if (engine.synchronize_calls < 3) progress_completed_early = true;
+            }
+            if ((int) (fraction * 100 + 0.5) >= 100 &&
+                engine.synchronize_calls < 3)
+                progress_completed_early = true;
             if (detail == "Downloaded 0 of 501 messages") saw_initial_total = true;
             if (detail == "Downloaded 250 of 501 messages — continuing in background") saw_background_total = true;
+            if (detail == "Downloaded 500 of 501 messages — continuing in background")
+                saw_second_background_total = true;
         });
         var loop = new MainLoop ();
         service.sync_account.begin (account, null, (object, result) => {
             service.sync_account.end (result);
         });
-        uint timeout_source = Timeout.add_seconds (8, () => { loop.quit (); return Source.REMOVE; });
+        bool timed_out = false;
+        uint timeout_source = Timeout.add_seconds (8, () => {
+            timed_out = true; loop.quit (); return Source.REMOVE;
+        });
         service.synchronized.connect ((id) => {
-            if (completed >= 3) loop.quit ();
+            if (completed >= 1) loop.quit ();
         });
         loop.run ();
-        if (timeout_source != 0) Source.remove (timeout_source);
-        assert (failures == 0); assert (completed == 3); assert (checkpoints == 2);
+        if (!timed_out) Source.remove (timeout_source);
+        assert (!timed_out); assert (failures == 0);
+        assert (completed == 1); assert (mail_checks == 1);
+        assert (logical_downloads == 501); assert (checkpoints == 2);
         assert (engine.synchronize_calls == 3); assert (engine.disconnect_calls == 2);
         assert (cache.cached_message_count (account.id) == 502);
         assert (saw_initial_total); assert (saw_background_total);
+        assert (saw_second_background_total);
+        assert (!progress_went_backwards); assert (!progress_completed_early);
+        assert (full_progress_events == 1); assert (previous_progress == 1);
         assert (engine.lifecycle.size == 8);
         assert (engine.lifecycle[0] == "connect"); assert (engine.lifecycle[1] == "synchronize");
         assert (engine.lifecycle[2] == "disconnect"); assert (engine.lifecycle[3] == "connect");
@@ -2618,24 +3023,115 @@ private void test_initial_history_backfill_stays_silent () {
         service.new_message.connect ((message) => messages++);
         service.new_mail_summary.connect ((summary) => summaries++);
         var loop = new MainLoop ();
+        bool timed_out = false;
         uint timeout_source = Timeout.add_seconds (8, () => {
+            timed_out = true;
             loop.quit ();
             return Source.REMOVE;
         });
         service.synchronized.connect ((id) => {
-            if (completed >= 3) loop.quit ();
+            if (completed >= 1) loop.quit ();
         });
         service.sync_account.begin (account, null, (object, result) => {
             service.sync_account.end (result);
         });
         loop.run ();
-        if (timeout_source != 0) Source.remove (timeout_source);
-        assert (completed == 3);
+        if (!timed_out) Source.remove (timeout_source);
+        assert (!timed_out); assert (completed == 1);
         assert (engine.synchronize_calls == 3);
         assert (cache.cached_message_count (account.id) == 501);
         assert (messages == 0); assert (summaries == 0);
     } catch (Error error) {
         GLib.error ("initial backfill notification test failed: %s", error.message);
+    }
+}
+
+private void test_initial_history_issue_retry_stays_silent () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-initial-issue-retry-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Initial retry", "retry@example.net");
+        account.id = "initial-issue-retry-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
+            MailboxRole.INBOX, 3, account.id, "INBOX");
+
+        var interrupted = new MailSyncResult (account.id);
+        interrupted.mailboxes.add (inbox);
+        interrupted.messages_to_download = 2;
+        interrupted.messages.add (new Message (
+            account.id + ":inbox:old-1", inbox.id, "History", "history@example.net",
+            account.email, "Older history 1", "", "Body", "Earlier", true, false,
+            false, 1, false, account.id, "old-1"));
+        interrupted.more_messages_available = true;
+        interrupted.record_issue ("Archive",
+            new MailError.PARTIAL_SYNC ("Synthetic provider interruption"));
+
+        var retry = new MailSyncResult (account.id);
+        retry.mailboxes.add (inbox);
+        retry.messages_to_download = 1;
+        retry.messages.add (new Message (
+            account.id + ":inbox:old-2", inbox.id, "History", "history@example.net",
+            account.email, "Older history 2", "", "Body", "Earlier", true, false,
+            false, 1, false, account.id, "old-2"));
+
+        var live = new MailSyncResult (account.id);
+        live.mailboxes.add (inbox);
+        live.messages_to_download = 1;
+        var live_message = new Message (
+            account.id + ":inbox:live", inbox.id, "Maya", "maya@example.net",
+            account.email, "Actually new", "", "Body", "Now", true, false,
+            false, 1, false, account.id, "live");
+        live.messages.add (live_message);
+
+        var engine = new RecordingMailEngine (account.id);
+        engine.queued_snapshots.add (interrupted);
+        engine.queued_snapshots.add (retry);
+        engine.queued_snapshots.add (live);
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
+        int completions = 0; int failures = 0; int messages = 0; int summaries = 0;
+        string notified_id = "";
+        service.synchronized.connect ((id) => completions++);
+        service.failed.connect ((id, error) => failures++);
+        service.new_message.connect ((message) => {
+            messages++;
+            notified_id = message.id;
+        });
+        service.new_mail_summary.connect ((summary) => summaries++);
+
+        var loop = new MainLoop ();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            bool returned = false; bool timed_out = false;
+            uint timeout_source = Timeout.add_seconds (2, () => {
+                timed_out = true; loop.quit (); return Source.REMOVE;
+            });
+            service.sync_account.begin (account, null, (object, result) => {
+                service.sync_account.end (result);
+                returned = true; loop.quit ();
+            });
+            loop.run ();
+            if (!timed_out) Source.remove (timeout_source);
+            assert (!timed_out); assert (returned);
+            if (attempt < 2) {
+                // Both interrupted and retried initial history remain silent.
+                assert (messages == 0); assert (summaries == 0);
+            }
+        }
+
+        assert (engine.synchronize_calls == 3); assert (completions == 3);
+        assert (failures == 1); assert (cache.cached_message_count (account.id) == 3);
+        // Once an authoritative no-more-history pass clears suppression, a
+        // genuinely later Inbox arrival is notified normally.
+        assert (messages == 1); assert (summaries == 1);
+        assert (notified_id == live_message.id);
+    } catch (Error error) {
+        GLib.error ("initial backfill issue/retry test failed: %s", error.message);
     }
 }
 
@@ -2674,7 +3170,9 @@ private void test_initial_history_cancel_resume_stays_silent () {
         var service = new AccountSyncService (cache, engine,
             new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
         int completions = 0; int messages = 0; int summaries = 0; int failures = 0;
+        int cancellations = 0;
         service.synchronized.connect ((id) => completions++);
+        service.cancelled.connect ((id) => cancellations++);
         service.new_message.connect ((message) => messages++);
         service.new_mail_summary.connect ((summary) => summaries++);
         service.failed.connect ((id, error) => failures++);
@@ -2698,7 +3196,7 @@ private void test_initial_history_cancel_resume_stays_silent () {
         });
         loop.run ();
         if (timeout_source != 0) Source.remove (timeout_source);
-        assert (failures == 0); assert (completions == 2);
+        assert (failures == 0); assert (completions == 1); assert (cancellations == 1);
         assert (engine.synchronize_calls == 2);
         assert (cache.cached_message_count (account.id) == 501);
         assert (messages == 0); assert (summaries == 0);
@@ -2734,6 +3232,49 @@ private void test_active_sync_can_be_cancelled () {
         assert (cancellations == 1); assert (failures == 0); assert (completions == 0);
         assert (engine.disconnect_calls == 0);
     } catch (Error error) { GLib.error ("sync cancellation test failed: %s", error.message); }
+}
+
+private void test_suppress_active_sync_emits_terminal_once () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-suppress-sync-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Suppress", "suppress@example.net");
+        account.id = "suppress-account"; account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var engine = new RecordingMailEngine (account.id);
+        engine.delay_synchronization = true;
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
+        int cancellations = 0; int failures = 0; int completions = 0;
+        bool suppressed_while_active = false; bool returned = false; bool timed_out = false;
+        service.cancelled.connect ((id) => { if (id == account.id) cancellations++; });
+        service.failed.connect ((id, error) => failures++);
+        service.synchronized.connect ((id) => completions++);
+        var loop = new MainLoop ();
+        uint safety_source = Timeout.add_seconds (2, () => {
+            timed_out = true; loop.quit (); return Source.REMOVE;
+        });
+        service.sync_account.begin (account, null, (object, result) => {
+            service.sync_account.end (result); returned = true; loop.quit ();
+        });
+        Timeout.add (1, () => {
+            if (engine.active_synchronizations != 1) return Source.CONTINUE;
+            suppressed_while_active = true;
+            service.suppress_account (account.id);
+            // Repeated suppression must not publish a second terminal edge.
+            service.suppress_account (account.id);
+            return Source.REMOVE;
+        });
+        loop.run ();
+        if (!timed_out) Source.remove (safety_source);
+        assert (!timed_out); assert (returned); assert (suppressed_while_active);
+        assert (cancellations == 1); assert (failures == 0); assert (completions == 0);
+    } catch (Error error) {
+        GLib.error ("active sync suppression test failed: %s", error.message);
+    }
 }
 
 private void test_partial_sync_is_installed_and_reported () {
@@ -2854,6 +3395,89 @@ private void test_account_sync_serialization () {
         loop.run ();
         assert (engine.synchronize_calls == 2); assert (engine.maximum_active_synchronizations == 1);
     } catch (Error error) { GLib.error ("account sync serialization test failed: %s", error.message); }
+}
+
+private void test_folder_empty_is_serialized_with_sync () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-empty-sync-race-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "empty-sync-race-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var junk = new Mailbox (account.id + ":junk", "Junk",
+            "dialog-warning-symbolic", MailboxRole.JUNK, 0, account.id, "Junk");
+        var initial = new MailSyncResult (account.id); initial.mailboxes.add (junk);
+        cache.store_sync_result (initial);
+
+        var engine = new RecordingMailEngine (account.id);
+        engine.snapshot.mailboxes.add (junk);
+        engine.delay_synchronization = true;
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        // Use the production debounce path with a short test interval so the
+        // pending Empty Junk request becomes runnable during synchronize().
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments),
+            new JunkFilterService (cache), attachments);
+        service.pending_flush_delay_milliseconds = 1;
+        var loop = new MainLoop (); bool timed_out = false; bool purge_queued = false;
+        uint safety_source = Timeout.add_seconds (2, () => {
+            timed_out = true; loop.quit (); return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            try { cache.queue_mailbox_purge (junk.id); purge_queued = true; }
+            catch (Error error) { GLib.error ("Could not queue test Junk purge: %s", error.message); }
+            return Source.REMOVE;
+        });
+        service.sync_account.begin (account, null, (object, result) => {
+            service.sync_account.end (result); loop.quit ();
+        });
+        loop.run ();
+        if (!timed_out) Source.remove (safety_source);
+        assert (!timed_out); assert (purge_queued);
+        assert (!engine.remote_operations_overlapped);
+        assert (engine.emptied_folders.size == 1);
+        assert (engine.remote_operation_lifecycle.size == 4);
+        assert (engine.remote_operation_lifecycle[0] == "synchronize-start");
+        assert (engine.remote_operation_lifecycle[1] == "synchronize-finish");
+        assert (engine.remote_operation_lifecycle[2] == "empty-start");
+        assert (engine.remote_operation_lifecycle[3] == "empty-finish");
+        assert (cache.list_pending_folder_purges (account.id).size == 0);
+
+        // Exercise the opposite ordering too: once a standalone Empty Junk
+        // flush owns the provider objects, a newly requested sync must wait.
+        engine.delay_synchronization = false;
+        engine.delay_folder_empty = true;
+        engine.remote_operations_overlapped = false;
+        engine.remote_operation_lifecycle.clear ();
+        cache.queue_mailbox_purge (junk.id);
+        timed_out = false;
+        safety_source = Timeout.add_seconds (2, () => {
+            timed_out = true; loop.quit (); return Source.REMOVE;
+        });
+        Timeout.add (10, () => {
+            service.sync_account.begin (account, null, (object, result) => {
+                service.sync_account.end (result); loop.quit ();
+            });
+            return Source.REMOVE;
+        });
+        loop.run ();
+        if (!timed_out) Source.remove (safety_source);
+        assert (!timed_out);
+        assert (!engine.remote_operations_overlapped);
+        assert (engine.emptied_folders.size == 2);
+        assert (engine.remote_operation_lifecycle.size == 4);
+        assert (engine.remote_operation_lifecycle[0] == "empty-start");
+        assert (engine.remote_operation_lifecycle[1] == "empty-finish");
+        assert (engine.remote_operation_lifecycle[2] == "synchronize-start");
+        assert (engine.remote_operation_lifecycle[3] == "synchronize-finish");
+        assert (cache.list_pending_folder_purges (account.id).size == 0);
+    } catch (Error error) {
+        GLib.error ("folder empty/sync serialization test failed: %s", error.message);
+    }
 }
 
 private void test_chained_move_remaps_server_identity () {
@@ -3221,11 +3845,26 @@ private void test_remote_content_sender_policy () {
         var policy = new RemoteContentPolicy (cache);
         int changes = 0; policy.changed.connect (() => changes++);
         assert (!policy.is_sender_trusted ("maya@example.net"));
+
+        // Adding a sender to Safe Senders also dismisses the blocked remote-
+        // content notice for that sender. Removing the Safe Sender entry must
+        // restore the privacy default when no explicit image trust exists.
+        cache.set_safe_sender (" Maya@Example.NET ", true);
+        assert (policy.is_sender_trusted ("MAYA@example.net"));
+        cache.set_safe_sender ("maya@example.net", false);
+        assert (!policy.is_sender_trusted ("maya@example.net"));
+
+        // Remote-content trust remains a separate, durable user choice. A
+        // later Safe Sender removal must not revoke explicit image trust.
         policy.trust_sender (" Maya@Example.NET ");
         assert (policy.is_sender_trusted ("MAYA@example.net"));
         assert (policy.trusted_senders ().size == 1);
         assert (policy.trusted_senders ()[0] == "maya@example.net");
         assert (changes == 1);
+        cache.set_safe_sender ("maya@example.net", true);
+        assert (policy.is_sender_trusted ("maya@example.net"));
+        cache.set_safe_sender ("MAYA@example.net", false);
+        assert (policy.is_sender_trusted ("maya@example.net"));
         bool rejected = false;
         try { policy.trust_sender ("not an address"); }
         catch (MailError error) { rejected = true; }
@@ -3507,6 +4146,36 @@ private void test_message_security_assessment_and_unsubscribe () {
     assert (safe_link_assessment.findings.size == 1);
 }
 
+private void test_safe_sender_inline_warning_policy () {
+    var service = new MessageSecurityService ();
+    var message = new Message ("security-inline", "inbox", "Accounts Example.com",
+        "billing@example.com", "alex@example.net", "Action required", "", "",
+        "Today");
+    message.reply_to = "collect@different.example";
+    message.authentication_results = "mx.example; dmarc=fail; spf=softfail; dkim=fail";
+    message.body_html =
+        "<p><a href='https://credential-check.example/login'>example.com</a></p>";
+
+    // Safe Sender status changes presentation, not the assessment evidence.
+    // Security Details must retain high-confidence findings even though the
+    // automatic inline warning is dismissed for a sender the user approved.
+    var safe = service.assess (message, true);
+    assert (safe.sender_is_safe);
+    assert (safe.level == MessageThreatLevel.DANGER);
+    assert (safe.authentication_reported);
+    assert (safe.findings.size >= 4);
+    assert (!safe.should_show_inline_warning);
+
+    // The identical message from a sender not on the Safe Senders list still
+    // qualifies for the automatic inline warning.
+    var unsafe = service.assess (message, false);
+    assert (!unsafe.sender_is_safe);
+    assert (unsafe.level == MessageThreatLevel.DANGER);
+    assert (unsafe.authentication_reported);
+    assert (unsafe.findings.size == safe.findings.size);
+    assert (unsafe.should_show_inline_warning);
+}
+
 private void test_security_metadata_and_safe_senders_are_durable () {
     string path = Path.build_filename (Environment.get_tmp_dir (),
         "mailficient-security-%s.sqlite".printf (Uuid.string_random ())) ;
@@ -3778,11 +4447,14 @@ int main (string[] args) {
     Test.add_func ("/security/html", test_sanitizer);
     Test.add_func ("/security/html-adversarial", test_sanitizer_adversarial);
     Test.add_func ("/security/html-preserves-safe-mail", test_sanitizer_preserves_safe_mail);
+    Test.add_func ("/security/html-remote-content-detection", test_remote_content_detection);
     Test.add_func ("/security/html-content-policy", test_html_content_policy);
     Test.add_func ("/security/inline-content-resolver", test_inline_content_resolver);
     Test.add_func ("/security/filename", test_filename);
     Test.add_func ("/security/message-assessment-and-unsubscribe",
         test_message_security_assessment_and_unsubscribe);
+    Test.add_func ("/security/safe-sender-inline-warning-policy",
+        test_safe_sender_inline_warning_policy);
     Test.add_func ("/security/metadata-and-safe-senders-durable",
         test_security_metadata_and_safe_senders_are_durable);
     Test.add_func ("/attachments/import", test_attachment_import);
@@ -3817,6 +4489,8 @@ int main (string[] args) {
     Test.add_func ("/sync/startup-network-gate", test_startup_sync_gate);
     Test.add_func ("/sync/live-mail-coordinator", test_live_mail_coordinator_debounces_and_cancels);
     Test.add_func ("/sync/live-arrival-triggers-one-sync", test_live_arrival_triggers_one_sync);
+    Test.add_func ("/sync/live-arrival-during-sync-is-not-lost",
+        test_live_arrival_during_sync_is_not_lost);
     Test.add_func ("/compose/signatures", test_signature_service);
     Test.add_func ("/storage/cache-maintenance", test_cache_maintenance);
     Test.add_func ("/storage/drafts", test_cache_drafts);
@@ -3836,9 +4510,15 @@ int main (string[] args) {
     Test.add_func ("/storage/synchronized-mail", test_synchronized_cache_repository);
     Test.add_func ("/storage/message-pagination", test_cached_message_pagination);
     Test.add_func ("/mail/virtualized-inbox-is-bounded", test_virtual_message_model_is_bounded);
+    Test.add_func ("/storage/logical-message-state-updates-all-copies",
+        test_logical_message_state_updates_all_copies);
+    Test.add_func ("/storage/archive-views-hide-inbox-copies",
+        test_archive_views_hide_inbox_copies);
     Test.add_func ("/storage/pending-state-survives-sync", test_pending_state_survives_sync);
     Test.add_func ("/storage/incremental-sync-merges-and-prunes", test_incremental_sync_merges_and_prunes);
     Test.add_func ("/storage/cached-message-ids-are-lightweight", test_cached_message_ids_do_not_require_message_loading);
+    Test.add_func ("/storage/corrupted-text-scheduled-for-reextraction",
+        test_corrupted_cached_text_is_scheduled_for_reextraction);
     Test.add_func ("/storage/server-unread-total-survives-partial-cache", test_server_unread_total_survives_partial_cache);
     Test.add_func ("/storage/pending-unread-move-adjusts-server-totals", test_pending_unread_move_adjusts_server_totals);
     Test.add_func ("/sync/pipeline", test_sync_pipeline);
@@ -3846,12 +4526,18 @@ int main (string[] args) {
     Test.add_func ("/sync/automatic-history-backfill", test_automatic_history_backfill);
     Test.add_func ("/sync/initial-history-backfill-stays-silent",
         test_initial_history_backfill_stays_silent);
+    Test.add_func ("/sync/initial-history-issue-retry-stays-silent",
+        test_initial_history_issue_retry_stays_silent);
     Test.add_func ("/sync/initial-history-cancel-resume-stays-silent",
         test_initial_history_cancel_resume_stays_silent);
     Test.add_func ("/sync/can-be-cancelled", test_active_sync_can_be_cancelled);
+    Test.add_func ("/sync/suppress-active-emits-terminal-once",
+        test_suppress_active_sync_emits_terminal_once);
     Test.add_func ("/sync/partial-result-is-installed", test_partial_sync_is_installed_and_reported);
     Test.add_func ("/sync/mutation-serialization", test_mutation_flush_serialization);
     Test.add_func ("/sync/account-serialization", test_account_sync_serialization);
+    Test.add_func ("/sync/folder-empty-serialization",
+        test_folder_empty_is_serialized_with_sync);
     Test.add_func ("/sync/move-flushes-state-before-transfer", test_move_flushes_state_before_transfer);
     Test.add_func ("/sync/junk-classification-is-durable", test_junk_classification_is_durable);
     Test.add_func ("/junk/rules-and-filter", test_junk_rules_and_filter);

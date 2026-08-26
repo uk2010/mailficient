@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.2.8', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.2.9', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 cc = meson.get_compiler('c')
 
@@ -117,6 +117,13 @@ core_tests = executable('core-tests', files('tests/test-core.vala') + core_suppo
   vala_args: ['--target-glib=2.76'])
 test('core', core_tests, timeout: 300)
 
+rich_text_tests = executable('rich-text-tests',
+  files('tests/test-rich-text.vala', 'src/ui/rich-text-buffer.vala'),
+  include_directories: include_directories('src'),
+  dependencies: [gtk, gee, json],
+  vala_args: ['--target-glib=2.76'])
+test('rich-text', rich_text_tests, timeout: 30)
+
 draft_sync_tests = executable('draft-sync-tests',
   files('tests/test-draft-sync.vala') + core_support_sources,
   include_directories: include_directories('src'),
@@ -153,8 +160,10 @@ endif
 
 camel_test_dep = dependency('camel-1.2', required: false)
 if camel_test_dep.found()
+  edataserver_test_dep = dependency('libedataserver-1.2')
   camel_test_sources = files(
     'tests/test-camel.vala',
+    'src/services/camel-cache-namespace.vala',
     'src/services/camel-mail-engine.vala',
     'src/services/remote-mail-search-provider.vala',
     'src/services/camel-live-mail-watch.vala',
@@ -188,7 +197,7 @@ if camel_test_dep.found()
     'src/security/message-security-service.vala',
   )
   camel_tests = executable('camel-tests', camel_test_sources,
-    dependencies: [gee, gio, xml, camel_test_dep],
+    dependencies: [gee, gio, xml, camel_test_dep, edataserver_test_dep],
     vala_args: ['--target-glib=2.76'] + camel_vala_args)
   test('camel', camel_tests)
 
@@ -198,6 +207,7 @@ if camel_test_dep.found()
   # gated and starts its own disposable GreenMail container.
   greenmail_test_sources = files(
     'tests/test-greenmail.vala',
+    'src/services/camel-cache-namespace.vala',
     'src/services/camel-mail-engine.vala',
     'src/services/remote-mail-search-provider.vala',
     'src/services/search-query.vala',
@@ -233,7 +243,7 @@ if camel_test_dep.found()
     'src/security/message-security-service.vala',
   )
   greenmail_tests = executable('greenmail-tests', greenmail_test_sources,
-    dependencies: [gee, gio, xml, camel_test_dep],
+    dependencies: [gee, gio, xml, camel_test_dep, edataserver_test_dep],
     vala_args: ['--target-glib=2.76'] + camel_vala_args)
   test('camel-draft-cap', greenmail_tests,
     args: ['-p', '/camel/draft-uid-cap-converges'])

@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Wed Aug 26 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.9-1
+- Improve mail-check speed, task navigation, draft cleanup, HTML rendering,
+  folder state updates, message selection, and interface polish.
+
 * Tue Aug 25 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.8-1
 - Add compose safeguards, tasks, calendar RSVP, message safety, advanced rules,
   Quick Steps, server search, and release polish.

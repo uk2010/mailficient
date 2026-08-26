@@ -4,6 +4,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     public signal void accounts_changed ();
     public signal void smart_mailboxes_changed ();
     public signal void automation_changed ();
+    public signal void sender_safety_changed ();
     private CacheDatabase cache;
     private MailSettingsStore settings;
     private RemoteContentPolicy remote_content_policy;
@@ -33,6 +34,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     private Adw.EntryRow smart_query_row;
     private Adw.PreferencesGroup smart_group;
     private Gee.ArrayList<Adw.ActionRow> smart_rows = new Gee.ArrayList<Adw.ActionRow> ();
+    private Adw.ComboRow vacation_identity_row;
 
     public PreferencesWindow (CacheDatabase cache, MailSettingsStore settings,
                               RemoteContentPolicy remote_content_policy,
@@ -49,21 +51,38 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         add (accounts_page);
         var general_page = build_general_page (); general_page.name = "general"; add (general_page);
         var composing_page = build_composing_page (); composing_page.name = "composing"; add (composing_page);
-        var junk_page = build_junk_page (); junk_page.name = "junk"; add (junk_page);
         var rules_page = build_rules_page (); rules_page.name = "rules"; add (rules_page);
-        var smart_page = build_smart_mailboxes_page (); smart_page.name = "smart-mailboxes"; add (smart_page);
-        var vacation_page = build_vacation_page (); vacation_page.name = "vacation"; add (vacation_page);
         var privacy_page = build_privacy_page (); privacy_page.name = "privacy"; add (privacy_page);
         load_identities ();
         notify["visible-page-name"].connect (() => {
             string? page_name = get_visible_page_name ();
             if (page_name != null && page_name != "") settings.preferences_page = page_name;
         });
-        string? qa_page = Environment.get_variable ("MAILFICIENT_QA_PREFERENCES");
-        if (qa_page == "accounts" || qa_page == "composing" || qa_page == "junk" || qa_page == "rules" || qa_page == "smart-mailboxes" || qa_page == "vacation" || qa_page == "privacy")
-            set_visible_page_name (qa_page);
-        else
-            set_visible_page_name (settings.preferences_page);
+        string requested_page = Environment.get_variable ("MAILFICIENT_QA_PREFERENCES") ?? "";
+        if (requested_page == "" || requested_page == "0")
+            requested_page = settings.preferences_page;
+        Gtk.Widget? requested_focus = null;
+        switch (requested_page) {
+        case "junk":
+            requested_page = "privacy"; requested_focus = junk_pattern_row; break;
+        case "smart-mailboxes":
+            requested_page = "rules"; requested_focus = smart_name_row; break;
+        case "vacation":
+            requested_page = "composing"; requested_focus = vacation_identity_row; break;
+        case "accounts": case "general": case "composing": case "rules": case "privacy":
+            break;
+        default:
+            requested_page = "general"; break;
+        }
+        set_visible_page_name (requested_page);
+        if (requested_focus != null) {
+            Gtk.Widget focus_target = requested_focus;
+            Idle.add (() => {
+                if (focus_target.get_root () != null)
+                    focus_target.grab_focus ();
+                return Source.REMOVE;
+            });
+        }
         if (Environment.get_variable ("MAILFICIENT_QA_CONFIGURE_SIGNATURE") == "1") Idle.add (() => {
             signature_editor.buffer.text = "Mailficient QA Signature";
             signature_enabled_switch.active = true;
@@ -89,24 +108,26 @@ public class PreferencesWindow : Adw.PreferencesDialog {
 
         var checking = new Adw.PreferencesGroup (); checking.title = "Checking for Mail";
         var intervals = new Gtk.StringList (null);
-        intervals.append ("Manually"); intervals.append ("Every 5 minutes");
-        intervals.append ("Every 15 minutes"); intervals.append ("Every 30 minutes");
-        intervals.append ("Every hour");
+        intervals.append ("Manually"); intervals.append ("Every minute");
+        intervals.append ("Every 5 minutes"); intervals.append ("Every 15 minutes");
+        intervals.append ("Every 30 minutes"); intervals.append ("Every hour");
         var interval = new Adw.ComboRow (); interval.title = "Check for new mail"; interval.model = intervals;
         interval.subtitle = "Changes take effect immediately";
         switch (settings.sync_interval_minutes) {
         case 0: interval.selected = 0; break;
-        case 15: interval.selected = 2; break;
-        case 30: interval.selected = 3; break;
-        case 60: interval.selected = 4; break;
-        default: interval.selected = 1; break;
+        case 1: interval.selected = 1; break;
+        case 15: interval.selected = 3; break;
+        case 30: interval.selected = 4; break;
+        case 60: interval.selected = 5; break;
+        default: interval.selected = 2; break;
         }
         interval.notify["selected"].connect (() => {
             switch (interval.selected) {
             case 0: settings.sync_interval_minutes = 0; break;
-            case 2: settings.sync_interval_minutes = 15; break;
-            case 3: settings.sync_interval_minutes = 30; break;
-            case 4: settings.sync_interval_minutes = 60; break;
+            case 1: settings.sync_interval_minutes = 1; break;
+            case 3: settings.sync_interval_minutes = 15; break;
+            case 4: settings.sync_interval_minutes = 30; break;
+            case 5: settings.sync_interval_minutes = 60; break;
             default: settings.sync_interval_minutes = 5; break;
             }
         });
@@ -134,7 +155,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     }
 
     private Adw.PreferencesPage build_composing_page () {
-        var page = new Adw.PreferencesPage (); page.title = "Composing"; page.icon_name = "document-edit-symbolic";
+        var page = new Adw.PreferencesPage (); page.title = "Compose"; page.icon_name = "document-edit-symbolic";
         var safety = new Adw.PreferencesGroup (); safety.title = "Writing and Sending";
         var spellcheck = new Adw.SwitchRow (); spellcheck.title = "Check spelling while typing";
         spellcheck.subtitle = "Uses an installed local dictionary; message text never leaves this device";
@@ -169,11 +190,13 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         signature_editor.buffer.changed.connect (() => { if (!loading) save_signature (); });
         var scroller = new Gtk.ScrolledWindow (); scroller.set_policy (Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
         scroller.set_min_content_height (150); scroller.set_child (signature_editor); scroller.add_css_class ("card");
-        group.add (scroller); page.add (group); return page;
+        group.add (scroller); page.add (group);
+        add_vacation_settings (page);
+        return page;
     }
 
     private Adw.PreferencesPage build_privacy_page () {
-        var page = new Adw.PreferencesPage (); page.title = "Privacy"; page.icon_name = "security-high-symbolic";
+        var page = new Adw.PreferencesPage (); page.title = "Safety"; page.icon_name = "security-high-symbolic";
         var group = new Adw.PreferencesGroup (); group.title = "Message Content";
         var images = new Adw.SwitchRow (); images.title = "Always show remote images";
         images.subtitle = "Load external images automatically for every sender";
@@ -193,11 +216,13 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         scripts.add_prefix (new Gtk.Image.from_icon_name ("channel-secure-symbolic")); group.add (scripts);
         page.add (group);
         trusted_senders_group = new Adw.PreferencesGroup (); trusted_senders_group.title = "Trusted Senders";
-        trusted_senders_group.description = "Remote images load automatically only for senders listed here. You can trust a sender from the blocked-content notice in a message.";
+        trusted_senders_group.description = "Remote images load automatically for senders listed here. Safe Senders are trusted for images automatically too.";
         page.add (trusted_senders_group); reload_trusted_senders ();
         safe_senders_group = new Adw.PreferencesGroup (); safe_senders_group.title = "Safe Senders";
-        safe_senders_group.description = "Safe Senders reduce identity-mismatch notices, but never hide failed SPF, DKIM, or DMARC reports.";
-        page.add (safe_senders_group); reload_safe_senders (); return page;
+        safe_senders_group.description = "Safe Senders load remote images automatically and hide automatic sender warnings. Full findings remain available from Security Details.";
+        page.add (safe_senders_group); reload_safe_senders ();
+        add_junk_settings (page);
+        return page;
     }
 
     private void reload_trusted_senders () {
@@ -218,7 +243,10 @@ public class PreferencesWindow : Adw.PreferencesDialog {
                 remove.valign = Gtk.Align.CENTER; remove.tooltip_text = "Stop trusting this sender";
                 Accessibility.label (remove, "Stop loading remote images from " + address);
                 remove.clicked.connect (() => {
-                    try { remote_content_policy.forget_sender (address); reload_trusted_senders (); }
+                    try {
+                        remote_content_policy.forget_sender (address);
+                        reload_trusted_senders (); sender_safety_changed ();
+                    }
                     catch (Error error) { warning ("Could not remove trusted sender: %s", error.message); }
                 });
                 row.add_suffix (remove); trusted_senders_group.add (row); trusted_sender_rows.add (row);
@@ -242,12 +270,15 @@ public class PreferencesWindow : Adw.PreferencesDialog {
             }
             foreach (var address in senders) {
                 var row = new Adw.ActionRow (); row.title = address;
-                row.subtitle = "Identity mismatch notices are reduced; authentication failures still appear";
+                row.subtitle = "Remote images load automatically; warnings remain in Security Details";
                 var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
                 remove.valign = Gtk.Align.CENTER; remove.tooltip_text = "Remove from Safe Senders";
                 Accessibility.label (remove, "Remove " + address + " from Safe Senders");
                 remove.clicked.connect (() => {
-                    try { cache.set_safe_sender (address, false); reload_safe_senders (); }
+                    try {
+                        cache.set_safe_sender (address, false);
+                        reload_safe_senders (); sender_safety_changed ();
+                    }
                     catch (Error error) { warning ("Could not remove Safe Sender: %s", error.message); }
                 });
                 row.add_suffix (remove); safe_senders_group.add (row); safe_sender_rows.add (row);
@@ -258,8 +289,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         }
     }
 
-    private Adw.PreferencesPage build_junk_page () {
-        var page = new Adw.PreferencesPage (); page.title = "Junk"; page.icon_name = "dialog-warning-symbolic";
+    private void add_junk_settings (Adw.PreferencesPage page) {
         var add_group = new Adw.PreferencesGroup (); add_group.title = "Block a Sender";
         add_group.description = "New Inbox messages matching these addresses or domains are marked as junk on the server and moved to Junk.";
         var kinds = new Gtk.StringList (null); kinds.append ("Email address"); kinds.append ("Domain");
@@ -274,7 +304,6 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         junk_rules_group = new Adw.PreferencesGroup (); junk_rules_group.title = "Blocked Senders";
         junk_rules_group.description = "Rules are stored locally. Removing a rule does not restore mail already classified as junk.";
         page.add (junk_rules_group); reload_junk_rules ();
-        return page;
     }
 
     private void add_junk_rule () {
@@ -308,7 +337,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     }
 
     private Adw.PreferencesPage build_rules_page () {
-        var page = new Adw.PreferencesPage (); page.title = "Rules"; page.icon_name = "system-run-symbolic";
+        var page = new Adw.PreferencesPage (); page.title = "Automation"; page.icon_name = "system-run-symbolic";
         var add = new Adw.PreferencesGroup (); add.title = "Automation";
         add.description = "Rules run in order as messages synchronize. Use multiple AND/OR conditions, exceptions, actions, account scope, and stop-processing.";
         var create = new Gtk.Button.with_label ("Add Mail Rule…"); create.halign = Gtk.Align.END;
@@ -324,7 +353,9 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         var add_quick = new Gtk.Button.with_label ("Add Quick Step…"); add_quick.halign = Gtk.Align.END;
         add_quick.clicked.connect (() => add_quick_step.begin ()); quick_steps_group.add (add_quick);
         page.add (quick_steps_group);
-        reload_mail_rules (); reload_quick_steps (); return page;
+        reload_mail_rules (); reload_quick_steps ();
+        add_smart_mailbox_settings (page);
+        return page;
     }
 
     private async void add_advanced_rule () {
@@ -463,8 +494,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         button.add_css_class ("flat"); button.tooltip_text = label; Accessibility.label (button, label); return button;
     }
 
-    private Adw.PreferencesPage build_smart_mailboxes_page () {
-        var page = new Adw.PreferencesPage (); page.title = "Smart Mailboxes"; page.icon_name = "view-filter-symbolic";
+    private void add_smart_mailbox_settings (Adw.PreferencesPage page) {
         var add = new Adw.PreferencesGroup (); add.title = "New Smart Mailbox";
         add.description = "Saved searches appear in the left column and update as mail changes.";
         smart_name_row = new Adw.EntryRow (); smart_name_row.title = "Name"; add.add (smart_name_row);
@@ -478,7 +508,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
             } catch (Error error) { warning ("Could not add Smart Mailbox: %s", error.message); }
         }); add.add (create); page.add (add);
         smart_group = new Adw.PreferencesGroup (); smart_group.title = "Saved Smart Mailboxes"; page.add (smart_group);
-        reload_smart_mailboxes (); return page;
+        reload_smart_mailboxes ();
     }
 
     private void reload_smart_mailboxes () {
@@ -495,14 +525,14 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         } catch (Error error) { warning ("Could not load Smart Mailboxes: %s", error.message); }
     }
 
-    private Adw.PreferencesPage build_vacation_page () {
-        var page = new Adw.PreferencesPage (); page.title = "Vacation"; page.icon_name = "weather-clear-symbolic";
+    private void add_vacation_settings (Adw.PreferencesPage page) {
         var group = new Adw.PreferencesGroup (); group.title = "Automatic Vacation Reply";
         group.description = "Mailficient replies once to each sender while it is running and checking mail.";
         var accounts = new Gtk.StringList (null); var ids = new Gee.ArrayList<string> ();
         try { foreach (var account in cache.list_accounts ()) { accounts.append (account.email); ids.add (account.id); } }
         catch (Error error) { warning ("Could not load vacation identities: %s", error.message); }
-        var identity = new Adw.ComboRow (); identity.title = "Account"; identity.model = accounts; group.add (identity);
+        vacation_identity_row = new Adw.ComboRow (); vacation_identity_row.title = "Account";
+        vacation_identity_row.model = accounts; group.add (vacation_identity_row);
         var enabled = new Adw.SwitchRow (); enabled.title = "Send vacation replies"; group.add (enabled);
         var starts = new Adw.EntryRow (); starts.title = "Starts (YYYY-MM-DD, optional)"; group.add (starts);
         var ends = new Adw.EntryRow (); ends.title = "Ends (YYYY-MM-DD, optional)"; group.add (ends);
@@ -512,10 +542,10 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         body_scroll.child = body; body_scroll.add_css_class ("card"); group.add (body_scroll);
         bool loading_vacation = false;
         SourceFunc load = () => {
-            if (ids.size == 0 || identity.selected >= ids.size) return Source.REMOVE;
+            if (ids.size == 0 || vacation_identity_row.selected >= ids.size) return Source.REMOVE;
             loading_vacation = true;
             try {
-                var value = cache.vacation_settings (ids[(int) identity.selected]);
+                var value = cache.vacation_settings (ids[(int) vacation_identity_row.selected]);
                 enabled.active = value != null && value.enabled;
                 starts.text = value == null || value.starts_at == 0 ? "" : new DateTime.from_unix_local (value.starts_at).format ("%F");
                 ends.text = value == null || value.ends_at == 0 ? "" : new DateTime.from_unix_local (value.ends_at).format ("%F");
@@ -523,16 +553,16 @@ public class PreferencesWindow : Adw.PreferencesDialog {
             } catch (Error error) { warning ("Could not load vacation settings: %s", error.message); }
             loading_vacation = false; return Source.REMOVE;
         };
-        identity.notify["selected"].connect (() => load ());
+        vacation_identity_row.notify["selected"].connect (() => load ());
         var save = new Gtk.Button.with_label ("Save Vacation Reply"); save.halign = Gtk.Align.END;
         save.add_css_class ("suggested-action"); save.clicked.connect (() => {
-            if (loading_vacation || ids.size == 0 || identity.selected >= ids.size) return;
+            if (loading_vacation || ids.size == 0 || vacation_identity_row.selected >= ids.size) return;
             try {
-                var value = new VacationSettings (ids[(int) identity.selected]); value.enabled = enabled.active;
+                var value = new VacationSettings (ids[(int) vacation_identity_row.selected]); value.enabled = enabled.active;
                 value.starts_at = parse_optional_day (starts.text, false); value.ends_at = parse_optional_day (ends.text, true);
                 value.subject = subject.text; value.body = body.buffer.text; cache.save_vacation_settings (value);
             } catch (Error error) { warning ("Could not save vacation settings: %s", error.message); }
-        }); group.add (save); page.add (group); load (); return page;
+        }); group.add (save); page.add (group); load ();
     }
 
     private static int64 parse_optional_day (string text, bool end_of_day) throws MailError {

@@ -17,6 +17,7 @@ public class ReadingPane : Gtk.Box {
     private RemoteContentPolicy remote_content_policy;
     private CalendarIntegrationService calendar_service;
     private CacheDatabase cache;
+    private MailSettingsStore settings;
     private MessageSecurityService message_security = new MessageSecurityService ();
     private Cancellable? calendar_cancellable;
     private Message? current;
@@ -31,6 +32,8 @@ public class ReadingPane : Gtk.Box {
     private Gee.ArrayList<ulong> html_layout_handlers = new Gee.ArrayList<ulong> ();
     private Gee.ArrayList<ulong> html_link_handlers = new Gee.ArrayList<ulong> ();
     private int constrained_width;
+    private bool shutting_down;
+    private bool suspended;
 
     public ReadingPane (ReceivedAttachmentService attachment_service,
                         RemoteContentPolicy remote_content_policy,
@@ -41,6 +44,7 @@ public class ReadingPane : Gtk.Box {
         this.remote_content_policy = remote_content_policy;
         this.calendar_service = calendar_service;
         this.cache = cache;
+        this.settings = new MailSettingsStore (cache);
         set_size_request (0, -1);
         hexpand = true;
         add_css_class ("reading-pane");
@@ -62,6 +66,7 @@ public class ReadingPane : Gtk.Box {
     }
 
     public void set_viewport_width (int width) {
+        if (shutting_down) return;
         if (width <= 0) return;
         constrained_width = width;
         content.set_size_request (width, -1);
@@ -70,11 +75,13 @@ public class ReadingPane : Gtk.Box {
     }
 
     public void zoom_in () {
+        if (shutting_down) return;
         foreach (var html_view in html_views)
             if (html_view.get_parent () != null) html_view.zoom_in ();
     }
 
     public void zoom_out () {
+        if (shutting_down) return;
         foreach (var html_view in html_views)
             if (html_view.get_parent () != null) html_view.zoom_out ();
     }
@@ -82,6 +89,8 @@ public class ReadingPane : Gtk.Box {
     public void show_message (Message message, Gee.List<Message>? conversation = null,
                               bool sender_is_vip = false, bool always_load_remote_content = false,
                               bool full_html_formatting = false) {
+        if (shutting_down) return;
+        suspended = false;
         message_generation++;
         current = message;
         this.always_load_remote_content = always_load_remote_content;
@@ -155,22 +164,76 @@ public class ReadingPane : Gtk.Box {
         scroller.vadjustment = new Gtk.Adjustment (0, 0, 0, 24, 240, 0);
     }
 
+    private string compact_recipient_summary (Message message) {
+        try {
+            var recipients = RecipientParser.parse (message.recipients);
+            string own_address = "";
+            try {
+                var account = cache.find_account (message.account_id);
+                if (account != null) own_address = account.email.down ();
+            } catch (Error ignored) { }
+
+            bool includes_me = false;
+            foreach (var recipient in recipients)
+                if (own_address != "" && recipient.address.down () == own_address) {
+                    includes_me = true;
+                    break;
+                }
+            string summary = includes_me ? "to me" : "to " + recipient_display_name (recipients[0]);
+            int additional = recipients.size - 1;
+            if (additional > 0) summary += " +%d".printf (additional);
+            if (message.cc_recipients.strip () != "") {
+                try {
+                    int cc_count = RecipientParser.parse (message.cc_recipients).size;
+                    summary += " · cc %d".printf (cc_count);
+                } catch (Error ignored) { summary += " · cc"; }
+            }
+            return summary;
+        } catch (Error error) {
+            string fallback = message.recipients.strip ();
+            int address_start = fallback.index_of_char ('<');
+            if (address_start > 0) fallback = fallback.substring (0, address_start).strip ();
+            return fallback == "" ? "Recipients unavailable" : "to " + fallback;
+        }
+    }
+
+    private static string recipient_display_name (Recipient recipient) {
+        return recipient.name.strip () == "" ? recipient.address : recipient.name;
+    }
+
     private void append_conversation_message (Message message, bool expanded) {
         var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); card.hexpand = true; card.halign = Gtk.Align.FILL; card.add_css_class ("conversation-message");
         var header_button = new Gtk.Button (); header_button.hexpand = true; header_button.halign = Gtk.Align.FILL; header_button.add_css_class ("flat");
-        var sender_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10); sender_line.hexpand = true; sender_line.halign = Gtk.Align.FILL;
-        sender_line.append (new Adw.Avatar (42, message.initials (), false));
-        var sender_text = new Gtk.Box (Gtk.Orientation.VERTICAL, 1); sender_text.hexpand = true;
-        var sender = new Gtk.Label ("<b>%s</b>  <span alpha='65%%'>&lt;%s&gt;</span>".printf (Markup.escape_text (message.sender_name), Markup.escape_text (message.sender_address)));
-        sender.use_markup = true; sender.xalign = 0; sender.ellipsize = Pango.EllipsizeMode.END;
+        var sender_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+        sender_line.hexpand = true; sender_line.halign = Gtk.Align.FILL;
+        var sender_avatar = new Gtk.Button.with_label (message.initials ());
+        sender_avatar.set_size_request (36, 36);
+        sender_avatar.halign = Gtk.Align.CENTER;
+        sender_avatar.valign = Gtk.Align.CENTER;
+        sender_avatar.focusable = false;
+        sender_avatar.can_target = false;
+        sender_avatar.add_css_class ("sender-avatar");
+        sender_avatar.add_css_class ("circular");
+        sender_line.append (sender_avatar);
+        var sender_text = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); sender_text.hexpand = true;
+        var primary = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        var sender = new Gtk.Label (message.sender_name);
+        sender.xalign = 0; sender.hexpand = true;
+        sender.ellipsize = Pango.EllipsizeMode.END;
+        sender.add_css_class ("heading");
         sender.tooltip_text = "%s <%s>".printf (message.sender_name, message.sender_address);
-        sender_text.append (sender);
-        string recipient_detail = "to %s".printf (message.recipients);
-        if (message.cc_recipients.strip () != "") recipient_detail += "\ncc %s".printf (message.cc_recipients);
-        var recipients = new Gtk.Label (recipient_detail); recipients.xalign = 0; recipients.wrap = true;
-        recipients.add_css_class ("dim-label"); sender_text.append (recipients); sender_line.append (sender_text);
+        primary.append (sender);
         var time = new Gtk.Label (message.timestamp); time.add_css_class ("dim-label");
-        time.ellipsize = Pango.EllipsizeMode.END; time.max_width_chars = 18; sender_line.append (time);
+        time.ellipsize = Pango.EllipsizeMode.END; time.max_width_chars = 12;
+        time.xalign = 1; primary.append (time); sender_text.append (primary);
+        var recipients = new Gtk.Label (compact_recipient_summary (message));
+        recipients.xalign = 0; recipients.ellipsize = Pango.EllipsizeMode.END;
+        string recipient_tooltip = "To: %s".printf (message.recipients);
+        if (message.cc_recipients.strip () != "")
+            recipient_tooltip += "\nCc: %s".printf (message.cc_recipients);
+        recipients.tooltip_text = recipient_tooltip;
+        recipients.add_css_class ("dim-label"); sender_text.append (recipients);
+        sender_line.append (sender_text);
         header_button.child = sender_line; header_button.tooltip_text = expanded ? "Message details" : "Expand message";
         Accessibility.label (header_button, "%s message from %s".printf (expanded ? "Message details" : "Expand", message.sender_name));
         var header_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 2);
@@ -219,6 +282,11 @@ public class ReadingPane : Gtk.Box {
         if (message.body_html != "") {
             uint view_generation = message_generation;
             html_view = html_view_pool.size > 0 ? html_view_pool.remove_at (html_view_pool.size - 1) : new HtmlMessageView ();
+            // A pooled renderer can outlive the message subtree that owned it.
+            // Always sever that direct GTK parent before attaching it to the
+            // next message, even if an earlier teardown was interrupted.
+            if (!detach_html_view (html_view))
+                html_view = new HtmlMessageView ();
             html_view.reset_for_reuse ();
             html_view.hexpand = true; html_view.halign = Gtk.Align.FILL; html_view.vexpand = true;
             html_views.add (html_view);
@@ -282,11 +350,29 @@ public class ReadingPane : Gtk.Box {
     }
 
     public void show_empty () {
+        if (shutting_down) return;
         current = null; clear ();
         var empty = new Adw.StatusPage (); empty.icon_name = "mail-read-symbolic"; empty.title = "Select a Message"; empty.description = "Choose a message from the list to read it."; empty.vexpand = true; empty.add_css_class ("empty-state"); content.append (empty);
     }
 
+    // The workspace stack hides the reader while tasks are open. Preserve the
+    // complete reader tree and its selection so opening Today/Planned does no
+    // WebKit or GtkListView teardown, and returning to mail does not reload the
+    // same HTML message.
+    public void suspend () {
+        if (shutting_down) return;
+        suspended = true;
+    }
+
+    public bool resume_message (string message_id) {
+        if (shutting_down || !suspended || current == null ||
+            current.id != message_id) return false;
+        suspended = false;
+        return true;
+    }
+
     public void show_no_accounts () {
+        if (shutting_down) return;
         current = null; clear ();
         var status = new Adw.StatusPage (); status.icon_name = "mail-unread-symbolic";
         status.title = "Welcome to Mailficient";
@@ -301,6 +387,7 @@ public class ReadingPane : Gtk.Box {
     }
 
     public void show_loading () {
+        if (shutting_down) return;
         current = null; clear ();
         var status = new Adw.StatusPage (); status.title = "Loading Message";
         status.description = "Opening the cached message content…"; status.vexpand = true;
@@ -338,6 +425,7 @@ public class ReadingPane : Gtk.Box {
     }
 
     public void show_error (UserFacingError error) {
+        if (shutting_down) return;
         current = null; clear ();
         var status = new Adw.StatusPage (); status.icon_name = "dialog-warning-symbolic";
         status.title = error.title; status.description = "%s\n%s".printf (error.description, error.suggestion);
@@ -351,6 +439,9 @@ public class ReadingPane : Gtk.Box {
         content.append (status);
     }
     private void clear () {
+        // Invalidate every callback captured by the outgoing reader tree,
+        // including clears that do not immediately display another message.
+        message_generation++;
         if (calendar_cancellable != null) calendar_cancellable.cancel ();
         calendar_cancellable = null;
         current_html_view = null;
@@ -360,6 +451,7 @@ public class ReadingPane : Gtk.Box {
             var link_handler = html_link_handlers[index];
             if (layout_handler != 0) view.disconnect (layout_handler);
             if (link_handler != 0) view.disconnect (link_handler);
+            if (!detach_html_view (view)) continue;
             view.reset_for_reuse ();
             if (html_view_pool.size < 3) html_view_pool.add (view);
             else view.shutdown ();
@@ -369,6 +461,54 @@ public class ReadingPane : Gtk.Box {
         html_link_handlers.clear ();
         while (content.get_first_child () != null)
             content.remove ((Gtk.Widget) content.get_first_child ());
+    }
+
+    public void shutdown () {
+        if (shutting_down) return;
+        shutting_down = true;
+        message_generation++;
+        if (calendar_cancellable != null) calendar_cancellable.cancel ();
+        calendar_cancellable = null;
+        current = null;
+        current_html_view = null;
+        var renderers = new Gee.ArrayList<HtmlMessageView> ();
+
+        for (int index = 0; index < html_views.size; index++) {
+            var view = html_views[index];
+            var layout_handler = html_layout_handlers[index];
+            var link_handler = html_link_handlers[index];
+            if (layout_handler != 0) view.disconnect (layout_handler);
+            if (link_handler != 0) view.disconnect (link_handler);
+            detach_html_view (view);
+            renderers.add (view);
+        }
+        html_views.clear ();
+        html_layout_handlers.clear ();
+        html_link_handlers.clear ();
+
+        foreach (var view in html_view_pool)
+            renderers.add (view);
+        html_view_pool.clear ();
+        // All mail views use WebKit's default process pool. Keep one view alive
+        // while the others close, then terminate that shared renderer exactly
+        // once through WebKit's supported API.
+        for (int index = 0; index < renderers.size; index++)
+            renderers[index].shutdown (index == renderers.size - 1);
+        renderers.clear ();
+        while (content.get_first_child () != null)
+            content.remove ((Gtk.Widget) content.get_first_child ());
+    }
+
+    private static bool detach_html_view (HtmlMessageView view) {
+        var parent = view.get_parent ();
+        if (parent == null) return true;
+        var box = parent as Gtk.Box;
+        if (box != null) {
+            box.remove (view);
+            return view.get_parent () == null;
+        }
+        warning ("Pooled HTML renderer has an unexpected non-box parent");
+        return false;
     }
 
     private string print_header (Message message) {
@@ -393,7 +533,7 @@ public class ReadingPane : Gtk.Box {
 
     private void append_identity_security (Message message, Gtk.Box target) {
         var assessment = message_security.assess (message, sender_is_safe (message));
-        if ((int) assessment.level < (int) MessageThreatLevel.CAUTION) return;
+        if (!assessment.should_show_inline_warning) return;
         var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
         card.hexpand = true; card.halign = Gtk.Align.FILL;
         card.set_margin_start (30); card.set_margin_end (30);
@@ -477,7 +617,6 @@ public class ReadingPane : Gtk.Box {
             try {
                 cache.set_safe_sender (message.sender_address, !safe);
                 safe_sender_changed (message.sender_address, !safe);
-                if (current != null && current.id == message.id) show_message (message);
             } catch (Error error) { remote_content_failed (error); }
         } else if (response == "phishing") phishing_report_requested (message);
     }
@@ -524,7 +663,7 @@ public class ReadingPane : Gtk.Box {
         try {
             var invitation = yield calendar_service.load_invitation (
                 message, attachment, cancellable);
-            if (generation != message_generation || host.get_parent () == null) return;
+            if (generation != message_generation || host.get_root () == null) return;
             while (host.get_first_child () != null)
                 host.remove ((Gtk.Widget) host.get_first_child ());
             var card = new CalendarInvitationCard (message, invitation,
@@ -538,7 +677,7 @@ public class ReadingPane : Gtk.Box {
             reset_scroll_to_top ();
         } catch (Error error) {
             if (error is IOError.CANCELLED || generation != message_generation ||
-                host.get_parent () == null) return;
+                host.get_root () == null) return;
             while (host.get_first_child () != null)
                 host.remove ((Gtk.Widget) host.get_first_child ());
             var notice = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
@@ -557,7 +696,7 @@ public class ReadingPane : Gtk.Box {
         Message message, CalendarInvitation invitation,
         CalendarParticipation participation, CalendarInvitationCard card) {
         var parent = get_root () as Gtk.Window;
-        if (parent == null || card.get_parent () == null) return;
+        if (parent == null || card.get_root () == null) return;
         string action = participation == CalendarParticipation.ACCEPTED ? "Accept" :
             (participation == CalendarParticipation.TENTATIVE ? "Mark Tentative" : "Decline");
         var send = new Gtk.CheckButton.with_label ("Send a response to the organizer");
@@ -578,13 +717,13 @@ public class ReadingPane : Gtk.Box {
             card.set_busy (true);
             yield calendar_service.respond (message, invitation, participation,
                 send.active, calendar_cancellable);
-            if (card.get_parent () == null) return;
+            if (card.get_root () == null) return;
             card.set_busy (false); card.set_response (participation);
             calendar_action_completed (send.active ?
                 "%s — response sent to the organizer".printf (participation.label ()) :
                 "%s in your calendar — no response sent".printf (participation.label ()));
         } catch (Error error) {
-            if (card.get_parent () != null) card.set_busy (false);
+            if (card.get_root () != null) card.set_busy (false);
             if (!(error is IOError.CANCELLED)) calendar_action_failed (error);
         }
     }
@@ -613,7 +752,7 @@ public class ReadingPane : Gtk.Box {
         } catch (Error error) {
             if (!(error is IOError.CANCELLED)) calendar_action_failed (error);
         } finally {
-            if (button.get_parent () != null) {
+            if (button.get_root () != null) {
                 button.child = null; button.icon_name = "appointment-new-symbolic";
                 button.sensitive = true;
             }
@@ -624,7 +763,7 @@ public class ReadingPane : Gtk.Box {
         if (!message.has_attachment && message.attachments.size == 0) return;
 
         var section = new Gtk.Box (Gtk.Orientation.VERTICAL, 6);
-        section.set_margin_start (30); section.set_margin_end (30);
+        section.set_margin_start (18); section.set_margin_end (18);
         section.set_margin_top (18); section.set_margin_bottom (20);
         string attachment_title;
         if (message.attachments.size == 0) attachment_title = "Attachments";
@@ -642,11 +781,19 @@ public class ReadingPane : Gtk.Box {
             foreach (var attachment in message.attachments) {
                 var row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
                 row.add_css_class ("attachment-row");
-                row.append (new Gtk.Image.from_icon_name ("mail-attachment-symbolic"));
-                var label = new Gtk.Label ("%s  ·  %s".printf (
-                    attachment.name, attachment.formatted_size ()));
-                label.ellipsize = Pango.EllipsizeMode.MIDDLE; label.max_width_chars = 52; label.hexpand = true; label.xalign = 0;
-                row.append (label);
+                var icon = new Gtk.Image.from_icon_name ("mail-attachment-symbolic");
+                icon.valign = Gtk.Align.CENTER; row.append (icon);
+                var details = new Gtk.Box (Gtk.Orientation.VERTICAL, 1);
+                details.hexpand = true;
+                var filename = new Gtk.Label (attachment.name);
+                filename.xalign = 0; filename.hexpand = true;
+                filename.ellipsize = Pango.EllipsizeMode.MIDDLE;
+                filename.tooltip_text = attachment.name;
+                filename.add_css_class ("heading"); details.append (filename);
+                var size = new Gtk.Label (attachment.formatted_size ());
+                size.xalign = 0; size.add_css_class ("caption");
+                size.add_css_class ("dim-label"); details.append (size);
+                row.append (details);
                 if (attachment.is_downloaded () &&
                     AttachmentSafety.preview_kind (attachment.content_type, attachment.name) != AttachmentPreviewKind.NONE) {
                     var preview = new Gtk.Button.with_label ("Preview");
@@ -668,10 +815,9 @@ public class ReadingPane : Gtk.Box {
                     });
                     row.append (calendar);
                 }
-                var save = new Gtk.Button.from_icon_name ("document-save-symbolic");
+                var save = new Gtk.Button.with_label (attachment.is_downloaded () ?
+                    "Save" : "Download");
                 save.add_css_class ("flat");
-                save.icon_name = attachment.is_downloaded () ?
-                    "document-save-symbolic" : "folder-download-symbolic";
                 save.tooltip_text = attachment.is_downloaded () ?
                     "Save attachment" : "Download attachment from the mail server";
                 Accessibility.label (save, "%s %s, %s".printf (
@@ -733,19 +879,20 @@ public class ReadingPane : Gtk.Box {
         if (root_window == null) return;
         var dialog = new Gtk.FileDialog ();
         dialog.title = "Save Attachment"; dialog.accept_label = "Save";
+        dialog.initial_folder = settings.file_dialog_initial_folder ();
         dialog.initial_name = AttachmentSafety.safe_filename (attachment.name);
         try {
             var destination = yield dialog.save (root_window, null);
+            settings.remember_file_dialog_selection (destination);
             button.sensitive = false;
             var spinner = new Gtk.Spinner (); spinner.spinning = true; button.child = spinner;
             yield attachment_service.save (message, attachment, destination);
             attachment_saved (destination.get_basename ());
         } catch (Error error) {
-            if (!(error is IOError.CANCELLED)) attachment_failed (error);
+            if (!DialogErrors.was_cancelled (error)) attachment_failed (error);
         } finally {
             button.child = null;
-            button.icon_name = attachment.is_downloaded () ?
-                "document-save-symbolic" : "folder-download-symbolic";
+            button.label = attachment.is_downloaded () ? "Save" : "Download";
             button.sensitive = true;
         }
     }

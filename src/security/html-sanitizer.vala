@@ -38,6 +38,49 @@ public class HtmlSanitizer : Object {
         return normalize_plain_text (output.str);
     }
 
+    public static bool has_remote_content (string html) {
+        if (html.strip () == "" || html.length > MAX_INPUT_BYTES) return false;
+
+        int options = Html.ParserOption.RECOVER | Html.ParserOption.NOERROR |
+            Html.ParserOption.NOWARNING | Html.ParserOption.NONET | Html.ParserOption.COMPACT;
+        Html.Doc* document = Html.Doc.read_memory ((char[]) html.data, html.length,
+            "about:blank", "UTF-8", options);
+        if (document == null) return false;
+
+        Xml.Node* root = document->get_root_element ();
+        bool remote = root != null && node_has_remote_content (root, 0);
+        delete document;
+        return remote;
+    }
+
+    private static bool node_has_remote_content (Xml.Node* node, int depth) {
+        if (depth >= MAX_TREE_DEPTH) return false;
+        if (node->type == Xml.ElementType.ELEMENT_NODE) {
+            string element = ((string) node->name).down ();
+            for (Xml.Attr* attribute = node->properties;
+                 attribute != null; attribute = attribute->next) {
+                if (attribute->ns != null) continue;
+                string name = ((string) attribute->name).down ();
+                string value = attribute->children == null ? "" :
+                    attribute->children->get_content ();
+                bool fetch_attribute = name == "src" || name == "srcset" ||
+                    name == "background" || name == "poster" || name == "style" ||
+                    (element == "link" && name == "href");
+                if (fetch_attribute && contains_remote_url (value)) return true;
+            }
+            if (element == "style" && contains_remote_url (node->get_content ()))
+                return true;
+        }
+        for (Xml.Node* child = node->children; child != null; child = child->next)
+            if (node_has_remote_content (child, depth + 1)) return true;
+        return false;
+    }
+
+    private static bool contains_remote_url (string value) {
+        string normalized = value.down ();
+        return normalized.contains ("http://") || normalized.contains ("https://");
+    }
+
     private static void append_plain_children (Xml.Node* parent, StringBuilder output, int depth) {
         if (depth >= MAX_TREE_DEPTH) return;
         for (Xml.Node* child = parent->children; child != null; child = child->next)
@@ -184,6 +227,15 @@ public class HtmlSanitizer : Object {
         if (element == "img" && name == "src") return safe_image (value, allow_remote_content);
         if (element == "img" && (name == "alt" || name == "width" || name == "height"))
             return safe_dimension_or_text (name, value);
+        if (full_html_formatting &&
+            (element == "table" || element == "tr" || element == "td" || element == "th") &&
+            (name == "bgcolor" || name == "bordercolor")) return safe_color (value);
+        if (full_html_formatting && element == "font" && name == "color")
+            return safe_color (value);
+        if (full_html_formatting && element == "font" && name == "face")
+            return safe_font_face (value);
+        if (full_html_formatting && element == "font" && name == "size")
+            return safe_font_size (value);
         if ((element == "td" || element == "th") &&
             (name == "colspan" || name == "rowspan" || name == "width" || name == "height"))
             return safe_positive_number (value);
@@ -237,6 +289,43 @@ public class HtmlSanitizer : Object {
         return null;
     }
 
+    private static string? safe_color (string value) {
+        string normalized = value.strip ();
+        if (normalized.length == 0 || normalized.length > 24) return null;
+        if (normalized[0] == '#') {
+            int digits = normalized.length - 1;
+            if (digits != 3 && digits != 4 && digits != 6 && digits != 8) return null;
+            for (int index = 1; index < normalized.length; index++)
+                if (!normalized[index].isxdigit ()) return null;
+            return normalized;
+        }
+        for (int index = 0; index < normalized.length; index++)
+            if (!normalized[index].isalpha () && normalized[index] != '-') return null;
+        return normalized;
+    }
+
+    private static string? safe_font_face (string value) {
+        string normalized = value.strip ();
+        if (normalized.length == 0 || normalized.length > 128) return null;
+        for (int index = 0; index < normalized.length; index++) {
+            char character = normalized[index];
+            if (!(character.isalnum () || character.isspace () || character == '-' ||
+                  character == '_' || character == ',' || character == '\'')) return null;
+        }
+        return normalized;
+    }
+
+    private static string? safe_font_size (string value) {
+        string normalized = value.strip ();
+        if (normalized.length == 0 || normalized.length > 2) return null;
+        int start = (normalized[0] == '+' || normalized[0] == '-') ? 1 : 0;
+        if (start == normalized.length) return null;
+        for (int index = start; index < normalized.length; index++)
+            if (!normalized[index].isdigit ()) return null;
+        int size = int.parse (normalized.substring (start));
+        return size >= 1 && size <= 7 ? normalized : null;
+    }
+
     private static bool discard_with_contents (string name, bool full_html_formatting) {
         switch (name) {
         case "style": return !full_html_formatting;
@@ -256,9 +345,9 @@ public class HtmlSanitizer : Object {
         switch (name) {
         case "a": case "abbr": case "address": case "article": case "aside":
         case "b": case "bdi": case "bdo": case "blockquote": case "br": case "caption":
-        case "cite": case "code": case "col": case "colgroup": case "dd": case "del":
+        case "center": case "cite": case "code": case "col": case "colgroup": case "dd": case "del":
         case "details": case "dfn": case "div": case "dl": case "dt": case "em":
-        case "figcaption": case "figure": case "footer": case "h1": case "h2": case "h3":
+        case "figcaption": case "figure": case "font": case "footer": case "h1": case "h2": case "h3":
         case "h4": case "h5": case "h6": case "header": case "hr": case "i": case "img":
         case "ins": case "kbd": case "li": case "main": case "mark": case "ol": case "p":
         case "pre": case "q": case "s": case "samp": case "section": case "small":

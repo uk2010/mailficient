@@ -28,6 +28,11 @@ public class ComposeWindow : Adw.Window {
     private Adw.ToastOverlay overlay = new Adw.ToastOverlay ();
     private uint autosave_source;
     private bool force_close;
+    // Draft.dirty tracks persistence/synchronization. These two fields track
+    // this editor session so an untouched new reply/forward can close without
+    // asking to save automatically prepared content.
+    private bool opened_saved_draft;
+    private bool changed_by_user;
     private Gtk.Button send_button;
     private Gtk.Button send_later_button;
     private Gtk.Button cancel_button;
@@ -36,6 +41,11 @@ public class ComposeWindow : Adw.Window {
     private Gtk.Button attach_button;
     private Gtk.Button spellcheck_button;
     private Gtk.Button security_button;
+    private Gtk.ToggleButton bold_button;
+    private Gtk.ToggleButton italic_button;
+    private Gtk.ToggleButton underline_button;
+    private Gtk.Label draft_status_label = new Gtk.Label ("");
+    private SimpleActionGroup compose_actions = new SimpleActionGroup ();
     private Gtk.Box bottom_actions;
     private Gtk.Box outbox_status_container = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
     private Gtk.Widget from_selector;
@@ -63,6 +73,12 @@ public class ComposeWindow : Adw.Window {
     private Cancellable spelling_cancellable = new Cancellable ();
     private uint spellcheck_source;
     private uint spellcheck_generation;
+    private SimpleActionGroup spelling_actions = new SimpleActionGroup ();
+    private Menu spelling_context_menu = new Menu ();
+    private Gtk.TextMark? context_spelling_start;
+    private Gtk.TextMark? context_spelling_end;
+    private string context_spelling_word = "";
+    private Gee.ArrayList<string> context_spelling_suggestions = new Gee.ArrayList<string> ();
 
     public ComposeWindow (Gtk.Window parent, CacheDatabase cache, AttachmentService attachment_service,
                           ReceivedAttachmentService received_attachment_service,
@@ -94,6 +110,7 @@ public class ComposeWindow : Adw.Window {
         this.outbound_service = outbound_service;
         this.settings = settings;
         this.signatures = new SignatureService (settings);
+        opened_saved_draft = saved_draft != null;
         draft = saved_draft ?? new Draft (source_message == null || source_message.account_id == "" ? "demo-account" : source_message.account_id);
         if (queued) {
             try { queued_item = cache.find_outbox_item (draft.id); }
@@ -101,7 +118,16 @@ public class ComposeWindow : Adw.Window {
         }
         var toolbar = new Adw.ToolbarView ();
         var header = new Adw.HeaderBar ();
-        cancel_button = new Gtk.Button.with_label ("Cancel"); cancel_button.clicked.connect (() => confirm_close.begin ()); header.pack_start (cancel_button);
+        var title_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        var title_label = new Gtk.Label ("");
+        title_label.add_css_class ("heading");
+        bind_property ("title", title_label, "label", BindingFlags.SYNC_CREATE);
+        draft_status_label.add_css_class ("caption");
+        draft_status_label.add_css_class ("dim-label");
+        draft_status_label.visible = false;
+        title_box.append (title_label); title_box.append (draft_status_label);
+        header.title_widget = title_box;
+        cancel_button = new Gtk.Button.with_label ("Cancel"); cancel_button.clicked.connect (request_close); header.pack_start (cancel_button);
         if (queued_item != null && queued_item.delivery_state != OutboxDeliveryState.ACCEPTED &&
             queued_item.delivery_state != OutboxDeliveryState.PREPARING) {
             delete_queued_button = new Gtk.Button.with_label ("Delete");
@@ -117,9 +143,14 @@ public class ComposeWindow : Adw.Window {
         Accessibility.label (undo_send_button, "Undo Send and keep editing");
         undo_send_button.clicked.connect (undo_send); undo_send_button.visible = false;
         header.pack_start (undo_send_button);
-        send_button = new Gtk.Button.with_label ("Send"); send_button.add_css_class ("compose-send-button"); send_button.clicked.connect (() => send_message.begin ()); header.pack_end (send_button);
-        send_later_button = new Gtk.Button.from_icon_name ("alarm-symbolic"); send_later_button.tooltip_text = "Send later";
-        Accessibility.label (send_later_button, "Schedule message to send later");
+        send_button = new Gtk.Button.with_label ("Send");
+        send_button.add_css_class ("suggested-action");
+        send_button.tooltip_text = "Send message (Ctrl+Enter)";
+        Accessibility.label (send_button, "Send message");
+        send_button.clicked.connect (() => send_message.begin ()); header.pack_end (send_button);
+        send_later_button = new Gtk.Button.with_label ("Send Later…");
+        send_later_button.tooltip_text = "Choose a date and time to send";
+        Accessibility.label (send_later_button, "Choose a date and time to send this message");
         send_later_button.clicked.connect (() => schedule_send.begin ()); header.pack_end (send_later_button);
         toolbar.add_top_bar (header);
         var root = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
@@ -129,6 +160,9 @@ public class ComposeWindow : Adw.Window {
         from_selector = build_from_selector ();
         var compose_header = new ComposeHeader (from_selector, to_entry, cc_entry, bcc_entry, subject_entry);
         compose_header.contacts_requested.connect (show_contacts);
+        configure_recipient_entry (to_entry, "Add one or more recipients", true);
+        configure_recipient_entry (cc_entry, "Add carbon-copy recipients", false);
+        configure_recipient_entry (bcc_entry, "Add blind-copy recipients", false);
         root.append (compose_header);
         root.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
 #if HAVE_ADDRESS_BOOK
@@ -141,12 +175,20 @@ public class ComposeWindow : Adw.Window {
         RichTextBuffer.prepare (body.buffer);
         spelling_tag.underline = Pango.Underline.ERROR;
         body.buffer.tag_table.add (spelling_tag);
+        install_spelling_context_menu ();
         // Keep the compose form keyboard-navigable. Gtk.TextView normally
         // consumes Tab as text, which traps focus in the message body; Ctrl+Tab
         // remains available when a literal tab is intentionally needed.
         var body_key_controller = new Gtk.EventControllerKey ();
         body_key_controller.propagation_phase = Gtk.PropagationPhase.CAPTURE;
         body_key_controller.key_pressed.connect ((keyval, keycode, state) => {
+            if (keyval == Gdk.Key.Menu ||
+                (keyval == Gdk.Key.F10 && (state & Gdk.ModifierType.SHIFT_MASK) != 0)) {
+                prepare_keyboard_spelling_context ();
+                // GtkTextView owns the platform menu binding; returning false
+                // lets it open the native menu with our spelling section.
+                return false;
+            }
             if (keyval != Gdk.Key.Tab && keyval != Gdk.Key.ISO_Left_Tab) return false;
             if ((state & Gdk.ModifierType.CONTROL_MASK) != 0 && body.editable) {
                 body.buffer.insert_at_cursor ("\t", 1);
@@ -169,37 +211,37 @@ public class ComposeWindow : Adw.Window {
         root.append (attachment_rows);
         bottom_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6); bottom_actions.add_css_class ("compose-actions");
         bottom_actions.set_margin_start (12); bottom_actions.set_margin_end (12); bottom_actions.set_margin_top (8); bottom_actions.set_margin_bottom (10);
-        attach_button = new Gtk.Button.from_icon_name ("mail-attachment-symbolic"); attach_button.tooltip_text = "Attach files"; Accessibility.label (attach_button, "Attach files"); attach_button.clicked.connect (() => choose_attachments.begin ()); bottom_actions.append (attach_button);
+        var content_group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        content_group.add_css_class ("linked");
+        attach_button = new Gtk.Button.from_icon_name ("mail-attachment-symbolic"); attach_button.tooltip_text = "Attach files"; Accessibility.label (attach_button, "Attach files"); attach_button.clicked.connect (() => choose_attachments.begin ()); content_group.append (attach_button);
         var image_button = new Gtk.Button.from_icon_name ("insert-image-symbolic"); image_button.tooltip_text = "Insert image";
-        Accessibility.label (image_button, "Insert inline image"); image_button.clicked.connect (() => choose_inline_image.begin ()); bottom_actions.append (image_button);
+        Accessibility.label (image_button, "Insert inline image"); image_button.clicked.connect (() => choose_inline_image.begin ()); content_group.append (image_button);
+        bottom_actions.append (content_group);
+
+        var format_group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        format_group.add_css_class ("linked");
+        bold_button = format_toggle_button ("format-text-bold-symbolic", "Bold", RichTextBuffer.BOLD);
+        italic_button = format_toggle_button ("format-text-italic-symbolic", "Italic", RichTextBuffer.ITALIC);
+        underline_button = format_toggle_button ("format-text-underline-symbolic", "Underline", RichTextBuffer.UNDERLINE);
+        format_group.append (bold_button); format_group.append (italic_button); format_group.append (underline_button);
+        var link = new Gtk.Button.from_icon_name ("insert-link-symbolic"); link.tooltip_text = "Insert link";
+        Accessibility.label (link, "Insert link"); link.clicked.connect (() => insert_link.begin ()); format_group.append (link);
+        bottom_actions.append (format_group);
+
+        var flexible_space = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        flexible_space.hexpand = true; bottom_actions.append (flexible_space);
+        var utility_group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        utility_group.add_css_class ("linked");
         spellcheck_button = new Gtk.Button.from_icon_name ("tools-check-spelling-symbolic");
         spellcheck_button.tooltip_text = "Check spelling";
         Accessibility.label (spellcheck_button, "Check spelling");
         spellcheck_button.clicked.connect (() => show_spelling_dialog.begin ());
-        bottom_actions.append (spellcheck_button);
-        bottom_actions.append (format_button ("format-text-bold-symbolic", "Bold", RichTextBuffer.BOLD));
-        bottom_actions.append (format_button ("format-text-italic-symbolic", "Italic", RichTextBuffer.ITALIC));
-        bottom_actions.append (format_button ("format-text-underline-symbolic", "Underline", RichTextBuffer.UNDERLINE));
-        bottom_actions.append (format_button ("format-text-strikethrough-symbolic", "Strikethrough", RichTextBuffer.STRIKETHROUGH));
-        bottom_actions.append (format_button ("applications-engineering-symbolic", "Code", RichTextBuffer.CODE));
-        var link = new Gtk.Button.from_icon_name ("insert-link-symbolic"); link.tooltip_text = "Insert link";
-        Accessibility.label (link, "Insert link"); link.clicked.connect (() => insert_link.begin ()); bottom_actions.append (link);
-        var bullets = new Gtk.Button.from_icon_name ("view-list-bullet-symbolic"); bullets.tooltip_text = "Bulleted list";
-        Accessibility.label (bullets, "Create bulleted list"); bullets.clicked.connect (() => apply_list (false)); bottom_actions.append (bullets);
-        var numbers = new Gtk.Button.from_icon_name ("view-list-ordered-symbolic"); numbers.tooltip_text = "Numbered list";
-        Accessibility.label (numbers, "Create numbered list"); numbers.clicked.connect (() => apply_list (true)); bottom_actions.append (numbers);
-        var insert_template_button = new Gtk.Button.from_icon_name ("document-open-symbolic"); insert_template_button.tooltip_text = "Insert template";
-        Accessibility.label (insert_template_button, "Insert message template"); insert_template_button.clicked.connect (() => insert_template.begin ()); bottom_actions.append (insert_template_button);
-        var save_template_button = new Gtk.Button.from_icon_name ("document-save-symbolic"); save_template_button.tooltip_text = "Save as template";
-        Accessibility.label (save_template_button, "Save message as template"); save_template_button.clicked.connect (() => save_as_template.begin ()); bottom_actions.append (save_template_button);
-        var signature_button = new Gtk.Button.from_icon_name ("insert-text-symbolic");
-        signature_button.tooltip_text = "Insert signature";
-        Accessibility.label (signature_button, "Insert signature");
-        signature_button.clicked.connect (insert_signature);
-        bottom_actions.append (signature_button);
+        utility_group.append (spellcheck_button);
         security_button = new Gtk.Button.from_icon_name ("channel-insecure-symbolic");
         Accessibility.label (security_button, "Message signing and encryption");
-        security_button.clicked.connect (() => configure_security.begin ()); bottom_actions.append (security_button);
+        security_button.clicked.connect (() => configure_security.begin ()); utility_group.append (security_button);
+        utility_group.append (build_compose_overflow_button ());
+        bottom_actions.append (utility_group);
         root.append (bottom_actions); toolbar.set_content (root); overlay.set_child (toolbar); content = overlay;
 
         if (saved_draft != null) populate_draft ();
@@ -212,9 +254,14 @@ public class ComposeWindow : Adw.Window {
                 apply_signature_setting ();
             if (key == "spellcheck-enabled") schedule_spellcheck ();
         });
-        to_entry.changed.connect (schedule_autosave); cc_entry.changed.connect (schedule_autosave); bcc_entry.changed.connect (schedule_autosave);
-        subject_entry.changed.connect (schedule_autosave);
-        body.buffer.changed.connect (() => { schedule_autosave (); schedule_spellcheck (); });
+        to_entry.changed.connect (edited_by_user); cc_entry.changed.connect (edited_by_user); bcc_entry.changed.connect (edited_by_user);
+        subject_entry.changed.connect (edited_by_user);
+        body.buffer.changed.connect (() => { edited_by_user (); schedule_spellcheck (); });
+        body.buffer.mark_set.connect ((location, mark) => {
+            if (mark == body.buffer.get_insert () ||
+                mark == body.buffer.get_selection_bound ())
+                update_format_controls ();
+        });
         // GtkShortcutAction on Ctrl+Return can re-enter GTK's active focus
         // traversal on some GTK 4/X11 combinations. Handle the completed key
         // gesture instead, then begin the transition after key dispatch has
@@ -282,6 +329,9 @@ public class ComposeWindow : Adw.Window {
         configure_outbox_state ();
         update_security_button ();
         schedule_spellcheck ();
+        update_format_controls ();
+        if (saved_draft != null && queued_item == null)
+            set_draft_status ("Draft saved");
     }
 
     private void update_compose_palette (bool dark) {
@@ -296,8 +346,10 @@ public class ComposeWindow : Adw.Window {
         spelling_cancellable.cancel ();
         spelling_cancellable = new Cancellable ();
         spellcheck_generation++;
+        clear_spelling_context ();
+        spelling_issues.clear ();
+        clear_spelling_marks ();
         if (!settings.spellcheck_enabled) {
-            spelling_issues.clear (); clear_spelling_marks ();
             spellcheck_button.tooltip_text = "Spell checking is off";
             Accessibility.label (spellcheck_button, "Spell checking is off");
             return;
@@ -314,6 +366,7 @@ public class ComposeWindow : Adw.Window {
         try {
             var issues = yield spell_checker.check (body.buffer.text, cancellable);
             if (cancellable.is_cancelled () || generation != spellcheck_generation) return;
+            clear_spelling_context ();
             spelling_issues = issues; clear_spelling_marks ();
             foreach (var issue in spelling_issues) {
                 Gtk.TextIter start; Gtk.TextIter end;
@@ -338,11 +391,152 @@ public class ComposeWindow : Adw.Window {
         body.buffer.remove_tag (spelling_tag, start, end);
     }
 
+    private void install_spelling_context_menu () {
+        var replace = new SimpleAction ("replace", VariantType.STRING);
+        replace.activate.connect ((parameter) => {
+            if (parameter != null) replace_context_spelling (parameter.get_string ());
+        });
+        spelling_actions.add_action (replace);
+        var ignore = new SimpleAction ("ignore", null);
+        ignore.activate.connect (() => {
+            Gtk.TextIter start; Gtk.TextIter end;
+            if (!resolve_spelling_context (out start, out end)) {
+                clear_spelling_context (); return;
+            }
+            string word = context_spelling_word;
+            clear_spelling_context ();
+            spell_checker.ignore (word);
+            schedule_spellcheck ();
+            body.grab_focus ();
+        });
+        spelling_actions.add_action (ignore);
+        var no_suggestions = new SimpleAction ("no-suggestions", null);
+        no_suggestions.set_enabled (false);
+        spelling_actions.add_action (no_suggestions);
+        body.insert_action_group ("spell", spelling_actions);
+        body.extra_menu = spelling_context_menu;
+
+        // GtkTextView owns Cut/Copy/Paste and the rest of its normal context
+        // menu. extra_menu is merged into that menu, so spelling corrections
+        // augment the standard actions instead of replacing them.
+        var context_click = new Gtk.GestureClick ();
+        context_click.button = 0;
+        context_click.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        context_click.pressed.connect ((count, x, y) => {
+            var event = context_click.get_current_event ();
+            if (event == null || !event.triggers_context_menu ()) return;
+            int buffer_x; int buffer_y;
+            body.window_to_buffer_coords (Gtk.TextWindowType.WIDGET,
+                (int) x, (int) y, out buffer_x, out buffer_y);
+            Gtk.TextIter location; int trailing;
+            if (body.get_iter_at_position (out location, out trailing, buffer_x, buffer_y))
+                update_spelling_context (location.get_offset (), false);
+            else clear_spelling_context ();
+        });
+        body.add_controller (context_click);
+    }
+
+    private void prepare_keyboard_spelling_context () {
+        int offset = body.buffer.cursor_position;
+        Gtk.TextIter selection_start; Gtk.TextIter selection_end;
+        if (body.buffer.get_selection_bounds (out selection_start, out selection_end)) {
+            foreach (var issue in spelling_issues) {
+                if (issue.start_offset == selection_start.get_offset () &&
+                    issue.end_offset == selection_end.get_offset ()) {
+                    offset = issue.start_offset;
+                    break;
+                }
+            }
+        }
+        update_spelling_context (offset, true);
+    }
+
+    private void update_spelling_context (int offset, bool accept_trailing_boundary) {
+        SpellingIssue? found = null;
+        foreach (var issue in spelling_issues) {
+            if (issue.start_offset <= offset && offset < issue.end_offset) {
+                found = issue; break;
+            }
+        }
+        // The insertion cursor naturally sits after a word. Pointer targeting
+        // remains half-open so clicking the next word cannot use the previous
+        // word's correction.
+        if (found == null && accept_trailing_boundary && offset > 0) {
+            foreach (var issue in spelling_issues) {
+                if (issue.end_offset == offset) { found = issue; break; }
+            }
+        }
+        if (found == null) {
+            clear_spelling_context (); return;
+        }
+        clear_spelling_context ();
+        Gtk.TextIter start; Gtk.TextIter end;
+        body.buffer.get_iter_at_offset (out start, found.start_offset);
+        body.buffer.get_iter_at_offset (out end, found.end_offset);
+        context_spelling_start = body.buffer.create_mark (null, start, true);
+        context_spelling_end = body.buffer.create_mark (null, end, false);
+        context_spelling_word = found.word;
+        context_spelling_suggestions.add_all (found.suggestions);
+        var suggestions = new Menu ();
+        if (found.suggestions.size == 0)
+            suggestions.append ("No Suggestions", "spell.no-suggestions");
+        else foreach (var correction in found.suggestions) {
+                var item = new MenuItem (correction, null);
+                item.set_action_and_target_value ("spell.replace", new Variant.string (correction));
+                suggestions.append_item (item);
+            }
+        spelling_context_menu.append_section (
+            "Spelling — “%s”".printf (found.word), suggestions);
+        var controls = new Menu ();
+        controls.append ("Ignore for This Message", "spell.ignore");
+        spelling_context_menu.append_section (null, controls);
+    }
+
+    private void clear_spelling_context () {
+        if (context_spelling_start != null)
+            body.buffer.delete_mark (context_spelling_start);
+        if (context_spelling_end != null)
+            body.buffer.delete_mark (context_spelling_end);
+        context_spelling_start = null;
+        context_spelling_end = null;
+        context_spelling_word = "";
+        context_spelling_suggestions.clear ();
+        spelling_context_menu.remove_all ();
+    }
+
+    private bool resolve_spelling_context (out Gtk.TextIter start,
+                                           out Gtk.TextIter end) {
+        body.buffer.get_start_iter (out start);
+        end = start;
+        if (!settings.spellcheck_enabled || !body.editable ||
+            context_spelling_start == null || context_spelling_end == null ||
+            context_spelling_word == "") return false;
+        body.buffer.get_iter_at_mark (out start, context_spelling_start);
+        body.buffer.get_iter_at_mark (out end, context_spelling_end);
+        return start.compare (end) < 0 &&
+            body.buffer.get_text (start, end, true) == context_spelling_word;
+    }
+
+    private void replace_context_spelling (string correction) {
+        Gtk.TextIter start; Gtk.TextIter end;
+        body.buffer.get_start_iter (out start);
+        end = start;
+        if (correction.strip () == "" ||
+            !context_spelling_suggestions.contains (correction) ||
+            !resolve_spelling_context (out start, out end)) {
+            clear_spelling_context (); schedule_spellcheck (); return;
+        }
+        clear_spelling_context ();
+        RichTextBuffer.replace_preserving_format (body.buffer, start, end, correction);
+        body.grab_focus ();
+    }
+
     private void cancel_spellcheck () {
         if (spellcheck_source != 0) {
             Source.remove (spellcheck_source); spellcheck_source = 0;
         }
         spellcheck_generation++; spelling_cancellable.cancel ();
+        clear_spelling_context ();
     }
 
     private async void show_spelling_dialog () {
@@ -392,8 +586,12 @@ public class ComposeWindow : Adw.Window {
         Gtk.TextIter start; Gtk.TextIter end;
         body.buffer.get_iter_at_offset (out start, issue.start_offset);
         body.buffer.get_iter_at_offset (out end, issue.end_offset);
-        body.buffer.delete (ref start, ref end);
-        body.buffer.insert (ref start, issue.suggestions[(int) suggestions_row.selected], -1);
+        if (body.buffer.get_text (start, end, true) != issue.word) {
+            schedule_spellcheck ();
+            return;
+        }
+        RichTextBuffer.replace_preserving_format (body.buffer, start, end,
+            issue.suggestions[(int) suggestions_row.selected]);
         body.grab_focus ();
     }
 
@@ -419,6 +617,10 @@ public class ComposeWindow : Adw.Window {
             return false;
         }
         confirm_close.begin (); return true;
+    }
+
+    internal void request_close () {
+        confirm_close.begin ();
     }
 
     private void populate_draft () {
@@ -457,9 +659,14 @@ public class ComposeWindow : Adw.Window {
         if ((sign.active || encrypt.active) && selected_protocol == MessageSecurityProtocol.NONE) {
             overlay.add_toast (new Adw.Toast ("Choose OpenPGP or S/MIME to secure the message.")); return;
         }
+        string selected_identity = identity.text.strip ();
+        bool changed = draft.security_protocol != selected_protocol ||
+            draft.sign_message != sign.active || draft.encrypt_message != encrypt.active ||
+            draft.security_identity != selected_identity;
         draft.security_protocol = selected_protocol; draft.sign_message = sign.active;
-        draft.encrypt_message = encrypt.active; draft.security_identity = identity.text.strip ();
-        draft.touch (); schedule_autosave (); update_security_button ();
+        draft.encrypt_message = encrypt.active; draft.security_identity = selected_identity;
+        if (changed) { draft.touch (); edited_by_user (); }
+        update_security_button ();
     }
 
     private void update_security_button () {
@@ -474,12 +681,85 @@ public class ComposeWindow : Adw.Window {
         else security_button.tooltip_text = "%s signed".printf (protocol);
     }
 
-    private Gtk.Button format_button (string icon_name, string label, string tag_name) {
-        var button = new Gtk.Button.from_icon_name (icon_name);
-        button.add_css_class ("flat"); button.tooltip_text = "%s selected text".printf (label);
-        Accessibility.label (button, "%s selected text".printf (label));
+    private Gtk.ToggleButton format_toggle_button (string icon_name, string label,
+                                                    string tag_name) {
+        var button = new Gtk.ToggleButton ();
+        button.icon_name = icon_name;
+        button.add_css_class ("flat");
+        button.tooltip_text = "%s selected text".printf (label);
+        Accessibility.label (button, "%s formatting".printf (label));
         button.clicked.connect (() => apply_format (tag_name));
         return button;
+    }
+
+    private Gtk.MenuButton build_compose_overflow_button () {
+        var strikethrough = new SimpleAction ("strikethrough", null);
+        strikethrough.activate.connect (() => apply_format (RichTextBuffer.STRIKETHROUGH));
+        compose_actions.add_action (strikethrough);
+        var code = new SimpleAction ("code", null);
+        code.activate.connect (() => apply_format (RichTextBuffer.CODE));
+        compose_actions.add_action (code);
+        var bullets = new SimpleAction ("bullets", null);
+        bullets.activate.connect (() => apply_list (false));
+        compose_actions.add_action (bullets);
+        var numbers = new SimpleAction ("numbers", null);
+        numbers.activate.connect (() => apply_list (true));
+        compose_actions.add_action (numbers);
+        var insert_template_action = new SimpleAction ("insert-template", null);
+        insert_template_action.activate.connect (() => insert_template.begin ());
+        compose_actions.add_action (insert_template_action);
+        var save_template_action = new SimpleAction ("save-template", null);
+        save_template_action.activate.connect (() => save_as_template.begin ());
+        compose_actions.add_action (save_template_action);
+        var signature = new SimpleAction ("signature", null);
+        signature.activate.connect (insert_signature);
+        compose_actions.add_action (signature);
+        insert_action_group ("compose", compose_actions);
+
+        var formatting = new Menu ();
+        formatting.append ("Strikethrough", "compose.strikethrough");
+        formatting.append ("Code Style", "compose.code");
+        formatting.append ("Bulleted List", "compose.bullets");
+        formatting.append ("Numbered List", "compose.numbers");
+        var reusable_content = new Menu ();
+        reusable_content.append ("Insert Template…", "compose.insert-template");
+        reusable_content.append ("Save as Template…", "compose.save-template");
+        reusable_content.append ("Insert Signature", "compose.signature");
+        var menu = new Menu ();
+        menu.append_section ("More Formatting", formatting);
+        menu.append_section ("Reusable Content", reusable_content);
+
+        var button = new Gtk.MenuButton ();
+        button.icon_name = "view-more-symbolic";
+        button.tooltip_text = "More compose options";
+        Accessibility.label (button, "More compose options");
+        button.menu_model = menu;
+        return button;
+    }
+
+    private bool format_is_active (string tag_name) {
+        var tag = body.buffer.tag_table.lookup (tag_name);
+        if (tag == null) return false;
+        Gtk.TextIter start; Gtk.TextIter end;
+        if (body.buffer.get_selection_bounds (out start, out end)) {
+            Gtk.TextIter cursor = start;
+            while (cursor.compare (end) < 0) {
+                if (!cursor.has_tag (tag)) return false;
+                if (!cursor.forward_char ()) break;
+            }
+            return start.compare (end) < 0;
+        }
+        body.buffer.get_iter_at_mark (out start, body.buffer.get_insert ());
+        if (start.has_tag (tag)) return true;
+        if (start.get_offset () == 0) return false;
+        start.backward_char ();
+        return start.has_tag (tag);
+    }
+
+    private void update_format_controls () {
+        bold_button.active = format_is_active (RichTextBuffer.BOLD);
+        italic_button.active = format_is_active (RichTextBuffer.ITALIC);
+        underline_button.active = format_is_active (RichTextBuffer.UNDERLINE);
     }
 
     private Gtk.Shortcut format_shortcut (string trigger, string tag_name) {
@@ -491,14 +771,15 @@ public class ComposeWindow : Adw.Window {
         if (!RichTextBuffer.toggle_selection (body.buffer, tag_name)) {
             overlay.add_toast (new Adw.Toast ("Select text to apply formatting."));
             body.grab_focus ();
+            update_format_controls ();
             return;
         }
-        update_draft (); schedule_autosave (); body.grab_focus ();
+        update_draft (); edited_by_user (); body.grab_focus (); update_format_controls ();
     }
 
     private void apply_list (bool ordered) {
         RichTextBuffer.prefix_lines (body.buffer, ordered);
-        update_draft (); schedule_autosave (); body.grab_focus ();
+        update_draft (); edited_by_user (); body.grab_focus ();
     }
 
     private async void insert_link () {
@@ -523,6 +804,46 @@ public class ComposeWindow : Adw.Window {
         schedule_autosave (); body.grab_focus ();
     }
 
+    private void configure_recipient_entry (Gtk.Entry entry, string placeholder,
+                                            bool required) {
+        entry.placeholder_text = placeholder;
+        string guidance = required ?
+            "Enter at least one email address. Separate multiple recipients with commas." :
+            "Separate multiple email addresses with commas.";
+        entry.tooltip_text = guidance;
+        Accessibility.description (entry, guidance);
+        entry.changed.connect (() => {
+            entry.remove_css_class ("error");
+            entry.tooltip_text = guidance;
+            Accessibility.description (entry, guidance);
+        });
+        entry.notify["has-focus"].connect (() => {
+            if (!entry.has_focus) validate_recipient_entry (entry, required, guidance);
+        });
+    }
+
+    private void validate_recipient_entry (Gtk.Entry entry, bool required,
+                                           string guidance) {
+        if (!required && entry.text.strip () == "") {
+            entry.remove_css_class ("error");
+            entry.tooltip_text = guidance;
+            Accessibility.description (entry, guidance);
+            return;
+        }
+        try {
+            var recipients = RecipientParser.parse (entry.text);
+            string status = recipients.size == 1 ? "1 valid recipient" :
+                "%d valid recipients".printf (recipients.size);
+            entry.remove_css_class ("error");
+            entry.tooltip_text = status;
+            Accessibility.description (entry, status);
+        } catch (Error error) {
+            entry.add_css_class ("error");
+            entry.tooltip_text = error.message;
+            Accessibility.description (entry, error.message);
+        }
+    }
+
     private Gtk.Widget build_from_selector () {
         var labels = new Gtk.StringList (null);
         var ids = new Gee.ArrayList<string> ();
@@ -544,7 +865,7 @@ public class ComposeWindow : Adw.Window {
                     completion.account_id = draft.account_id; completion.refresh ();
                 }
                 if (signature_initialized) replace_signature_for_account ();
-                draft.touch (); schedule_autosave ();
+                draft.touch (); edited_by_user ();
             }
         });
         return selector;
@@ -689,11 +1010,20 @@ public class ComposeWindow : Adw.Window {
             try {
                 var copy = yield received_attachment_service.copy_for_draft (
                     source, attachment, attachment_operations);
+                if (force_close) {
+                    try { attachment_service.remove_private_copy (copy); }
+                    catch (Error cleanup_error) {
+                        warning ("Closed response attachment cleanup remains pending: %s",
+                            cleanup_error.message);
+                    }
+                    break;
+                }
                 draft.add_attachment (copy); render_attachments ();
             } catch (Error error) {
                 if (!(error is IOError.CANCELLED) && !(error is MailError.CANCELLED)) failures++;
             }
         }
+        if (force_close) return;
         importing_forward_attachments = false;
         forward_spinner.stop (); forward_status.visible = false;
         if (!sending) send_button.sensitive = true;
@@ -720,29 +1050,42 @@ public class ComposeWindow : Adw.Window {
 
     private async void choose_attachments () {
         var dialog = new Gtk.FileDialog (); dialog.title = "Attach Files";
+        dialog.initial_folder = settings.file_dialog_initial_folder ();
         try {
             var files = yield dialog.open_multiple (this, attachment_operations);
+            var first = files.get_item (0) as File;
+            if (first != null) settings.remember_file_dialog_selection (first);
             for (uint index = 0; index < files.get_n_items (); index++) {
                 var file = files.get_item (index) as File;
                 if (file != null) yield import_attachment (file);
             }
         } catch (Error error) {
-            if (!(error is IOError.CANCELLED)) show_attachment_error (error);
+            if (!DialogErrors.was_cancelled (error)) show_attachment_error (error);
         }
     }
 
     private async void import_attachment (File file) {
         try {
             var attachment = yield attachment_service.import_file (file, attachment_operations);
-            draft.add_attachment (attachment); render_attachments (); schedule_autosave ();
-        } catch (Error error) { if (!(error is IOError.CANCELLED)) show_attachment_error (error); }
+            if (force_close) {
+                attachment_service.remove_private_copy (attachment);
+                return;
+            }
+            draft.add_attachment (attachment); render_attachments (); edited_by_user ();
+        } catch (Error error) { if (!DialogErrors.was_cancelled (error)) show_attachment_error (error); }
     }
 
     private async void choose_inline_image () {
         var dialog = new Gtk.FileDialog (); dialog.title = "Insert Image";
+        dialog.initial_folder = settings.file_dialog_initial_folder ();
         try {
             var file = yield dialog.open (this, attachment_operations);
+            settings.remember_file_dialog_selection (file);
             var imported = yield attachment_service.import_file (file, attachment_operations);
+            if (force_close) {
+                attachment_service.remove_private_copy (imported);
+                return;
+            }
             if (!imported.content_type.has_prefix ("image/")) {
                 attachment_service.remove_private_copy (imported);
                 overlay.add_toast (new Adw.Toast ("Choose an image file.")); return;
@@ -754,7 +1097,7 @@ public class ComposeWindow : Adw.Window {
             Gtk.TextIter cursor; body.buffer.get_iter_at_mark (out cursor, body.buffer.get_insert ());
             body.buffer.insert (ref cursor, "[Image: %s]".printf (inline.name), -1);
             render_attachments (); schedule_autosave ();
-        } catch (Error error) { if (!(error is IOError.CANCELLED)) show_attachment_error (error); }
+        } catch (Error error) { if (!DialogErrors.was_cancelled (error)) show_attachment_error (error); }
     }
 
     private void render_attachments () {
@@ -792,7 +1135,7 @@ public class ComposeWindow : Adw.Window {
     private void remove_attachment (Attachment attachment) {
         try { attachment_service.remove_private_copy (attachment); }
         catch (Error error) { overlay.add_toast (new Adw.Toast ("The private attachment copy could not be removed.")); return; }
-        draft.remove_attachment (attachment); render_attachments (); schedule_autosave ();
+        draft.remove_attachment (attachment); render_attachments (); edited_by_user ();
     }
 
     private void show_attachment_error (Error error) {
@@ -828,24 +1171,53 @@ public class ComposeWindow : Adw.Window {
         draft.touch ();
     }
 
+    private void edited_by_user () {
+        if (force_close || outbox_read_only) return;
+        changed_by_user = true;
+        schedule_autosave ();
+    }
+
+    private void set_draft_status (string status) {
+        draft_status_label.label = status;
+        draft_status_label.visible = status != "";
+        draft_status_label.tooltip_text = status == "" ? null : status;
+    }
+
     private void schedule_autosave () {
+        if (force_close) return;
         cancel_autosave ();
+        set_draft_status (has_content () ? "Saving…" : "");
         autosave_source = Timeout.add_seconds (2, () => {
             autosave_source = 0;
             try {
-                if (has_content ()) { update_draft (); cache.save_draft (draft); }
+                if (has_content ()) {
+                    update_draft (); cache.save_draft (draft);
+                    set_draft_status ("Draft saved");
+                } else set_draft_status ("");
             }
-            catch (Error error) { overlay.add_toast (new Adw.Toast ("Draft could not be saved. Check local storage and try again.")); }
+            catch (Error error) {
+                set_draft_status ("Draft not saved");
+                overlay.add_toast (new Adw.Toast ("Draft could not be saved. Check local storage and try again."));
+            }
             return Source.REMOVE;
         });
     }
 
     private void save_draft_now () {
+        if (importing_forward_attachments) {
+            overlay.add_toast (new Adw.Toast (
+                "Wait for the forwarded attachments to finish copying."));
+            return;
+        }
         cancel_autosave ();
+        set_draft_status ("Saving…");
         try {
             update_draft (); cache.save_draft (draft); draft_changed ();
+            opened_saved_draft = true; changed_by_user = false;
+            set_draft_status ("Draft saved");
             overlay.add_toast (new Adw.Toast ("Draft saved"));
         } catch (Error error) {
+            set_draft_status ("Draft not saved");
             overlay.add_toast (new Adw.Toast ("Draft could not be saved. Check local storage and try again."));
         }
     }
@@ -1204,6 +1576,24 @@ public class ComposeWindow : Adw.Window {
     private async void confirm_close () {
         if (sending) { overlay.add_toast (new Adw.Toast ("Wait for the current send attempt to finish.")); return; }
         if (outbox_read_only) { force_close = true; close (); return; }
+        if (!changed_by_user) {
+            cancel_autosave ();
+            force_close = true;
+            attachment_operations.cancel ();
+            if (!opened_saved_draft) {
+                try {
+                    draft_lifecycle.discard (draft);
+                } catch (Error error) {
+                    force_close = false;
+                    attachment_operations = new Cancellable ();
+                    overlay.add_toast (new Adw.Toast ("Draft could not be discarded."));
+                    return;
+                }
+                draft_changed ();
+            }
+            close ();
+            return;
+        }
         var dialog = new Adw.AlertDialog ("Save this draft?", "You can reopen saved drafts from the Drafts mailbox.");
         dialog.add_response ("cancel", "Keep Editing"); dialog.add_response ("discard", "Discard"); dialog.add_response ("save", "Save Draft");
         dialog.close_response = "cancel"; dialog.default_response = "save";
@@ -1211,17 +1601,34 @@ public class ComposeWindow : Adw.Window {
         dialog.set_response_appearance ("save", Adw.ResponseAppearance.SUGGESTED);
         string response = yield dialog.choose (this, null);
         if (response == "save") {
+            if (importing_forward_attachments) {
+                overlay.add_toast (new Adw.Toast (
+                    "Wait for the forwarded attachments to finish copying, then save again."));
+                return;
+            }
             cancel_autosave ();
+            force_close = true;
+            attachment_operations.cancel ();
             try { update_draft (); cache.save_draft (draft); }
-            catch (Error error) { overlay.add_toast (new Adw.Toast ("Draft could not be saved. Check local storage and try again.")); return; }
-            draft_changed (); force_close = true; attachment_operations.cancel (); close (); return;
+            catch (Error error) {
+                force_close = false;
+                attachment_operations = new Cancellable ();
+                overlay.add_toast (new Adw.Toast ("Draft could not be saved. Check local storage and try again."));
+                return;
+            }
+            draft_changed (); close (); return;
         }
         if (response == "discard") {
-            cancel_autosave (); attachment_operations.cancel ();
+            cancel_autosave (); force_close = true; attachment_operations.cancel ();
             try {
                 draft_lifecycle.discard (draft);
-            } catch (Error error) { overlay.add_toast (new Adw.Toast ("Draft could not be discarded.")); return; }
-            draft_changed (); force_close = true; close ();
+            } catch (Error error) {
+                force_close = false;
+                attachment_operations = new Cancellable ();
+                overlay.add_toast (new Adw.Toast ("Draft could not be discarded."));
+                return;
+            }
+            draft_changed (); close ();
         }
     }
 }

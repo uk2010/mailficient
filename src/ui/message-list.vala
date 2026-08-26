@@ -26,6 +26,8 @@ public class MessageList : Gtk.Box {
     private string mailbox_name = "Inbox";
     private Gtk.Stack list_stack = new Gtk.Stack ();
     private Gee.HashMap<string, MessageRow> bound_rows = new Gee.HashMap<string, MessageRow> ();
+    private bool suppress_unread_filter_reload;
+    private bool refresh_deferred_until_shown;
 
     public MessageList (MailRepository repository, MailSearchService search_service) {
         Object (orientation: Gtk.Orientation.VERTICAL);
@@ -43,7 +45,10 @@ public class MessageList : Gtk.Box {
         unread_filter.icon_name = "mail-unread-symbolic";
         unread_filter.tooltip_text = "Show unread messages only";
         Accessibility.label (unread_filter, "Show unread messages only");
-        unread_filter.toggled.connect (() => reload ()); header.append (unread_filter);
+        unread_filter.toggled.connect (() => {
+            if (!suppress_unread_filter_reload) reload ();
+        });
+        header.append (unread_filter);
         select_multiple.icon_name = "object-select-symbolic";
         select_multiple.tooltip_text = "Select multiple messages (Shift-click for a range, Ctrl+A for all)";
         Accessibility.label (select_multiple, "Select multiple messages");
@@ -83,7 +88,7 @@ public class MessageList : Gtk.Box {
             var item = object as Gtk.ListItem;
             var message = item == null ? null : item.item as Message;
             if (item == null || message == null) return;
-            var row = new MessageRow (message, selection, item.position,
+            var row = new MessageRow (message, selection, item,
                 select_multiple.active);
             row.reopen_requested.connect ((reopened) => message_selected (reopened));
             bound_rows[message.id] = row;
@@ -113,16 +118,36 @@ public class MessageList : Gtk.Box {
         int64 started = DebugTrace.mark ();
         bool already_loaded = mailbox_loaded && mailbox_id == mailbox.id && query == "" &&
             !unread_filter.active;
+        bool refresh_when_shown = already_loaded && refresh_deferred_until_shown;
         DebugTrace.log ("message-list", "show_mailbox begin mailbox=%s old=%s already_loaded=%s".printf (
             mailbox.id, mailbox_id, already_loaded.to_string ()));
         mailbox_id = mailbox.id; mailbox_name = mailbox.name; mailbox_title.label = mailbox.name;
         query = "";
-        if (unread_filter.active) unread_filter.active = false;
+        if (unread_filter.active) {
+            suppress_unread_filter_reload = true;
+            unread_filter.active = false;
+            suppress_unread_filter_reload = false;
+        }
         if (already_loaded) {
-            content_stack.visible_child_name = model != null && model.get_n_items () > 0 ? "messages" : "empty";
+            bool has_messages = model != null && model.get_n_items () > 0;
+            content_stack.visible_child_name = has_messages ? "messages" : "empty";
+            // Keep the reader in step even when the empty model was already
+            // loaded. A fresh reload emits this from reload(); the cached path
+            // must provide the same contract exactly once.
+            if (!has_messages) no_messages ();
+            if (refresh_when_shown) {
+                refresh_deferred_until_shown = false;
+                // Paint the retained row/reader immediately, then rebuild from
+                // the current cache after the task-to-mail switch completes.
+                Idle.add (() => {
+                    refresh_preserving_selection ();
+                    return Source.REMOVE;
+                });
+            }
             DebugTrace.duration ("message-list", "show_mailbox cached_complete", started);
             return;
         }
+        refresh_deferred_until_shown = false;
         reload (false);
         DebugTrace.duration ("message-list", "show_mailbox complete", started);
     }
@@ -144,6 +169,13 @@ public class MessageList : Gtk.Box {
     public void invalidate_cached_views () { }
     public void invalidate_cached_view (string id) { }
     public void invalidate_current_view () { }
+
+    public void defer_refresh_until_shown () {
+        // Background mail can arrive while Today or Planned owns the
+        // workspace. Avoid rebuilding the hidden Gtk.ListView; show_mailbox()
+        // consumes this marker and reloads once when mail becomes visible.
+        refresh_deferred_until_shown = true;
+    }
 
     public void mark_current_view_clean () {
         // The active model is already authoritative; inactive mailbox models
@@ -169,7 +201,17 @@ public class MessageList : Gtk.Box {
             var selected = selected_messages ();
             var removed_ids = new Gee.ArrayList<string> ();
             foreach (var message in selected) removed_ids.add (message.id);
-            if (removed_ids.size > 0 && model.remove_messages (removed_ids) == removed_ids.size) {
+            // Gtk.MultiSelection adjusts its bitset while ListModel emits
+            // items-changed. Suppress that intermediate state and clear it
+            // explicitly so the caller's replacement selection starts from
+            // exactly zero rows, even after a range removal.
+            bool was_suppressed = suppress_selection;
+            suppress_selection = true;
+            bool removed_in_place = removed_ids.size > 0 &&
+                model.remove_messages (removed_ids) == removed_ids.size;
+            if (removed_in_place && selection != null) selection.unselect_all ();
+            suppress_selection = was_suppressed;
+            if (removed_in_place) {
                 int remaining = (int) model.get_n_items ();
                 message_count.label = remaining == 1 ? "1 message" : "%d messages".printf (remaining);
                 mark_current_view_clean ();
@@ -193,14 +235,25 @@ public class MessageList : Gtk.Box {
     }
     public void set_sort (MessageSortMode mode) { sort_mode = mode; reload (true, false, "", true); }
 
-    public void mark_read_in_place (string id) {
+    public void set_read_in_place (string id, bool read) {
         var row = bound_rows[id];
-        if (row != null) row.mark_read_in_place ();
-        if (model == null) return;
-        for (uint position = 0; position < model.get_n_items (); position++) {
-            var message = model.get_item (position) as Message;
-            if (message != null && message.id == id) message.unread = false;
-        }
+        if (row != null) row.set_read_in_place (read);
+        if (model != null) model.set_cached_read_state (id, read);
+    }
+
+    public void set_flag_in_place (string id, bool flagged, string color = "") {
+        var row = bound_rows[id];
+        if (row != null) row.set_flag_in_place (flagged, color);
+        if (model != null) model.set_cached_flag_state (id, flagged, color);
+    }
+
+    public bool remove_unflagged_messages (Gee.Collection<string> ids) {
+        if (mailbox_id != "unified-flagged" && mailbox_id != "flagged") return false;
+        if (model == null || ids.size == 0 || model.remove_messages (ids) != ids.size) return false;
+        int remaining = (int) model.get_n_items ();
+        message_count.label = remaining == 1 ? "1 message" : "%d messages".printf (remaining);
+        if (remaining == 0) no_messages ();
+        return true;
     }
 
     public Message? first_message () {
@@ -297,6 +350,23 @@ public class MessageList : Gtk.Box {
     }
 
     public void finish_bulk_action () { select_multiple.active = false; }
+
+    internal void qa_assert_single_selection () {
+        var selected = selected_messages ();
+        if (selected.size != 1)
+            critical ("Removal selection QA expected one selected message, found %d",
+                selected.size);
+        int highlighted = 0;
+        foreach (var row in bound_rows.values) {
+            if (!row.qa_selection_style_matches ())
+                critical ("Removal selection QA found stale row styling for %s",
+                    row.message.id);
+            if (row.qa_has_selection_style ()) highlighted++;
+        }
+        if (highlighted != 1)
+            critical ("Removal selection QA expected one highlighted row, found %d",
+                highlighted);
+    }
 
     private void reload (bool notify_selection = true, bool preserve_selection = false,
                          string preferred_id = "", bool force_reload = false) {

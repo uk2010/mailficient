@@ -3,74 +3,118 @@ public class MessageRow : Gtk.Box {
     public signal void reopen_requested (Message message);
     public Message message { get; construct; }
     private weak Gtk.SelectionModel? context_selection;
-    private uint model_position;
+    // Gtk.ListView keeps a ListItem bound while rows before it are removed,
+    // and updates ListItem.position in place.  Keeping a numeric copy here
+    // leaves selection styling attached to the row's old position.
+    private weak Gtk.ListItem? context_item;
     private ulong selection_handler;
+    private ulong position_handler;
     private ulong unread_handler;
+    private ulong flagged_handler;
+    private ulong flag_color_handler;
     private MenuItem? read_menu_item;
     private Gtk.Widget? unread_dot;
+    private Gtk.Image? flag_icon;
+    private Gtk.CheckButton? selection_checkbox;
+    private bool syncing_selection_checkbox;
 
     public MessageRow (Message message, Gtk.SelectionModel? context_selection = null,
-                       uint model_position = 0, bool multiple = false) {
+                       Gtk.ListItem? context_item = null, bool multiple = false) {
         Object (message: message, orientation: Gtk.Orientation.VERTICAL);
         this.context_selection = context_selection;
-        this.model_position = model_position;
+        this.context_item = context_item;
         add_css_class ("message-row");
         unread_handler = message.notify["unread"].connect (update_unread_style);
+        flagged_handler = message.notify["flagged"].connect (update_flag_style);
+        flag_color_handler = message.notify["flag-color"].connect (update_flag_style);
         update_unread_style ();
         accessible_role = Gtk.AccessibleRole.LIST_ITEM;
 
-        var outer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        var outer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        outer.valign = Gtk.Align.CENTER;
         if (multiple && context_selection != null) {
             var selector = new Gtk.CheckButton ();
+            selection_checkbox = selector;
             selector.valign = Gtk.Align.CENTER;
-            selector.active = context_selection.is_selected (model_position);
+            selector.active = context_selection.is_selected (current_position ());
             selector.tooltip_text = "Select this message";
             Accessibility.label (selector, "Select %s".printf (message.subject));
             weak Gtk.SelectionModel? row_selection = context_selection;
             weak Gtk.CheckButton weak_selector = selector;
-            uint row_position = model_position;
-            bool syncing_selector = false;
+            weak MessageRow weak_row = this;
             selector.toggled.connect (() => {
-                if (syncing_selector || row_selection == null || weak_selector == null) return;
+                if (weak_row == null || weak_row.syncing_selection_checkbox ||
+                    row_selection == null || weak_selector == null) return;
+                uint row_position = weak_row.current_position ();
+                if (row_position == Gtk.INVALID_LIST_POSITION) return;
                 var selected = new Gtk.Bitset.empty ();
                 var mask = new Gtk.Bitset.range (row_position, 1);
                 if (weak_selector.active) selected.add (row_position);
                 row_selection.set_selection (selected, mask);
             });
-            selection_handler = context_selection.selection_changed.connect ((position, count) => {
-                if (weak_selector != null && position <= row_position &&
-                    row_position < position + count && row_selection != null) {
-                    syncing_selector = true;
-                    weak_selector.active = row_selection.is_selected (row_position);
-                    syncing_selector = false;
-                }
-            });
             outer.append (selector);
         }
-        var unread_indicator = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
-        unread_indicator.add_css_class ("unread-indicator-slot");
+
+        if (context_selection != null) {
+            weak MessageRow weak_row = this;
+            selection_handler = context_selection.selection_changed.connect ((position, count) => {
+                if (weak_row == null) return;
+                uint row_position = weak_row.current_position ();
+                if (position <= row_position && row_position < position + count)
+                    weak_row.sync_selection_style ();
+            });
+        }
+        if (context_item != null) {
+            weak MessageRow weak_row = this;
+            position_handler = context_item.notify["position"].connect (() => {
+                if (weak_row != null) weak_row.sync_selection_style ();
+            });
+        }
+
+        // Keep the unread marker attached to the sender identity instead of
+        // spending a permanent column on an empty dot for every read message.
+        var avatar_overlay = new Gtk.Overlay ();
+        avatar_overlay.valign = Gtk.Align.CENTER;
+        var avatar = new Gtk.Button.with_label (message.initials ());
+        avatar.set_size_request (34, 34);
+        avatar.halign = Gtk.Align.CENTER;
+        avatar.valign = Gtk.Align.CENTER;
+        avatar.focusable = false;
+        avatar.can_target = false;
+        avatar.add_css_class ("sender-avatar");
+        avatar.add_css_class ("circular");
+        avatar_overlay.child = avatar;
         unread_dot = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         unread_dot.add_css_class ("unread-indicator-dot");
-        unread_dot.valign = Gtk.Align.CENTER;
+        unread_dot.halign = Gtk.Align.START;
+        unread_dot.valign = Gtk.Align.START;
+        unread_dot.tooltip_text = "Unread message";
         unread_dot.visible = message.unread;
-        unread_indicator.append (unread_dot);
-        outer.append (unread_indicator);
-        var avatar = new Adw.Avatar (32, message.initials (), false); avatar.add_css_class ("sender-avatar"); outer.append (avatar);
-        var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); content.hexpand = true;
+        avatar_overlay.add_overlay (unread_dot);
+        outer.append (avatar_overlay);
+        var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 3);
+        content.hexpand = true;
+        content.add_css_class ("message-row-content");
         var top = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
-        var sender = new Gtk.Label (message.sender_name); sender.xalign = 0; sender.hexpand = true; sender.ellipsize = Pango.EllipsizeMode.END; sender.add_css_class ("sender"); top.append (sender);
-        if (message.flagged) {
-            var flag = new Gtk.Image.from_icon_name ("mailficient-flag-symbolic");
-            flag.add_css_class ("flag-" + message.flag_color);
-            flag.tooltip_text = "%s flag".printf (flag_color_label (message.flag_color));
-            top.append (flag);
-        }
+        var sender = new Gtk.Label (message.sender_name);
+        sender.xalign = 0; sender.hexpand = true;
+        sender.ellipsize = Pango.EllipsizeMode.END;
+        sender.tooltip_text = "%s <%s>".printf (message.sender_name, message.sender_address);
+        sender.add_css_class ("sender"); top.append (sender);
+        flag_icon = new Gtk.Image.from_icon_name ("mailficient-flag-symbolic");
+        top.append (flag_icon);
+        update_flag_style ();
         var time = new Gtk.Label (message.timestamp); time.add_css_class ("timestamp");
-        time.set_size_request (68, -1); time.xalign = 1;
+        time.set_size_request (62, -1); time.xalign = 1;
         top.append (time);
         content.append (top);
         var subject_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 5);
-        var subject = new Gtk.Label (message.subject); subject.xalign = 0; subject.hexpand = true; subject.ellipsize = Pango.EllipsizeMode.END; subject.add_css_class ("subject"); subject_box.append (subject);
+        string subject_text = message.subject.strip () == "" ? "(No Subject)" : message.subject;
+        var subject = new Gtk.Label (subject_text);
+        subject.xalign = 0; subject.hexpand = true;
+        subject.ellipsize = Pango.EllipsizeMode.END;
+        subject.tooltip_text = subject_text;
+        subject.add_css_class ("subject"); subject_box.append (subject);
         if (message.conversation_count > 1) { var count = new Gtk.Label (message.conversation_count.to_string ()); count.add_css_class ("dim-label"); count.add_css_class ("conversation-count"); subject_box.append (count); }
         if (message.has_attachment) {
             var attachment = new Gtk.Image.from_icon_name ("mail-attachment-symbolic");
@@ -82,14 +126,9 @@ public class MessageRow : Gtk.Box {
         var preview = new Gtk.Label (message.preview); preview.xalign = 0; preview.ellipsize = Pango.EllipsizeMode.END; preview.add_css_class ("preview"); content.append (preview);
         outer.append (content);
         append (outer);
+        sync_selection_style ();
         tooltip_text = "%s — %s".printf (message.sender_name, message.subject);
-        var accessible = new StringBuilder (message.unread ? "Unread message" : "Read message");
-        accessible.append (" from ").append (message.sender_name).append (", subject ").append (message.subject);
-        if (message.timestamp != "") accessible.append (", ").append (message.timestamp);
-        if (message.flagged) accessible.append_printf (", %s flag", flag_color_label (message.flag_color).down ());
-        if (message.has_attachment) accessible.append (", has attachment");
-        if (message.conversation_count > 1) accessible.append_printf (", %u messages in conversation", message.conversation_count);
-        Accessibility.label (this, accessible.str);
+        update_accessible_label ();
 
         var menu = new Menu (); menu.append ("Reply", "win.reply"); menu.append ("Reply All", "win.reply-all");
         menu.append ("Forward", "win.forward"); menu.append ("Archive", "win.archive");
@@ -113,11 +152,14 @@ public class MessageRow : Gtk.Box {
         var popover = new Gtk.PopoverMenu.from_model (menu); popover.set_parent (this); popover.has_arrow = false;
         var context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
         weak Gtk.SelectionModel? row_selection = context_selection;
-        uint row_position = model_position;
+        weak MessageRow weak_row = this;
         context_click.pressed.connect ((count, x, y) => {
             // Right-clicking anywhere inside an existing range must preserve
             // the range so the chosen action applies to every selected item.
-            if (row_selection != null && !row_selection.is_selected (row_position))
+            uint row_position = weak_row == null ? Gtk.INVALID_LIST_POSITION :
+                weak_row.current_position ();
+            if (row_position != Gtk.INVALID_LIST_POSITION && row_selection != null &&
+                !row_selection.is_selected (row_position))
                 row_selection.select_item (row_position, true);
             // Refresh the action label from the row's current state before
             // showing the menu. This also covers a row whose read state was
@@ -131,8 +173,11 @@ public class MessageRow : Gtk.Box {
             // Gtk does not emit selection-changed when the already-selected
             // row is clicked again. That is the normal way to reopen a
             // message that was manually marked unread.
+            uint row_position = weak_row == null ? Gtk.INVALID_LIST_POSITION :
+                weak_row.current_position ();
             if (!multiple && context_selection != null &&
-                context_selection.is_selected (model_position))
+                row_position != Gtk.INVALID_LIST_POSITION &&
+                context_selection.is_selected (row_position))
                 reopen_requested (message);
         });
         add_controller (primary_click);
@@ -142,21 +187,42 @@ public class MessageRow : Gtk.Box {
         if (selection_handler != 0 && context_selection != null)
             context_selection.disconnect (selection_handler);
         selection_handler = 0;
+        if (position_handler != 0 && context_item != null)
+            context_item.disconnect (position_handler);
+        position_handler = 0;
         context_selection = null;
+        context_item = null;
+        selection_checkbox = null;
+        remove_css_class ("selected-message");
+        unset_state_flags (Gtk.StateFlags.SELECTED);
         if (unread_handler != 0) message.disconnect (unread_handler);
         unread_handler = 0;
+        if (flagged_handler != 0) message.disconnect (flagged_handler);
+        flagged_handler = 0;
+        if (flag_color_handler != 0) message.disconnect (flag_color_handler);
+        flag_color_handler = 0;
     }
 
     // The repository may hand the window a separate Message instance from
     // the one currently bound to this row. Keep the visible indicator
     // authoritative when the message is opened.
-    public void mark_read_in_place () {
-        message.unread = false;
+    public void set_read_in_place (bool read) {
+        message.unread = !read;
         update_unread_style ();
     }
 
+    public void set_flag_in_place (bool flagged, string color = "") {
+        message.flagged = flagged;
+        if (color != "") message.flag_color = color;
+        update_flag_style ();
+    }
+
     ~MessageRow () {
+        if (position_handler != 0 && context_item != null)
+            context_item.disconnect (position_handler);
         if (unread_handler != 0) message.disconnect (unread_handler);
+        if (flagged_handler != 0) message.disconnect (flagged_handler);
+        if (flag_color_handler != 0) message.disconnect (flag_color_handler);
     }
 
     private void update_unread_style () {
@@ -164,6 +230,63 @@ public class MessageRow : Gtk.Box {
         else remove_css_class ("unread");
         if (unread_dot != null) unread_dot.visible = message.unread;
         if (read_menu_item != null) read_menu_item.set_label (message.unread ? "Mark as Read" : "Mark as Unread");
+        update_accessible_label ();
+    }
+
+    private void sync_selection_style () {
+        uint model_position = current_position ();
+        bool selected = context_selection != null &&
+            model_position != Gtk.INVALID_LIST_POSITION &&
+            context_selection.is_selected (model_position);
+        if (selected) {
+            add_css_class ("selected-message");
+            set_state_flags (Gtk.StateFlags.SELECTED, false);
+        } else {
+            remove_css_class ("selected-message");
+            unset_state_flags (Gtk.StateFlags.SELECTED);
+        }
+        if (selection_checkbox != null && selection_checkbox.active != selected) {
+            syncing_selection_checkbox = true;
+            selection_checkbox.active = selected;
+            syncing_selection_checkbox = false;
+        }
+    }
+
+    private uint current_position () {
+        return context_item == null ? Gtk.INVALID_LIST_POSITION : context_item.position;
+    }
+
+    internal bool qa_selection_style_matches () {
+        uint position = current_position ();
+        bool selected = context_selection != null &&
+            position != Gtk.INVALID_LIST_POSITION &&
+            context_selection.is_selected (position);
+        return selected == has_css_class ("selected-message");
+    }
+
+    internal bool qa_has_selection_style () {
+        return has_css_class ("selected-message");
+    }
+
+    private void update_flag_style () {
+        if (flag_icon == null) return;
+        foreach (var color in new string[] { "orange", "red", "purple", "blue", "yellow", "green", "gray" })
+            flag_icon.remove_css_class ("flag-" + color);
+        flag_icon.add_css_class ("flag-" + message.flag_color);
+        flag_icon.visible = message.flagged;
+        flag_icon.tooltip_text = "%s flag".printf (flag_color_label (message.flag_color));
+        update_accessible_label ();
+    }
+
+    private void update_accessible_label () {
+        var accessible = new StringBuilder (message.unread ? "Unread message" : "Read message");
+        accessible.append (" from ").append (message.sender_name).append (", subject ").append (message.subject);
+        if (message.timestamp != "") accessible.append (", ").append (message.timestamp);
+        if (message.flagged) accessible.append_printf (", %s flag", flag_color_label (message.flag_color).down ());
+        if (message.has_attachment) accessible.append (", has attachment");
+        if (message.conversation_count > 1)
+            accessible.append_printf (", %u messages in conversation", message.conversation_count);
+        Accessibility.label (this, accessible.str);
     }
 
     private static string flag_color_label (string color) {

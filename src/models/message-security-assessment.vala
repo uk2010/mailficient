@@ -12,6 +12,11 @@ public class MessageSecurityAssessment : Object {
     public bool sender_is_safe { get; construct; }
     public bool authentication_reported { get; set; }
     public Gee.ArrayList<string> findings { get; private set; default = new Gee.ArrayList<string> (); }
+    public bool should_show_inline_warning {
+        get {
+            return !sender_is_safe && level >= MessageThreatLevel.CAUTION;
+        }
+    }
 
     public MessageSecurityAssessment (bool sender_is_safe = false) {
         Object (sender_is_safe: sender_is_safe);

@@ -46,7 +46,7 @@ public class BackgroundSendRunner : Object {
 #if HAVE_CAMEL
         var camel_engine = new CamelMailEngine (credentials,
             background_path (directory, "camel-data"),
-            background_path (directory, "camel-cache-v3"),
+            CamelCacheNamespace.path_for (Path.build_filename (directory, "background")),
             background_path (directory, "received-attachments"), online_accounts);
         engine = camel_engine;
         draft_sync = new DraftSyncService (cache, camel_engine, attachments);

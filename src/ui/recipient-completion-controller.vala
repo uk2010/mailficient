@@ -92,7 +92,15 @@ public class RecipientCompletionController : Object {
         var row = new Gtk.ListBoxRow (); row.set_data<Recipient> ("recipient", recipient);
         var content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
         content.set_margin_top (7); content.set_margin_bottom (7); content.set_margin_start (10); content.set_margin_end (10);
-        content.append (new Adw.Avatar (30, initials (recipient), false));
+        var avatar = new Gtk.Button.with_label (initials (recipient));
+        avatar.set_size_request (30, 30);
+        avatar.halign = Gtk.Align.CENTER;
+        avatar.valign = Gtk.Align.CENTER;
+        avatar.focusable = false;
+        avatar.can_target = false;
+        avatar.add_css_class ("sender-avatar");
+        avatar.add_css_class ("circular");
+        content.append (avatar);
         var labels = new Gtk.Box (Gtk.Orientation.VERTICAL, 1); labels.hexpand = true;
         var name = new Gtk.Label (recipient.name == "" ? recipient.address : recipient.name);
         name.xalign = 0; name.ellipsize = Pango.EllipsizeMode.END; labels.append (name);

@@ -309,7 +309,11 @@ menubutton.app-menu-button > button:hover { background: alpha(currentColor, .12)
 .message-row { padding: 10px 12px 10px 9px; border-left: 3px solid transparent; border-bottom: 1px solid alpha(currentColor, .08); }
 .message-row:selected { border-left-color: var(--accent-bg-color); }
 .message-row.unread .sender, .message-row.unread .subject { font-weight: 700; }
-.sender-avatar { background: color-mix(in srgb, var(--accent-bg-color) 70%, var(--window-bg-color)); color: var(--accent-fg-color); font-weight: 700; }
+.sender-avatar {
+  background: color-mix(in srgb, var(--window-fg-color) 14%, var(--window-bg-color));
+  color: color-mix(in srgb, var(--window-fg-color) 82%, var(--window-bg-color));
+  font-weight: 700;
+}
 .preview { color: alpha(currentColor, .62); }
 .timestamp { color: alpha(currentColor, .58); font-size: .86em; }
 .reading-pane { min-width: 0; background: var(--view-bg-color); }
@@ -641,11 +645,14 @@ menubutton.app-menu-button > button {
 .sender-avatar {
   min-width: 32px;
   min-height: 32px;
-  background: color-mix(in srgb, var(--accent-bg-color) 68%, var(--window-bg-color));
-  color: var(--accent-fg-color);
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background-color: color-mix(in srgb, var(--window-fg-color) 14%, var(--window-bg-color));
+  color: color-mix(in srgb, var(--window-fg-color) 82%, var(--window-bg-color));
   font-size: .86em;
   font-weight: 750;
-  box-shadow: inset 0 1px alpha(white, .18);
+  box-shadow: inset 0 1px alpha(white, .18), 0 0 0 1px alpha(currentColor, .08);
 }
 
 .sender {
@@ -675,7 +682,8 @@ menubutton.app-menu-button > button {
   min-width: 8px;
   min-height: 8px;
   border-radius: 999px;
-  background: var(--accent-bg-color);
+  background-color: #3584e4;
+  background-image: none;
   box-shadow: 0 1px 2px alpha(black, .22);
 }
 
@@ -1446,4 +1454,204 @@ window.compose-window.compose-dark > contents,
 
 .compose-window.compose-dark .outbox-status.rejected > box > image {
   color: #ff7b63;
+}
+
+/* 2026 adaptive UI pass ----------------------------------------------------
+ * Keep important state unmistakable, while retaining the quiet native
+ * surfaces used throughout the application. */
+
+.mail-sidebar row.active-mailbox,
+.mail-sidebar row.active-mailbox:hover,
+.mail-sidebar row:selected,
+.mail-sidebar row:selected:hover {
+  color: var(--window-fg-color);
+  background-color: rgba(53, 132, 228, .18);
+  box-shadow: inset 3px 0 #3584e4, inset 0 0 0 1px rgba(53, 132, 228, .14);
+}
+
+.mail-sidebar row.active-mailbox image,
+.mail-sidebar row:selected image {
+  color: #1c71d8;
+  opacity: 1;
+}
+
+.mail-sidebar row image {
+  color: alpha(currentColor, .78);
+  opacity: .88;
+}
+
+.message-list-items > row:selected,
+.message-list-items > row:selected:hover,
+.message-list-items > row:focus-visible,
+.message-row.selected-message,
+.message-row.selected-message:hover,
+.message-row:selected,
+.message-row:selected:hover {
+  color: var(--window-fg-color);
+  background-color: rgba(53, 132, 228, .15);
+  border-color: rgba(53, 132, 228, .26);
+  border-left-color: #3584e4;
+  box-shadow: inset 4px 0 #3584e4;
+  outline: none;
+}
+
+.message-row.selected-message .preview,
+.message-row.selected-message .timestamp,
+.message-row.selected-message .dim-label {
+  color: alpha(currentColor, .70);
+}
+
+/* The list container owns the outer selection rail; avoid painting a second
+ * rail on the rounded MessageRow child. */
+.message-list-items > row:selected .message-row,
+.message-list-items > row:focus-visible .message-row {
+  border-left-color: transparent;
+  box-shadow: none;
+}
+
+.message-row-content {
+  min-width: 0;
+}
+
+.message-row .unread-indicator-dot {
+  min-width: 9px;
+  min-height: 9px;
+  background-color: #3584e4;
+  border: 2px solid var(--view-bg-color);
+  box-shadow: 0 1px 3px alpha(black, .28);
+}
+
+.task-list {
+  background: transparent;
+}
+
+.task-row {
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 12px;
+  background: var(--card-bg-color);
+  box-shadow: 0 2px 8px alpha(black, .045), inset 0 1px alpha(white, .18);
+}
+
+.task-row:hover {
+  border-color: alpha(currentColor, .16);
+  background: color-mix(in srgb, var(--card-bg-color) 96%, currentColor);
+  box-shadow: 0 4px 12px alpha(black, .07), inset 0 1px alpha(white, .22);
+}
+
+.task-row.overdue {
+  border-left-color: var(--error-color);
+  box-shadow: inset 3px 0 var(--error-color), 0 2px 8px alpha(black, .045);
+}
+
+.compose-window headerbar button.suggested-action,
+.compose-window headerbar button.suggested-action:hover,
+.compose-window headerbar button.compose-send-button,
+.compose-window headerbar button.compose-send-button:hover {
+  color: white;
+  background: #3584e4;
+  border-color: #1c71d8;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .24), 0 2px 7px rgba(28, 113, 216, .20);
+}
+
+.compose-window headerbar button.suggested-action:active,
+.compose-window headerbar button.compose-send-button:active {
+  color: white;
+  background: #1c71d8;
+}
+
+.compose-actions .linked {
+  min-height: 32px;
+  border: 1px solid alpha(currentColor, .11);
+  border-radius: 9px;
+  background: alpha(currentColor, .025);
+  box-shadow: inset 0 1px alpha(white, .15);
+}
+
+.compose-actions .linked > button,
+.compose-actions .linked > menubutton > button {
+  min-width: 34px;
+  min-height: 30px;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid alpha(currentColor, .09);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.compose-actions .linked > button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.compose-actions .linked > button:last-child,
+.compose-actions .linked > menubutton:last-child > button {
+  border-right: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.compose-actions togglebutton:checked {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .18);
+}
+
+.recipient-chip-strip {
+  padding: 2px 0;
+}
+
+.recipient-chip {
+  min-height: 26px;
+  padding: 1px 3px 1px 9px;
+  border: 1px solid rgba(53, 132, 228, .22);
+  border-radius: 999px;
+  color: color-mix(in srgb, #1c71d8 78%, currentColor);
+  background: rgba(53, 132, 228, .11);
+}
+
+.recipient-chip-remove {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 2px;
+  border-radius: 999px;
+  color: alpha(currentColor, .72);
+}
+
+.recipient-chip-remove:hover {
+  color: currentColor;
+  background: alpha(currentColor, .10);
+}
+
+.recipient-chip-more {
+  min-height: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: alpha(currentColor, .72);
+  background: alpha(currentColor, .07);
+}
+
+.compose-line-entry.error,
+.compose-line-entry.error:focus,
+.compose-line-entry.error:focus-within {
+  box-shadow: inset 0 -2px var(--error-color);
+}
+
+@media (prefers-color-scheme: dark) {
+  .mail-sidebar row.active-mailbox,
+  .mail-sidebar row.active-mailbox:hover,
+  .mail-sidebar row:selected,
+  .mail-sidebar row:selected:hover,
+  .message-list-items > row:selected,
+  .message-list-items > row:selected:hover,
+  .message-row.selected-message,
+  .message-row.selected-message:hover,
+  .message-row:selected,
+  .message-row:selected:hover {
+    background-color: rgba(120, 174, 237, .20);
+    border-color: rgba(120, 174, 237, .30);
+  }
+
+  .recipient-chip {
+    color: #99c1f1;
+    background: rgba(120, 174, 237, .16);
+    border-color: rgba(120, 174, 237, .28);
+  }
 }

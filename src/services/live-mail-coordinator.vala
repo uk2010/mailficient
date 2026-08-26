@@ -2,13 +2,21 @@ namespace Mailficient {
 public enum LiveSyncReason { ARRIVAL, RECONNECT }
 
 public class LiveMailCoordinator : Object {
-    internal const uint ARRIVAL_DEBOUNCE_MILLISECONDS = 750;
+    // IMAP IDLE already coalesces its command activity. A short UI-side
+    // debounce still folds duplicate folder signals together without making
+    // a newly arrived message wait nearly another second before sync starts.
+    internal const uint ARRIVAL_DEBOUNCE_MILLISECONDS = 250;
     internal const uint RECONNECT_INITIAL_SECONDS = 5;
     internal const uint RECONNECT_MAX_SECONDS = 300;
 
     public signal void sync_requested (string account_id, LiveSyncReason reason);
 
     private Gee.HashMap<string, uint> pending_sources = new Gee.HashMap<string, uint> ();
+    // A successful foreground sync makes a pending reconnect unnecessary, but
+    // it must not consume an IDLE arrival that was reported after that sync
+    // began. Keep the pending source's kind separate from the source id so the
+    // completion path can distinguish those cases.
+    private Gee.HashSet<string> pending_arrivals = new Gee.HashSet<string> ();
     private Gee.HashMap<string, int> reconnect_attempts = new Gee.HashMap<string, int> ();
     private Gee.HashSet<string> suppressed_accounts = new Gee.HashSet<string> ();
 
@@ -16,8 +24,10 @@ public class LiveMailCoordinator : Object {
         if (!valid_account (account_id) || suppressed_accounts.contains (account_id)) return;
         clear_pending (account_id);
         reconnect_attempts.unset (account_id);
+        pending_arrivals.add (account_id);
         pending_sources[account_id] = Timeout.add (ARRIVAL_DEBOUNCE_MILLISECONDS, () => {
             pending_sources.unset (account_id);
+            pending_arrivals.remove (account_id);
             if (!suppressed_accounts.contains (account_id))
                 sync_requested (account_id, LiveSyncReason.ARRIVAL);
             return Source.REMOVE;
@@ -38,7 +48,7 @@ public class LiveMailCoordinator : Object {
     }
 
     public void sync_succeeded (string account_id) {
-        clear_pending (account_id);
+        if (!pending_arrivals.contains (account_id)) clear_pending (account_id);
         reconnect_attempts.unset (account_id);
     }
 
@@ -85,8 +95,8 @@ public class LiveMailCoordinator : Object {
     }
 
     private void clear_pending (string account_id) {
-        if (!pending_sources.has_key (account_id)) return;
-        uint source = pending_sources[account_id];
+        pending_arrivals.remove (account_id);
+        uint source = pending_sources.has_key (account_id) ? pending_sources[account_id] : 0;
         pending_sources.unset (account_id);
         if (source != 0) Source.remove (source);
     }

@@ -80,7 +80,7 @@ public class CachedMailRepository : Object, MailRepository {
             result.add (new Mailbox ("unified-sent", "Sent", "mail-sent-symbolic", MailboxRole.SENT,
                 cache.unified_unread_count (MailboxRole.SENT)));
             result.add (new Mailbox ("unified-archive", "Archive", "package-x-generic-symbolic", MailboxRole.ARCHIVE,
-                cache.unified_unread_count (MailboxRole.ARCHIVE)));
+                cache.archive_unread_count ()));
             result.add (new Mailbox ("unified-junk", "Junk", "dialog-warning-symbolic", MailboxRole.JUNK,
                 cache.unified_unread_count (MailboxRole.JUNK)));
             result.add (new Mailbox ("unified-trash", "Trash", "user-trash-symbolic", MailboxRole.TRASH,
@@ -214,13 +214,13 @@ public class CachedMailRepository : Object, MailRepository {
     public void set_flagged (string id, bool flagged) {
         if (id.has_prefix (DRAFT_PREFIX) || id.has_prefix (OUTBOX_PREFIX)) return;
         if (is_demo_mode ()) { demo.set_flagged (id, flagged); return; }
-        try { cache.set_cached_flagged (id, flagged); notify_changed (); }
+        try { if (cache.set_cached_flagged (id, flagged)) notify_changed (); }
         catch (Error error) { warning ("Could not update flag state: %s", error.message); }
     }
     public void set_flag_color (string id, string color) {
         if (id.has_prefix (DRAFT_PREFIX) || id.has_prefix (OUTBOX_PREFIX)) return;
         if (is_demo_mode ()) { demo.set_flag_color (id, color); return; }
-        try { cache.set_cached_flag_color (id, color); notify_changed (); }
+        try { if (cache.set_cached_flag_color (id, color)) notify_changed (); }
         catch (Error error) { warning ("Could not update flag color: %s", error.message); }
     }
     public bool sender_is_vip (Message message) {

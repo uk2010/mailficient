@@ -41,7 +41,7 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Release downloads
 
-The [v0.2.8 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.2.8)
+The [v0.2.9 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.2.9)
 provides the complete source archive, Debian packages for AMD64 and ARM64, RPM
 packages for x86_64 and aarch64, and SHA-256 checksums for every download.
 
@@ -51,7 +51,7 @@ Build the current Flatpak from the pinned source manifest, then install and run
 the resulting bundle with:
 
 ```sh
-flatpak install --user ./Mailficient-0.2.8-x86_64.flatpak
+flatpak install --user ./Mailficient-0.2.9-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -67,7 +67,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.2.8_arm64.snap
+sudo snap install --dangerous ./mailficient_0.2.9_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -94,7 +94,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.2.8-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.2.9-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 
@@ -107,7 +107,7 @@ The builder also writes a matching `.deb.sha256` checksum for release uploads.
 
 The complete feature roadmap is implemented: bounded local and explicit server-side search; multi-selection and bulk actions; recoverable Trash moves plus confirmed permanent deletion and Empty Trash/Junk; rich composition with spellcheck, attachment reminders, durable Undo Send, formatting, inline images, and attachments; multi-condition rules, Quick Steps, and labels; scheduled sending, snooze, templates, vacation replies, and Today/Planned tasks with reminders, recurrence, and linked-email follow-up; calendar RSVP and meeting workflows; identity warnings, raw headers, Safe Senders, and reviewable unsubscribe/reporting actions; EML/PDF export and printing; and OpenPGP/S/MIME support. See [the feature guide](docs/features.md) for the controls and operational details.
 
-Attachment rows provide signature-verified image, bounded text, and PDF previews. Remote images can be loaded once or allowed for a sender; the complete trusted-sender list remains reviewable and revocable under Preferences → Privacy. Background checking defaults to five minutes and can be changed to 15, 30, or 60 minutes—or manual-only—under Preferences → General; startup checking is independently configurable. Preferences also reopens to the last section used.
+Attachment rows provide signature-verified image, bounded text, and PDF previews. Remote images can be loaded once or allowed for a sender; the complete trusted-sender list remains reviewable and revocable under Preferences → Safety. IMAP IDLE delivers push updates while Mailficient is open. Background polling defaults to five minutes and can be changed to 1, 15, 30, or 60 minutes—or manual-only—under Preferences → General; startup checking is independently configurable. Preferences also reopens to the last section used.
 
 Calendar invitations (`text/calendar` or `.ics`) are parsed within strict size
 and structure limits and displayed as meeting cards in the reader. Builds with
@@ -146,7 +146,7 @@ Before Mailficient gives a message to SMTP, it verifies that every attachment is
 
 The composer checks spelling with local desktop dictionaries and has an offline common-correction fallback. It also catches attachment wording when no file is present. Immediate sends wait behind a configurable 5–30 second durable Undo Send fence in Outbox; every foreground and background SMTP claim honors that deadline, and canceling a deferred resend restores any prior failure or uncertain-delivery state.
 
-The reader exposes conservative message-identity findings and bounded raw headers from its shield control. Receiving-server authentication failures and misleading link destinations remain visible even for a locally designated Safe Sender. Standards-based unsubscribe targets are restricted to HTTPS or a reviewable mailto draft, and Report Phishing confirms before using the provider Junk path and local sender block.
+The reader exposes conservative message-identity findings and bounded raw headers from its shield control. A locally designated Safe Sender hides the automatic inline sender warning and permits remote images, while the full assessment stays available from the shield and link/attachment/HTML protections remain active. Standards-based unsubscribe targets are restricted to HTTPS or a reviewable mailto draft, and Report Phishing confirms before using the provider Junk path and local sender block.
 
 Rules now support ordered AND/OR conditions, exceptions, multiple actions, account scope, stop-processing, reordering, and a bounded Run Now pass. Quick Steps apply reusable action sequences to selected messages. Search supports quotes, OR, exclusions, recipient/account/folder/attachment scopes, dates, flags, and sizes. Typing searches the private local index; pressing Enter explicitly runs a cancellable, 200-message-bounded server search in the chosen folder/account/all-mail scope.
 

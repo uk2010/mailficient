@@ -5,11 +5,14 @@ public class PendingDraftDeletion : Object {
     public string mailbox_name { get; construct; }
     public string remote_uid { get; construct; }
     public string expected_message_id { get; construct; }
+    public string expected_fingerprint { get; construct; }
 
     public PendingDraftDeletion (int64 id, string account_id, string mailbox_name,
-                                 string remote_uid, string expected_message_id) {
+                                 string remote_uid, string expected_message_id,
+                                 string expected_fingerprint = "") {
         Object (id: id, account_id: account_id, mailbox_name: mailbox_name,
-                remote_uid: remote_uid, expected_message_id: expected_message_id);
+                remote_uid: remote_uid, expected_message_id: expected_message_id,
+                expected_fingerprint: expected_fingerprint);
     }
 }
 }

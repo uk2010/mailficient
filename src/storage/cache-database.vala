@@ -3,6 +3,13 @@ public class CacheDatabase : Object, AccountStore {
     public const int MESSAGE_LIST_LIMIT = 500;
     public const int MAX_CONVERSATION_MESSAGES = 100;
     public const int BUSY_TIMEOUT_MILLISECONDS = 5000;
+    // Sent-draft tombstones only bridge overlapping provider snapshots. User
+    // initiated discards are permanent; successful sends can age out after a
+    // conservative week so normal use cannot grow per-sync filtering forever.
+    private const int64 TRANSIENT_DRAFT_TOMBSTONE_SECONDS = 7 * 24 * 60 * 60;
+    // cached_messages.managed_draft_identity uses an explicit negative marker
+    // so upgraded rows are parsed once, rather than rescanned on every Cancel.
+    private const string NO_MANAGED_DRAFT_IDENTITY = "!";
     // Recipient completion is invoked from GTK entry change handlers.  Never
     // walk an unbounded mailbox here: a large local archive would otherwise
     // make the compose window (and its Send button) appear to hang.
@@ -75,13 +82,19 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE TABLE IF NOT EXISTS pending_credential_cleanup(account_id TEXT PRIMARY KEY,created_at INTEGER NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS pending_remote_draft_deletions(" +
             "id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL,mailbox_name TEXT NOT NULL,remote_uid TEXT NOT NULL," +
+            "expected_message_id TEXT NOT NULL,expected_fingerprint TEXT NOT NULL DEFAULT ''," +
+            "created_at INTEGER NOT NULL,completed_at INTEGER NOT NULL DEFAULT 0," +
+            "suppress_reimport INTEGER NOT NULL DEFAULT 0,permanent_tombstone INTEGER NOT NULL DEFAULT 0);" +
+            "CREATE TABLE IF NOT EXISTS remote_draft_upload_attempts(" +
+            "draft_id TEXT NOT NULL,account_id TEXT NOT NULL,revision INTEGER NOT NULL," +
             "expected_message_id TEXT NOT NULL,created_at INTEGER NOT NULL," +
-            "UNIQUE(account_id,mailbox_name,remote_uid,expected_message_id));" +
+            "PRIMARY KEY(draft_id,revision));" +
             "CREATE TABLE IF NOT EXISTS cached_messages(" +
             "id TEXT PRIMARY KEY, mailbox_id TEXT NOT NULL, sender_name TEXT NOT NULL, sender_address TEXT NOT NULL, recipients TEXT NOT NULL," +
             "subject TEXT NOT NULL, preview TEXT NOT NULL, body TEXT NOT NULL, timestamp TEXT NOT NULL, unread INTEGER NOT NULL, flagged INTEGER NOT NULL," +
             "has_attachment INTEGER NOT NULL, conversation_count INTEGER NOT NULL, has_remote_content INTEGER NOT NULL, body_html TEXT NOT NULL," +
-            "content_extracted INTEGER NOT NULL DEFAULT 0);" +
+            "content_extracted INTEGER NOT NULL DEFAULT 0,managed_draft_identity TEXT NOT NULL DEFAULT ''," +
+            "draft_content_fingerprint TEXT NOT NULL DEFAULT '');" +
             "CREATE TABLE IF NOT EXISTS cached_mailboxes(" +
             "id TEXT PRIMARY KEY, account_id TEXT NOT NULL, remote_name TEXT NOT NULL, name TEXT NOT NULL, icon_name TEXT NOT NULL," +
             "role INTEGER NOT NULL, unread_count INTEGER NOT NULL DEFAULT 0, UNIQUE(account_id,remote_name));" +
@@ -121,6 +134,12 @@ public class CacheDatabase : Object, AccountStore {
         ensure_column ("cached_messages", "list_unsubscribe", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("cached_messages", "list_unsubscribe_post", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("cached_messages", "raw_headers", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "managed_draft_identity", "TEXT NOT NULL DEFAULT ''");
+        // This is the verified semantic fingerprint supplied by the Drafts MIME
+        // conversion, not a hash reconstructed from lossy message-list fields.
+        // It makes immediate no-Message-ID cancellation safe across UID reuse.
+        ensure_column ("cached_messages", "draft_content_fingerprint",
+            "TEXT NOT NULL DEFAULT ''");
         // Older builds ignored top-level text/plain and text/html MIME bodies
         // and cached only the server preview. A zero value makes those rows
         // eligible for the normal bounded sync backfill.
@@ -155,6 +174,30 @@ public class CacheDatabase : Object, AccountStore {
         ensure_column ("outbox", "undo_previous_attempts", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("outbox", "undo_previous_next_attempt_at", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("outbox", "undo_previous_last_error", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("pending_remote_draft_deletions", "completed_at",
+            "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("pending_remote_draft_deletions", "suppress_reimport",
+            "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("pending_remote_draft_deletions", "permanent_tombstone",
+            "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("pending_remote_draft_deletions", "expected_fingerprint",
+            "TEXT NOT NULL DEFAULT ''");
+        migrate_remote_draft_deletion_identity ();
+        // Upgrade deletion work created by builds that had no distinction
+        // between generic duplicate cleanup and an explicit discard. A live
+        // draft whose adopted provider identity matches the row is the one
+        // unsafe case to suppress account-wide; everything else is an orphan
+        // the old build had already committed to deleting. The preference
+        // fence makes this inference a one-time migration, not startup policy.
+        execute ("UPDATE pending_remote_draft_deletions AS p " +
+            "SET suppress_reimport=1,permanent_tombstone=1 " +
+            "WHERE NOT EXISTS(SELECT 1 FROM preferences " +
+            "WHERE key='draft-tombstone-identity-v2') " +
+            "AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.account_id=p.account_id " +
+            "AND REPLACE(REPLACE(TRIM(d.remote_internet_message_id),'<',''),'>','')=" +
+            "REPLACE(REPLACE(TRIM(p.expected_message_id),'<',''),'>',''));" +
+            "INSERT OR IGNORE INTO preferences(key,value) " +
+            "VALUES('draft-tombstone-identity-v2','1')");
         ensure_column ("mail_tasks", "reminder_at", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("mail_tasks", "recurrence", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("mail_tasks", "recurrence_interval", "INTEGER NOT NULL DEFAULT 1");
@@ -164,13 +207,30 @@ public class CacheDatabase : Object, AccountStore {
         ensure_column ("mail_rules", "position", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("mail_rules", "match_mode", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("mail_rules", "stop_processing", "INTEGER NOT NULL DEFAULT 0");
+        migrate_cached_text_decoding ();
         normalize_mail_rule_positions ();
-        execute ("CREATE INDEX IF NOT EXISTS cached_messages_mailbox_date ON cached_messages(mailbox_id,date_unix DESC);" +
+        execute ("DELETE FROM pending_remote_draft_deletions " +
+            "WHERE suppress_reimport=1 AND permanent_tombstone=0 AND completed_at>0 " +
+            "AND completed_at<=strftime('%s','now')-" +
+            TRANSIENT_DRAFT_TOMBSTONE_SECONDS.to_string () + ";" +
+            "DELETE FROM pending_remote_draft_deletions " +
+            "WHERE suppress_reimport=1 AND permanent_tombstone=0 AND completed_at=0 " +
+            "AND mailbox_name='' AND remote_uid='' " +
+            "AND created_at<=strftime('%s','now')-" +
+            TRANSIENT_DRAFT_TOMBSTONE_SECONDS.to_string ());
+        // Older development builds indexed the negative managed-identity marker
+        // for every ordinary message. Replace that low-selectivity index once
+        // with a positive-identity-only index.
+        execute ("DROP INDEX IF EXISTS cached_messages_managed_draft_identity;" +
+            "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_date ON cached_messages(mailbox_id,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_unread_date ON cached_messages(mailbox_id,unread DESC,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_flagged_date ON cached_messages(mailbox_id,flagged DESC,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_date ON cached_messages(account_id,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_mailbox_remote_uid ON cached_messages(account_id,mailbox_id,remote_uid);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_message_id ON cached_messages(account_id,internet_message_id);" +
+            "CREATE INDEX IF NOT EXISTS cached_messages_managed_draft_identity_positive " +
+            "ON cached_messages(account_id,managed_draft_identity) " +
+            "WHERE managed_draft_identity<>'' AND managed_draft_identity<>'!';" +
             "CREATE INDEX IF NOT EXISTS cached_messages_account_reply ON cached_messages(account_id,in_reply_to);" +
             "CREATE INDEX IF NOT EXISTS cached_mailboxes_role_id ON cached_mailboxes(role,id);" +
             "CREATE INDEX IF NOT EXISTS cached_mailboxes_account_role ON cached_mailboxes(account_id,role);" +
@@ -179,6 +239,15 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE INDEX IF NOT EXISTS message_header_index_lookup ON message_header_index(account_id,header_id);" +
             "CREATE INDEX IF NOT EXISTS drafts_remote_sync ON drafts(account_id,revision,remote_revision);" +
             "CREATE INDEX IF NOT EXISTS pending_remote_draft_deletions_account ON pending_remote_draft_deletions(account_id,id);" +
+            "CREATE INDEX IF NOT EXISTS pending_remote_draft_deletions_identity ON pending_remote_draft_deletions(account_id,expected_message_id);" +
+            "CREATE INDEX IF NOT EXISTS pending_remote_draft_deletions_fingerprint ON pending_remote_draft_deletions(account_id,mailbox_name,remote_uid,expected_fingerprint);" +
+            "CREATE UNIQUE INDEX IF NOT EXISTS pending_remote_draft_deletions_message_unique " +
+            "ON pending_remote_draft_deletions(account_id,mailbox_name,remote_uid,expected_message_id) " +
+            "WHERE expected_message_id<>'';" +
+            "CREATE UNIQUE INDEX IF NOT EXISTS pending_remote_draft_deletions_fingerprint_unique " +
+            "ON pending_remote_draft_deletions(account_id,mailbox_name,remote_uid,expected_fingerprint) " +
+            "WHERE expected_message_id='' AND expected_fingerprint<>'';" +
+            "CREATE INDEX IF NOT EXISTS remote_draft_upload_attempts_account ON remote_draft_upload_attempts(account_id,expected_message_id);" +
             "CREATE INDEX IF NOT EXISTS outbox_delivery_schedule ON outbox(delivery_state,next_attempt_at,lease_until);" +
             "CREATE INDEX IF NOT EXISTS mail_tasks_due ON mail_tasks(completed,due_at);" +
             "CREATE INDEX IF NOT EXISTS mail_tasks_reminders ON mail_tasks(completed,reminder_at,reminder_sent_at);" +
@@ -910,6 +979,82 @@ public class CacheDatabase : Object, AccountStore {
         execute ("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
     }
 
+    private void migrate_remote_draft_deletion_identity () throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT sql FROM sqlite_master " +
+                "WHERE type='table' AND name='pending_remote_draft_deletions'",
+                -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect remote draft cleanup identity storage");
+        int row = statement.step ();
+        if (row != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not inspect remote draft cleanup identity storage");
+        string definition = statement.column_text (0).down ().replace (" ", "")
+            .replace ("\n", "").replace ("\t", "");
+        statement.reset ();
+        // Older databases made Message-ID alone part of the table constraint.
+        // That collapses two distinct no-ID drafts when a provider reuses a
+        // UID. Partial indexes below preserve the right identity semantics:
+        // Message-ID when present, otherwise exact content fingerprint.
+        if (!definition.contains (
+                "unique(account_id,mailbox_name,remote_uid,expected_message_id)"))
+            return;
+        execute ("BEGIN IMMEDIATE");
+        try {
+            execute ("ALTER TABLE pending_remote_draft_deletions " +
+                "RENAME TO pending_remote_draft_deletions_identity_v3;" +
+                "CREATE TABLE pending_remote_draft_deletions(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL," +
+                "mailbox_name TEXT NOT NULL,remote_uid TEXT NOT NULL," +
+                "expected_message_id TEXT NOT NULL," +
+                "expected_fingerprint TEXT NOT NULL DEFAULT ''," +
+                "created_at INTEGER NOT NULL,completed_at INTEGER NOT NULL DEFAULT 0," +
+                "suppress_reimport INTEGER NOT NULL DEFAULT 0," +
+                "permanent_tombstone INTEGER NOT NULL DEFAULT 0);" +
+                "INSERT INTO pending_remote_draft_deletions(" +
+                "id,account_id,mailbox_name,remote_uid,expected_message_id," +
+                "expected_fingerprint,created_at,completed_at,suppress_reimport," +
+                "permanent_tombstone) SELECT id,account_id,mailbox_name,remote_uid," +
+                "expected_message_id,expected_fingerprint,created_at,completed_at," +
+                "suppress_reimport,permanent_tombstone FROM " +
+                "pending_remote_draft_deletions_identity_v3;" +
+                "DROP TABLE pending_remote_draft_deletions_identity_v3;COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    private void migrate_cached_text_decoding () throws MailError {
+        Sqlite.Statement version_statement;
+        if (database.prepare_v2 ("SELECT COALESCE(MAX(version),1) FROM schema_version",
+                -1, out version_statement) != Sqlite.OK ||
+            version_statement.step () != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not inspect the mail cache version");
+        if (version_statement.column_int (0) >= 2) return;
+        version_statement.reset ();
+
+        execute ("BEGIN IMMEDIATE");
+        try {
+            // Older MIME extraction decoded transfer encodings but did not
+            // convert the declared character set. make_valid() permanently
+            // replaced those bytes with U+FFFD. Only affected rows are made
+            // eligible for the normal bounded IMAP content backfill.
+            Sqlite.Statement repair;
+            if (database.prepare_v2 (
+                    "UPDATE cached_messages SET content_extracted=0 " +
+                    "WHERE instr(body,?)>0 OR instr(body_html,?)>0",
+                    -1, out repair) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare cached text repair");
+            repair.bind_text (1, "�"); repair.bind_text (2, "�");
+            if (repair.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not schedule cached text repair");
+            execute ("UPDATE schema_version SET version=2;COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
     private void normalize_mail_rule_positions () throws MailError {
         Sqlite.Statement statement;
         const string inspect = "SELECT COUNT(*),COUNT(DISTINCT position)," +
@@ -1067,7 +1212,8 @@ public class CacheDatabase : Object, AccountStore {
         const string sql = "SELECT EXISTS(" +
             "SELECT 1 FROM drafts d WHERE d.account_id=? AND d.revision>d.remote_revision " +
             "AND d.remote_sync_owner='' AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id) " +
-            "UNION ALL SELECT 1 FROM pending_remote_draft_deletions p WHERE p.account_id=? LIMIT 1)";
+            "UNION ALL SELECT 1 FROM pending_remote_draft_deletions p WHERE p.account_id=? " +
+            "AND p.completed_at=0 AND p.mailbox_name<>'' AND p.remote_uid<>'' LIMIT 1)";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare background Drafts work inspection");
         statement.bind_text (1, account_id); statement.bind_text (2, account_id);
@@ -1079,6 +1225,26 @@ public class CacheDatabase : Object, AccountStore {
     public bool import_remote_draft (RemoteDraftSnapshot snapshot, Draft imported) throws MailError {
         execute ("BEGIN IMMEDIATE");
         try {
+            // A discarded draft can still be visible to one overlapping IMAP
+            // refresh until its provider-side copy is deleted. Its durable
+            // deletion journal is a tombstone: never recreate the editable
+            // draft from that stale snapshot.
+            string snapshot_message_id = snapshot.internet_message_id;
+            if (snapshot_message_id.strip () == "" && snapshot.managed_by_mailficient)
+                snapshot_message_id = Draft.remote_message_id_for (
+                    snapshot.draft.id, snapshot.draft.revision);
+            if (pending_remote_draft_identity (snapshot.draft.account_id,
+                    snapshot_message_id, snapshot.content_fingerprint,
+                    snapshot.mailbox_name, snapshot.remote_uid)) {
+                queue_remote_draft_deletion (snapshot.draft.account_id,
+                    snapshot.mailbox_name, snapshot.remote_uid,
+                    snapshot_message_id, false, false,
+                    snapshot.internet_message_id.strip () == "" ?
+                        snapshot.content_fingerprint : "");
+                execute ("COMMIT");
+                notify_remote_draft_work (snapshot.draft.account_id);
+                return false;
+            }
             Sqlite.Statement statement;
             const string lookup = "SELECT revision,remote_revision,remote_mailbox,remote_uid," +
                 "remote_internet_message_id,remote_content_fingerprint,remote_owned," +
@@ -1227,6 +1393,10 @@ public class CacheDatabase : Object, AccountStore {
                 foreach (var id in missing) {
                     var draft = load_draft (id);
                     if (draft != null) removed.add (draft);
+                    // The provider has authoritatively removed this clean
+                    // mirror. Any older append-attempt journal for it can no
+                    // longer be upgraded by a later user discard.
+                    delete_bound ("DELETE FROM remote_draft_upload_attempts WHERE draft_id=?", id);
                     delete_bound ("DELETE FROM drafts WHERE id=?", id);
                 }
                 execute ("COMMIT");
@@ -1240,16 +1410,43 @@ public class CacheDatabase : Object, AccountStore {
 
     public bool claim_draft_upload (string draft_id, string owner, int64 lease_until) throws MailError {
         recover_expired_draft_sync_claims ();
-        Sqlite.Statement statement;
-        const string sql = "UPDATE drafts SET remote_sync_owner=?,remote_sync_until=? WHERE id=? " +
-            "AND revision>remote_revision AND remote_sync_owner='' " +
-            "AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=drafts.id)";
-        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
-            throw new MailError.STORAGE ("Could not prepare the remote draft claim");
-        statement.bind_text (1, owner); statement.bind_int64 (2, lease_until); statement.bind_text (3, draft_id);
-        if (statement.step () != Sqlite.DONE)
-            throw new MailError.STORAGE ("Could not claim the remote draft update");
-        return database.changes () == 1;
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            const string sql = "UPDATE drafts SET remote_sync_owner=?,remote_sync_until=? WHERE id=? " +
+                "AND revision>remote_revision AND remote_sync_owner='' " +
+                "AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=drafts.id)";
+            if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare the remote draft claim");
+            statement.bind_text (1, owner); statement.bind_int64 (2, lease_until);
+            statement.bind_text (3, draft_id);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not claim the remote draft update");
+            bool claimed = database.changes () == 1;
+            if (claimed) {
+                const string attempt_sql = "INSERT OR IGNORE INTO remote_draft_upload_attempts(" +
+                    "draft_id,account_id,revision,expected_message_id,created_at) " +
+                    "SELECT id,account_id,revision,'',strftime('%s','now') FROM drafts WHERE id=?";
+                if (database.prepare_v2 (attempt_sql, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the remote draft upload journal");
+                statement.bind_text (1, draft_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not preserve the remote draft upload journal");
+                if (database.prepare_v2 ("UPDATE remote_draft_upload_attempts SET " +
+                        "expected_message_id='mailficient-draft-' || draft_id || '-' || revision || " +
+                        "'@mailficient.local' WHERE draft_id=? AND expected_message_id=''",
+                        -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the remote draft identity journal");
+                statement.bind_text (1, draft_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not preserve the remote draft identity journal");
+            }
+            execute ("COMMIT");
+            return claimed;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
     }
 
     public void release_draft_upload (string draft_id, string owner) throws MailError {
@@ -1315,12 +1512,19 @@ public class CacheDatabase : Object, AccountStore {
                     previous_mailbox, previous_uid);
             bool adopt_upload = current_draft && (owns_claim || canonical_same_revision ||
                 (current_revision == uploaded_revision && previous_revision < uploaded_revision));
+            bool retain_upload_attempt = false;
             if (!adopt_upload) {
                 bool already_adopted = current_draft && previous_revision == uploaded_revision &&
                     previous_mailbox == location.mailbox_name && previous_uid == location.remote_uid;
-                if (!already_adopted)
+                if (!already_adopted) {
                     queue_remote_draft_deletion (account_id, location.mailbox_name, location.remote_uid,
                         Draft.remote_message_id_for (draft_id, uploaded_revision));
+                    // The live draft can still be explicitly discarded before
+                    // that redundant-copy deletion completes. Keep its attempt
+                    // identity so discard can upgrade the generic cleanup into
+                    // a durable user-cancel tombstone.
+                    retain_upload_attempt = current_draft;
+                }
             } else {
                 if (previous_uid != "" && previous_revision > 0 &&
                     (previous_mailbox != location.mailbox_name || previous_uid != location.remote_uid))
@@ -1338,6 +1542,14 @@ public class CacheDatabase : Object, AccountStore {
                 statement.bind_text (6, draft_id); statement.bind_text (7, account_id);
                 if (statement.step () != Sqlite.DONE || database.changes () != 1)
                     throw new MailError.STORAGE ("Could not preserve the remote draft location");
+            }
+            if (!retain_upload_attempt) {
+                if (database.prepare_v2 ("DELETE FROM remote_draft_upload_attempts " +
+                        "WHERE draft_id=? AND revision=?", -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare completed draft upload cleanup");
+                statement.bind_text (1, draft_id); statement.bind_int64 (2, uploaded_revision);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not complete the draft upload journal");
             }
             execute ("COMMIT");
         } catch (MailError error) {
@@ -1360,26 +1572,56 @@ public class CacheDatabase : Object, AccountStore {
     public Gee.ArrayList<PendingDraftDeletion> list_pending_remote_draft_deletions (
         string account_id) throws MailError {
         Sqlite.Statement statement;
-        const string sql = "SELECT id,mailbox_name,remote_uid,expected_message_id " +
-            "FROM pending_remote_draft_deletions WHERE account_id=? ORDER BY id";
+        const string sql = "SELECT id,mailbox_name,remote_uid,expected_message_id," +
+            "expected_fingerprint " +
+            "FROM pending_remote_draft_deletions WHERE account_id=? AND completed_at=0 " +
+            "AND mailbox_name<>'' AND remote_uid<>'' ORDER BY id";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare remote draft cleanup");
         statement.bind_text (1, account_id);
         var result = new Gee.ArrayList<PendingDraftDeletion> (); int row;
         while ((row = statement.step ()) == Sqlite.ROW)
             result.add (new PendingDraftDeletion (statement.column_int64 (0), account_id,
-                statement.column_text (1), statement.column_text (2), statement.column_text (3)));
+                statement.column_text (1), statement.column_text (2),
+                statement.column_text (3), statement.column_text (4)));
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load remote draft cleanup");
         return result;
     }
 
     public void complete_remote_draft_deletion (int64 id) throws MailError {
-        delete_bound_int64 ("DELETE FROM pending_remote_draft_deletions WHERE id=?", id);
+        // Redundant-copy cleanup needs no lasting identity tombstone. Explicit
+        // discard does: retain that row after network completion so a sync
+        // snapshot fetched just before deletion cannot resurrect the draft.
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            // A redundant upload attempt remains associated with its live
+            // draft even after the exact server copy was deleted. A provider
+            // snapshot fetched just before that deletion can arrive later; if
+            // the user cancels in between, queue_saved_remote_draft_deletion()
+            // must still be able to upgrade that identity into a permanent
+            // tombstone. Successful adoption, send, discard, or account
+            // removal eventually consumes the small per-draft journal.
+            delete_bound_int64 ("DELETE FROM pending_remote_draft_deletions " +
+                "WHERE id=? AND suppress_reimport=0", id);
+            if (database.prepare_v2 ("UPDATE pending_remote_draft_deletions " +
+                    "SET completed_at=strftime('%s','now') WHERE id=? AND completed_at=0",
+                    -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare completed draft cleanup");
+            statement.bind_int64 (1, id);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not preserve completed draft cleanup");
+            execute ("COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
     }
 
     public int pending_remote_draft_deletion_count () throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT COUNT(*) FROM pending_remote_draft_deletions", -1,
+        if (database.prepare_v2 ("SELECT COUNT(*) FROM pending_remote_draft_deletions " +
+                                 "WHERE completed_at=0 AND mailbox_name<>'' AND remote_uid<>''", -1,
                                  out statement) != Sqlite.OK || statement.step () != Sqlite.ROW)
             throw new MailError.STORAGE ("Could not count remote draft cleanup");
         return statement.column_int (0);
@@ -1401,7 +1643,7 @@ public class CacheDatabase : Object, AccountStore {
             // Once a draft becomes an Outbox item its provider-side Drafts copy
             // must disappear.  Queue the cleanup in the same transaction so a
             // crash cannot strand the old copy indefinitely.
-            queue_saved_remote_draft_deletion (draft.id);
+            queue_saved_remote_draft_deletion (draft.id, false);
             Sqlite.Statement statement;
             if (database.prepare_v2 ("INSERT INTO outbox(id,draft_id,attempts,next_attempt_at,last_error,delivery_state,lease_owner,lease_until) VALUES(?,?,0,?,'',0,'',0) " +
                                      "ON CONFLICT(draft_id) DO UPDATE SET attempts=0,next_attempt_at=excluded.next_attempt_at,last_error='',delivery_state=0,lease_owner='',lease_until=0," +
@@ -1583,7 +1825,7 @@ public class CacheDatabase : Object, AccountStore {
                 throw new MailError.STORAGE ("Could not claim the Outbox message");
             bool claimed = database.changes () == 1;
             if (claimed)
-                queue_saved_remote_draft_deletion (draft_id);
+                queue_saved_remote_draft_deletion (draft_id, false);
             execute ("COMMIT"); return claimed;
         } catch (MailError error) {
             try { execute ("ROLLBACK"); } catch (MailError ignored) { }
@@ -1665,7 +1907,7 @@ public class CacheDatabase : Object, AccountStore {
             ownership.bind_text (1, id);
             if (ownership.step () != Sqlite.DONE)
                 throw new MailError.STORAGE ("Could not preserve provider draft discard");
-            cleanup_account_id = queue_saved_remote_draft_deletion (id);
+            cleanup_account_id = queue_saved_remote_draft_deletion (id, true);
             delete_bound ("DELETE FROM outbox WHERE draft_id=?", id);
             delete_bound ("DELETE FROM drafts WHERE id=?", id);
             execute ("COMMIT");
@@ -1707,9 +1949,13 @@ public class CacheDatabase : Object, AccountStore {
         }
     }
 
-    private string queue_saved_remote_draft_deletion (string draft_id) throws MailError {
+    private string queue_saved_remote_draft_deletion (string draft_id,
+                                                      bool permanent_tombstone) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT account_id,remote_mailbox,remote_uid,remote_revision,remote_owned,remote_internet_message_id FROM drafts WHERE id=?", -1,
+        if (database.prepare_v2 ("SELECT account_id,remote_mailbox,remote_uid," +
+                "remote_revision,remote_owned,remote_internet_message_id," +
+                "remote_content_fingerprint " +
+                "FROM drafts WHERE id=?", -1,
                                  out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare remote draft cleanup");
         statement.bind_text (1, draft_id);
@@ -1720,12 +1966,49 @@ public class CacheDatabase : Object, AccountStore {
         string remote_uid = statement.column_text (2);
         int64 remote_revision = statement.column_int64 (3);
         bool remote_owned = statement.column_int (4) != 0;
-        if (!remote_owned || mailbox_name == "" || remote_uid == "" || remote_revision <= 0) return "";
+        string remote_message_id = statement.column_text (5);
+        string remote_fingerprint = statement.column_text (6);
         string account_id = statement.column_text (0);
-        queue_remote_draft_deletion (account_id, mailbox_name, remote_uid,
-            statement.column_text (5) == "" ? Draft.remote_message_id_for (draft_id, remote_revision) :
-            statement.column_text (5));
-        return account_id;
+        bool queued = false;
+
+        // An append attempt outlives its short worker lease. The provider may
+        // have accepted the MIME before a timeout or crash, so transfer every
+        // attempted revision into the cancellation tombstone journal before
+        // the editable draft row disappears.
+        if (database.prepare_v2 ("SELECT account_id,expected_message_id FROM " +
+                "remote_draft_upload_attempts WHERE draft_id=? ORDER BY revision",
+                -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare attempted draft cleanup");
+        statement.bind_text (1, draft_id); int attempt_row;
+        while ((attempt_row = statement.step ()) == Sqlite.ROW) {
+            queue_remote_draft_tombstone (statement.column_text (0),
+                statement.column_text (1), permanent_tombstone);
+            queued = true;
+        }
+        if (attempt_row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not inspect attempted draft cleanup");
+        delete_bound ("DELETE FROM remote_draft_upload_attempts WHERE draft_id=?", draft_id);
+
+        if (remote_owned && mailbox_name != "" && remote_uid != "" &&
+            remote_revision > 0) {
+            string expected_message_id = remote_message_id;
+            string expected_fingerprint = "";
+            if (expected_message_id == "") {
+                // Retain the exact imported content token even when verified
+                // Mailficient extension headers let us reconstruct the ID.
+                // It permits immediate cleanup of a cached stripped-ID copy.
+                expected_fingerprint = remote_fingerprint;
+                if (Uuid.string_is_valid (draft_id))
+                    expected_message_id = Draft.remote_message_id_for (
+                        draft_id, remote_revision);
+            }
+            queue_remote_draft_deletion (account_id, mailbox_name, remote_uid,
+                expected_message_id, true, permanent_tombstone,
+                expected_fingerprint);
+            if (expected_message_id != "" || expected_fingerprint != "")
+                queued = true;
+        }
+        return queued ? account_id : "";
     }
 
     private void notify_remote_draft_work (string account_id) {
@@ -1741,17 +2024,419 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     private void queue_remote_draft_deletion (string account_id, string mailbox_name,
-                                              string remote_uid, string expected_message_id) throws MailError {
-        if (mailbox_name == "" || remote_uid == "" || expected_message_id == "") return;
+                                              string remote_uid, string expected_message_id,
+                                              bool suppress_reimport = false,
+                                              bool permanent_tombstone = false,
+                                              string expected_fingerprint = "") throws MailError {
+        purge_expired_transient_draft_tombstones ();
+        string canonical_id = canonical_message_id (expected_message_id);
+        string fingerprint = expected_fingerprint.strip ();
+        if (mailbox_name == "" || remote_uid == "" ||
+            (canonical_id == "" && fingerprint == "")) return;
         Sqlite.Statement statement;
+        bool effective_suppression = suppress_reimport;
+        bool effective_permanence = permanent_tombstone;
+        var provisional_ids = new Gee.ArrayList<int64?> ();
+        string existing_sql = "SELECT id,mailbox_name,remote_uid," +
+            "expected_message_id,suppress_reimport,permanent_tombstone," +
+            "completed_at,created_at,expected_fingerprint FROM " +
+            "pending_remote_draft_deletions WHERE account_id=? AND ";
+        if (canonical_id != "")
+            existing_sql += "expected_message_id IN (?,?)";
+        else
+            existing_sql += "mailbox_name=? AND remote_uid=? " +
+                "AND expected_message_id='' AND expected_fingerprint=?";
+        if (database.prepare_v2 (existing_sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect existing draft cleanup");
+        statement.bind_text (1, account_id);
+        if (canonical_id != "") {
+            statement.bind_text (2, canonical_id);
+            statement.bind_text (3, "<%s>".printf (canonical_id));
+        } else {
+            statement.bind_text (2, mailbox_name);
+            statement.bind_text (3, remote_uid);
+            statement.bind_text (4, fingerprint);
+        }
+        int row;
+        while ((row = statement.step ()) == Sqlite.ROW) {
+            string existing_id = canonical_message_id (statement.column_text (3));
+            bool same_identity = canonical_id != "" ? existing_id == canonical_id :
+                existing_id == "" && statement.column_text (8) == fingerprint;
+            if (!same_identity)
+                continue;
+            if (fingerprint == "" && statement.column_text (8) != "" &&
+                statement.column_text (1) == mailbox_name &&
+                statement.column_text (2) == remote_uid)
+                fingerprint = statement.column_text (8);
+            int64 completed_at = statement.column_int64 (6);
+            int64 retention_time = completed_at == 0 ?
+                statement.column_int64 (7) : completed_at;
+            bool exact_pending = completed_at == 0 &&
+                statement.column_text (1) != "" && statement.column_text (2) != "";
+            bool active_suppression = statement.column_int (4) != 0 &&
+                (statement.column_int (5) != 0 || exact_pending ||
+                 retention_time > new DateTime.now_utc ().to_unix () -
+                    TRANSIENT_DRAFT_TOMBSTONE_SECONDS);
+            if (active_suppression) effective_suppression = true;
+            if (statement.column_int (5) != 0) effective_permanence = true;
+            if (statement.column_text (1) == "" && statement.column_text (2) == "")
+                provisional_ids.add (statement.column_int64 (0));
+        }
+        if (row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not inspect existing draft cleanup");
+        // Replace a claim-time location-less tombstone now that either the
+        // upload worker or a provider snapshot supplied the exact UID.
+        foreach (var provisional_id in provisional_ids)
+            delete_bound_int64 ("DELETE FROM pending_remote_draft_deletions WHERE id=?",
+                provisional_id);
         const string sql = "INSERT OR IGNORE INTO pending_remote_draft_deletions(" +
-            "account_id,mailbox_name,remote_uid,expected_message_id,created_at) VALUES(?,?,?,?,strftime('%s','now'))";
+            "account_id,mailbox_name,remote_uid,expected_message_id," +
+            "expected_fingerprint,created_at," +
+            "suppress_reimport,permanent_tombstone) " +
+            "VALUES(?,?,?,?,?,strftime('%s','now'),?,?)";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare remote draft cleanup");
         statement.bind_text (1, account_id); statement.bind_text (2, mailbox_name);
-        statement.bind_text (3, remote_uid); statement.bind_text (4, expected_message_id);
+        statement.bind_text (3, remote_uid); statement.bind_text (4, canonical_id);
+        statement.bind_text (5, fingerprint);
+        statement.bind_int (6, effective_suppression ? 1 : 0);
+        statement.bind_int (7, effective_permanence ? 1 : 0);
         if (statement.step () != Sqlite.DONE)
             throw new MailError.STORAGE ("Could not preserve remote draft cleanup");
+        if (database.prepare_v2 ("UPDATE pending_remote_draft_deletions " +
+                "SET completed_at=0,created_at=strftime('%s','now')," +
+                "expected_fingerprint=?," +
+                "suppress_reimport=CASE WHEN suppress_reimport=1 OR ?=1 THEN 1 ELSE 0 END," +
+                "permanent_tombstone=CASE WHEN permanent_tombstone=1 OR ?=1 " +
+                "THEN 1 ELSE 0 END " +
+                "WHERE account_id=? " +
+                "AND mailbox_name=? AND remote_uid=? AND expected_message_id=? " +
+                "AND (?<>'' OR expected_fingerprint=?)",
+                -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare renewed draft cleanup");
+        statement.bind_text (1, fingerprint);
+        statement.bind_int (2, effective_suppression ? 1 : 0);
+        statement.bind_int (3, effective_permanence ? 1 : 0);
+        statement.bind_text (4, account_id); statement.bind_text (5, mailbox_name);
+        statement.bind_text (6, remote_uid); statement.bind_text (7, canonical_id);
+        statement.bind_text (8, canonical_id); statement.bind_text (9, fingerprint);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not renew remote draft cleanup");
+        purge_cached_remote_draft_copy (account_id, mailbox_name, remote_uid,
+            canonical_id, effective_suppression, fingerprint);
+    }
+
+    private void queue_remote_draft_tombstone (string account_id,
+                                               string expected_message_id,
+                                               bool permanent_tombstone) throws MailError {
+        purge_expired_transient_draft_tombstones ();
+        string canonical_id = canonical_message_id (expected_message_id);
+        if (account_id == "" || canonical_id == "") return;
+        Sqlite.Statement statement;
+        const string sql = "INSERT OR IGNORE INTO pending_remote_draft_deletions(" +
+            "account_id,mailbox_name,remote_uid,expected_message_id,created_at," +
+            "suppress_reimport,permanent_tombstone) " +
+            "VALUES(?,'','',?,strftime('%s','now'),1,?)";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare in-flight draft discard");
+        statement.bind_text (1, account_id); statement.bind_text (2, canonical_id);
+        statement.bind_int (3, permanent_tombstone ? 1 : 0);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not preserve in-flight draft discard");
+        if (database.prepare_v2 ("UPDATE pending_remote_draft_deletions " +
+                "SET completed_at=0,created_at=strftime('%s','now')," +
+                "suppress_reimport=1,permanent_tombstone=" +
+                "CASE WHEN permanent_tombstone=1 OR ?=1 THEN 1 ELSE 0 END " +
+                "WHERE account_id=? AND mailbox_name='' " +
+                "AND remote_uid='' AND expected_message_id=?", -1,
+                out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare in-flight draft tombstone");
+        statement.bind_int (1, permanent_tombstone ? 1 : 0);
+        statement.bind_text (2, account_id); statement.bind_text (3, canonical_id);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not preserve in-flight draft tombstone");
+    }
+
+    private void purge_expired_transient_draft_tombstones () throws MailError {
+        execute ("DELETE FROM pending_remote_draft_deletions " +
+            "WHERE suppress_reimport=1 AND permanent_tombstone=0 AND " +
+            "((completed_at>0 AND completed_at<=strftime('%s','now')-" +
+            TRANSIENT_DRAFT_TOMBSTONE_SECONDS.to_string () + ") OR " +
+            "(completed_at=0 AND mailbox_name='' AND remote_uid='' " +
+            "AND created_at<=strftime('%s','now')-" +
+            TRANSIENT_DRAFT_TOMBSTONE_SECONDS.to_string () + "))");
+    }
+
+    private bool pending_remote_draft_identity (string account_id,
+                                                string internet_message_id,
+                                                string content_fingerprint,
+                                                string mailbox_name,
+                                                string remote_uid) throws MailError {
+        string candidate_id = canonical_message_id (internet_message_id);
+        string candidate_fingerprint = content_fingerprint.strip ();
+        if (candidate_id == "" && candidate_fingerprint == "") return false;
+        Sqlite.Statement statement;
+        string sql = "SELECT expected_message_id,expected_fingerprint," +
+            "mailbox_name,remote_uid FROM pending_remote_draft_deletions " +
+            "WHERE account_id=? AND ";
+        if (candidate_id != "")
+            sql += "expected_message_id IN (?,?) AND ";
+        else
+            sql += "expected_message_id='' AND expected_fingerprint=? " +
+                "AND mailbox_name=? AND remote_uid=? AND ";
+        sql += "suppress_reimport=1 AND " +
+            "(permanent_tombstone=1 OR " +
+            "(completed_at=0 AND mailbox_name<>'' AND remote_uid<>'') OR " +
+            "(CASE WHEN completed_at=0 THEN created_at ELSE completed_at END)>" +
+            "strftime('%s','now')-" +
+            TRANSIENT_DRAFT_TOMBSTONE_SECONDS.to_string () + ")";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect discarded provider drafts");
+        statement.bind_text (1, account_id);
+        if (candidate_id != "") {
+            statement.bind_text (2, candidate_id);
+            statement.bind_text (3, "<%s>".printf (candidate_id));
+        } else {
+            statement.bind_text (2, candidate_fingerprint);
+            statement.bind_text (3, mailbox_name);
+            statement.bind_text (4, remote_uid);
+        }
+        int row;
+        while ((row = statement.step ()) == Sqlite.ROW) {
+            string expected_id = canonical_message_id (statement.column_text (0));
+            if (candidate_id != "" && candidate_id == expected_id)
+                return true;
+            if (candidate_id == "" && expected_id == "" &&
+                candidate_fingerprint != "" &&
+                candidate_fingerprint == statement.column_text (1) &&
+                mailbox_name == statement.column_text (2) &&
+                remote_uid == statement.column_text (3))
+                return true;
+        }
+        if (row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not inspect discarded provider drafts");
+        return false;
+    }
+
+    private void purge_cached_remote_draft_copy (string account_id,
+                                                 string mailbox_name,
+                                                 string remote_uid,
+                                                 string internet_message_id,
+                                                 bool suppress_reimport,
+                                                 string expected_fingerprint) throws MailError {
+        string expected_id = canonical_message_id (internet_message_id);
+        string fingerprint = expected_fingerprint.strip ();
+        var ids = new Gee.HashSet<string> ();
+        Sqlite.Statement statement; int row;
+
+        // Message-ID is indexed. Query only Drafts/Archive copies so a Sent or
+        // Inbox message that legitimately preserves the ID is never hidden.
+        if (suppress_reimport && expected_id != "") {
+            const string identity_sql = "SELECT m.id FROM cached_messages m " +
+                "JOIN cached_mailboxes b ON b.id=m.mailbox_id " +
+                "WHERE m.account_id=? AND b.role IN (?,?) " +
+                "AND m.internet_message_id IN (?,?)";
+            if (database.prepare_v2 (identity_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare discarded draft identity cleanup");
+            statement.bind_text (1, account_id);
+            statement.bind_int (2, (int) MailboxRole.DRAFTS);
+            statement.bind_int (3, (int) MailboxRole.ARCHIVE);
+            statement.bind_text (4, expected_id);
+            statement.bind_text (5, "<%s>".printf (expected_id));
+            while ((row = statement.step ()) == Sqlite.ROW)
+                ids.add (statement.column_text (0));
+            if (row != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not inspect discarded draft identities");
+
+            // A provider can strip Message-ID from its All Mail view while
+            // retaining Mailficient's UUID/revision headers. New cache rows
+            // persist the verified derived identity so this remains indexed.
+            const string managed_sql = "SELECT m.id FROM cached_messages m " +
+                "JOIN cached_mailboxes b ON b.id=m.mailbox_id " +
+                "WHERE m.account_id=? AND b.role IN (?,?) " +
+                "AND m.managed_draft_identity<>'' " +
+                "AND m.managed_draft_identity<>'!' " +
+                "AND m.managed_draft_identity=?";
+            if (database.prepare_v2 (managed_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare managed draft copy cleanup");
+            statement.bind_text (1, account_id);
+            statement.bind_int (2, (int) MailboxRole.DRAFTS);
+            statement.bind_int (3, (int) MailboxRole.ARCHIVE);
+            statement.bind_text (4, expected_id);
+            while ((row = statement.step ()) == Sqlite.ROW)
+                ids.add (statement.column_text (0));
+            if (row != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not inspect managed draft copies");
+
+            // Rows created before managed_draft_identity existed have an
+            // empty migration marker. Parse their already-bounded raw headers
+            // once on this rare explicit-discard path, then persist either the
+            // verified identity or a negative marker for future indexed use.
+            var migrated_identities = new Gee.HashMap<string, string> ();
+            const string legacy_sql = "SELECT m.id,m.raw_headers," +
+                "m.internet_message_id FROM cached_messages m " +
+                "JOIN cached_mailboxes b ON b.id=m.mailbox_id " +
+                "WHERE m.account_id=? AND b.role IN (?,?) " +
+                "AND m.internet_message_id='' AND m.managed_draft_identity='' " +
+                "AND m.raw_headers LIKE '%X-Mailficient-Draft-ID:%' " +
+                "AND m.raw_headers LIKE '%X-Mailficient-Draft-Revision:%'";
+            if (database.prepare_v2 (legacy_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare legacy managed draft cleanup");
+            statement.bind_text (1, account_id);
+            statement.bind_int (2, (int) MailboxRole.DRAFTS);
+            statement.bind_int (3, (int) MailboxRole.ARCHIVE);
+            while ((row = statement.step ()) == Sqlite.ROW) {
+                string message_id = statement.column_text (0);
+                string managed_identity = managed_draft_identity_from_cached_headers (
+                    statement.column_text (1), statement.column_text (2));
+                migrated_identities[message_id] = managed_identity;
+                if (managed_identity == expected_id) ids.add (message_id);
+            }
+            if (row != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not inspect legacy managed draft copies");
+            const string migrate_sql = "UPDATE cached_messages SET " +
+                "managed_draft_identity=? WHERE id=? AND managed_draft_identity=''";
+            if (database.prepare_v2 (migrate_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare managed draft cache migration");
+            foreach (var message_id in migrated_identities.keys) {
+                statement.bind_text (1, migrated_identities[message_id]);
+                statement.bind_text (2, message_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not migrate managed draft cache identity");
+                statement.reset (); statement.clear_bindings ();
+            }
+            // Mark the remaining legacy no-ID rows in one bounded SQL update.
+            // They have no complete managed header pair and need not be parsed
+            // or accumulated in memory on every later Cancel.
+            const string negative_sql = "UPDATE cached_messages SET " +
+                "managed_draft_identity=? WHERE account_id=? " +
+                "AND internet_message_id='' AND managed_draft_identity='' " +
+                "AND mailbox_id IN (SELECT id FROM cached_mailboxes " +
+                "WHERE account_id=? AND role IN (?,?))";
+            if (database.prepare_v2 (negative_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare negative managed draft migration");
+            statement.bind_text (1, NO_MANAGED_DRAFT_IDENTITY);
+            statement.bind_text (2, account_id); statement.bind_text (3, account_id);
+            statement.bind_int (4, (int) MailboxRole.DRAFTS);
+            statement.bind_int (5, (int) MailboxRole.ARCHIVE);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not complete managed draft cache migration");
+        }
+
+        // The exact folder+UID lookup uses cached_mailboxes(account,remote)
+        // and cached_messages(account,mailbox,uid) indexes. For a no-ID draft,
+        // this row is the provider copy from which the editable mapping and
+        // fingerprint were established; the retained tombstone itself never
+        // falls back to UID alone.
+        if (mailbox_name != "" && remote_uid != "") {
+            const string location_sql = "SELECT m.id,m.internet_message_id," +
+                "m.draft_content_fingerprint " +
+                "FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id " +
+                "WHERE m.account_id=? AND b.account_id=? AND b.remote_name=? " +
+                "AND m.remote_uid=?";
+            if (database.prepare_v2 (location_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare discarded draft location cleanup");
+            statement.bind_text (1, account_id); statement.bind_text (2, account_id);
+            statement.bind_text (3, mailbox_name); statement.bind_text (4, remote_uid);
+            while ((row = statement.step ()) == Sqlite.ROW) {
+                string candidate_id = canonical_message_id (statement.column_text (1));
+                if ((expected_id != "" && candidate_id == expected_id) ||
+                    (fingerprint != "" && candidate_id == "" &&
+                     statement.column_text (2) == fingerprint))
+                    ids.add (statement.column_text (0));
+            }
+            if (row != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not inspect the discarded draft location");
+        }
+
+        foreach (var id in ids) delete_cached_message (id);
+    }
+
+    private static string canonical_message_id (string value) {
+        string result = value.strip ();
+        if (result.length >= 2 && result.has_prefix ("<") &&
+            result.has_suffix (">"))
+            result = result.substring (1, result.length - 2).strip ();
+        return result;
+    }
+
+    private static string managed_draft_identity_for_message (Message message) {
+        return managed_draft_identity_from_cached_headers (
+            message.raw_headers, message.internet_message_id);
+    }
+
+    private static string managed_draft_identity_from_cached_headers (
+        string raw_headers, string internet_message_id) {
+        string managed_id = raw_header_value (
+            raw_headers, "X-Mailficient-Draft-ID");
+        string revision_text = raw_header_value (
+            raw_headers, "X-Mailficient-Draft-Revision");
+        int64 revision = 0;
+        if (!Uuid.string_is_valid (managed_id))
+            return NO_MANAGED_DRAFT_IDENTITY;
+        if (!int64.try_parse (revision_text, out revision) || revision <= 0)
+            return NO_MANAGED_DRAFT_IDENTITY;
+        string expected = Draft.remote_message_id_for (managed_id, revision);
+        string actual = canonical_message_id (internet_message_id);
+        // Extension headers only verify a managed identity when Message-ID is
+        // absent or agrees exactly. Never let attacker-controlled conflicting
+        // headers turn an unrelated cached message into a purge candidate.
+        return actual == "" || actual == expected ? expected :
+            NO_MANAGED_DRAFT_IDENTITY;
+    }
+
+    private static string raw_header_value (string raw_headers, string target) {
+        string normalized = raw_headers.replace ("\r\n", "\n").replace ("\r", "\n");
+        foreach (var line in normalized.split ("\n")) {
+            if (line == "" || line[0] == ' ' || line[0] == '\t') continue;
+            int separator = line.index_of_char (':');
+            if (separator <= 0) continue;
+            if (line.substring (0, separator).strip ().ascii_casecmp (target) != 0)
+                continue;
+            return line.substring (separator + 1).strip ();
+        }
+        return "";
+    }
+
+    private static string draft_location_key (string mailbox_name, string remote_uid) {
+        return mailbox_name + "\x1f" + remote_uid;
+    }
+
+    private static string draft_fingerprint_location_key (string fingerprint,
+                                                          string mailbox_name,
+                                                          string remote_uid) {
+        return fingerprint + "\x1e" + draft_location_key (mailbox_name, remote_uid);
+    }
+
+    private void load_remote_draft_tombstones (string account_id,
+                                               Gee.Set<string> message_ids,
+                                               Gee.Set<string> fingerprint_locations) throws MailError {
+        Sqlite.Statement statement;
+        string sql = "SELECT expected_message_id,expected_fingerprint," +
+            "mailbox_name,remote_uid FROM pending_remote_draft_deletions " +
+            "WHERE account_id=? AND suppress_reimport=1 AND " +
+            "(permanent_tombstone=1 OR " +
+            "(completed_at=0 AND mailbox_name<>'' AND remote_uid<>'') OR " +
+            "(CASE WHEN completed_at=0 THEN created_at ELSE completed_at END)>" +
+            "strftime('%s','now')-" +
+            TRANSIENT_DRAFT_TOMBSTONE_SECONDS.to_string () + ")";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare discarded draft filtering");
+        statement.bind_text (1, account_id); int row;
+        while ((row = statement.step ()) == Sqlite.ROW) {
+            string message_id = canonical_message_id (statement.column_text (0));
+            if (message_id != "") message_ids.add (message_id);
+            else {
+                string fingerprint = statement.column_text (1);
+                string mailbox_name = statement.column_text (2);
+                string remote_uid = statement.column_text (3);
+                if (fingerprint != "" && mailbox_name != "" && remote_uid != "")
+                    fingerprint_locations.add (draft_fingerprint_location_key (
+                        fingerprint, mailbox_name, remote_uid));
+            }
+        }
+        if (row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not load discarded draft filtering");
     }
 
     public int draft_count () throws MailError {
@@ -1965,6 +2650,7 @@ public class CacheDatabase : Object, AccountStore {
             // Removing an account is local-only.  Do not contact the provider
             // later to delete Drafts that the user may still need there.
             delete_bound ("DELETE FROM pending_remote_draft_deletions WHERE account_id=?", id);
+            delete_bound ("DELETE FROM remote_draft_upload_attempts WHERE account_id=?", id);
             delete_bound ("DELETE FROM cached_messages WHERE account_id=?", id);
             delete_bound ("DELETE FROM cached_mailboxes WHERE account_id=?", id);
             delete_bound ("DELETE FROM outbox WHERE draft_id IN (SELECT id FROM drafts WHERE account_id=?)", id);
@@ -2028,7 +2714,8 @@ public class CacheDatabase : Object, AccountStore {
         } catch (MailError error) { try { execute ("ROLLBACK"); } catch (MailError ignored) { } throw error; }
     }
 
-    private void cache_message_row (Message message) throws MailError {
+    private void cache_message_row (Message message,
+                                    string draft_content_fingerprint = "") throws MailError {
         reconcile_moved_message_identity (message);
         unowned Sqlite.Statement message_statement;
         Sqlite.Statement? owned_message_statement = null;
@@ -2056,6 +2743,8 @@ public class CacheDatabase : Object, AccountStore {
         message_statement.bind_text (29, message.list_unsubscribe);
         message_statement.bind_text (30, message.list_unsubscribe_post);
         message_statement.bind_text (31, MessageSecurityService.bounded_raw_headers (message.raw_headers));
+        message_statement.bind_text (32, managed_draft_identity_for_message (message));
+        message_statement.bind_text (33, draft_content_fingerprint.strip ());
         if (message_statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not cache the message");
         if (bulk_sync_mode) { message_statement.reset (); message_statement.clear_bindings (); }
         Sqlite.Statement statement;
@@ -2092,7 +2781,7 @@ public class CacheDatabase : Object, AccountStore {
 
     private Sqlite.Statement prepare_message_statement () throws MailError {
         Sqlite.Statement statement;
-        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size,reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,bcc_recipients=excluded.bcc_recipients,message_size=excluded.message_size,reply_to=excluded.reply_to,authentication_results=excluded.authentication_results,list_unsubscribe=excluded.list_unsubscribe,list_unsubscribe_post=excluded.list_unsubscribe_post,raw_headers=excluded.raw_headers,content_extracted=1";
+        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size,reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,managed_draft_identity,draft_content_fingerprint,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,bcc_recipients=excluded.bcc_recipients,message_size=excluded.message_size,reply_to=excluded.reply_to,authentication_results=excluded.authentication_results,list_unsubscribe=excluded.list_unsubscribe,list_unsubscribe_post=excluded.list_unsubscribe_post,raw_headers=excluded.raw_headers,managed_draft_identity=excluded.managed_draft_identity,draft_content_fingerprint=excluded.draft_content_fingerprint,content_extracted=1";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare message caching");
         return statement;
     }
@@ -2122,13 +2811,75 @@ public class CacheDatabase : Object, AccountStore {
         try {
             bulk_sync_mode = true;
             bulk_message_statement = prepare_message_statement ();
+            var discarded_draft_ids = new Gee.HashSet<string> ();
+            var discarded_draft_fingerprint_locations = new Gee.HashSet<string> ();
+            load_remote_draft_tombstones (snapshot.account_id,
+                discarded_draft_ids, discarded_draft_fingerprint_locations);
+            var draft_container_ids = new Gee.HashSet<string> ();
+            var remote_mailbox_names = new Gee.HashMap<string, string> ();
+            foreach (var mailbox in snapshot.mailboxes) {
+                remote_mailbox_names[mailbox.id] = mailbox.remote_name;
+                if (mailbox.role == MailboxRole.DRAFTS ||
+                    mailbox.role == MailboxRole.ARCHIVE)
+                    draft_container_ids.add (mailbox.id);
+            }
+            // A provider may strip Message-ID while retaining Mailficient's
+            // draft identity headers. RemoteDraftSnapshot verifies those
+            // headers, so use its exact location only for this one batch; do
+            // not retain a UID-only tombstone that could hide later UID reuse.
+            var verified_discarded_locations = new Gee.HashSet<string> ();
+            var draft_fingerprints_by_location = new Gee.HashMap<string, string> ();
+            var verified_draft_copies = new Gee.ArrayList<RemoteDraftSnapshot> ();
+            verified_draft_copies.add_all (snapshot.remote_drafts);
+            verified_draft_copies.add_all (snapshot.verified_draft_copies);
+            foreach (var remote_draft in verified_draft_copies) {
+                string location_key = draft_location_key (
+                    remote_draft.mailbox_name, remote_draft.remote_uid);
+                if (remote_draft.content_fingerprint != "")
+                    draft_fingerprints_by_location[location_key] =
+                        remote_draft.content_fingerprint;
+                string identity = remote_draft.internet_message_id;
+                if (identity.strip () == "" && remote_draft.managed_by_mailficient)
+                    identity = Draft.remote_message_id_for (remote_draft.draft.id,
+                        remote_draft.draft.revision);
+                identity = canonical_message_id (identity);
+                bool discarded_identity = identity != "" &&
+                    discarded_draft_ids.contains (identity);
+                if (!discarded_identity && identity == "" &&
+                    remote_draft.content_fingerprint != "")
+                    discarded_identity = discarded_draft_fingerprint_locations.contains (
+                        draft_fingerprint_location_key (
+                            remote_draft.content_fingerprint,
+                            remote_draft.mailbox_name, remote_draft.remote_uid));
+                if (discarded_identity)
+                    verified_discarded_locations.add (draft_location_key (
+                        remote_draft.mailbox_name, remote_draft.remote_uid));
+            }
             if (snapshot.folder_inventory_complete) prune_missing_mailboxes (snapshot);
             foreach (var mailbox in snapshot.mailboxes) cache_mailbox_row (mailbox);
             foreach (var mailbox in snapshot.mailboxes) {
                 var remote_uids = snapshot.remote_uids_for (mailbox.id);
                 if (remote_uids != null) prune_missing_messages (mailbox.id, remote_uids);
             }
-            foreach (var message in snapshot.messages) cache_message_row (message);
+            foreach (var message in snapshot.messages) {
+                string message_id = canonical_message_id (message.internet_message_id);
+                string remote_mailbox = remote_mailbox_names[message.mailbox_id] ?? "";
+                string location_key = draft_location_key (
+                    remote_mailbox, message.remote_uid);
+                string verified_fingerprint =
+                    draft_fingerprints_by_location[location_key] ?? "";
+                bool discarded_draft = draft_container_ids.contains (message.mailbox_id) &&
+                    message_id != "" &&
+                    discarded_draft_ids.contains (message_id);
+                if (!discarded_draft && message_id == "" &&
+                    draft_container_ids.contains (message.mailbox_id)) {
+                    if (remote_mailbox != "" && message.remote_uid != "")
+                        discarded_draft = verified_discarded_locations.contains (
+                            draft_location_key (remote_mailbox, message.remote_uid));
+                }
+                if (discarded_draft) delete_cached_message (message.id);
+                else cache_message_row (message, verified_fingerprint);
+            }
             foreach (var state in snapshot.states) update_remote_message_state (state);
             reapply_pending_state (snapshot.account_id);
             bulk_message_statement = null; bulk_sync_mode = false;
@@ -2305,6 +3056,12 @@ public class CacheDatabase : Object, AccountStore {
             result.add (new Mailbox (statement.column_text (0), statement.column_text (1), statement.column_text (2), (MailboxRole) statement.column_int (3),
                 (uint) statement.column_int (4), statement.column_text (5), statement.column_text (6)));
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load cached mailboxes");
+        // A provider such as Gmail reports All Mail's unread count including
+        // unread Inbox copies. Keep an account's Archive badge consistent
+        // with the filtered Archive rows the user can actually open.
+        foreach (var mailbox in result)
+            if (mailbox.role == MailboxRole.ARCHIVE)
+                mailbox.unread_count = archive_unread_count (mailbox.id);
         return result;
     }
 
@@ -2351,28 +3108,36 @@ public class CacheDatabase : Object, AccountStore {
 
     private static string cached_mailbox_predicate (string mailbox_id, out bool bind_mailbox) {
         string predicate; bind_mailbox = false;
+        // Gmail stores one physical row per folder for the same logical
+        // message. All Mail is exposed as role=ARCHIVE, but an Archive view
+        // should contain only messages which no longer have an Inbox, Drafts,
+        // Sent, Junk, or Trash owner. The account + Message-ID index keeps
+        // this correlated check bounded, and blank Message-IDs remain visible rather than
+        // risking a false match.
+        string archived_only = "NOT EXISTS(" +
+            "SELECT 1 FROM cached_messages other " +
+            "JOIN cached_mailboxes other_box ON other_box.id=other.mailbox_id " +
+            "WHERE other.account_id=m.account_id AND m.internet_message_id<>'' " +
+            "AND other.internet_message_id=m.internet_message_id " +
+            "AND other_box.role IN (0,3,4,5,6))";
         switch (mailbox_id) {
         case "unified-inbox": predicate = "b.role=0"; break;
         case "unified-vip": predicate = "EXISTS(SELECT 1 FROM vip_senders v WHERE v.address=m.sender_address COLLATE NOCASE)"; break;
         case "unified-flagged": predicate = "m.flagged=1"; break;
         case "unified-sent": predicate = "b.role=4"; break;
         case "unified-archive":
-            // Gmail exposes All Mail as a separate folder, so one message can
-            // have an All Mail row while it also has an Inbox, Junk, or Trash
-            // row. Archive is the user's filing view, not a raw copy of All
-            // Mail: suppress those copies when the same message is present in
-            // a mailbox that owns it instead.
-            predicate = "b.role=7 AND NOT EXISTS(" +
-                "SELECT 1 FROM cached_messages other " +
-                "JOIN cached_mailboxes other_box ON other_box.id=other.mailbox_id " +
-                "WHERE other.account_id=m.account_id AND m.internet_message_id<>'' " +
-                "AND other.internet_message_id=m.internet_message_id " +
-                "AND other_box.role IN (0,5,6))";
+            predicate = "b.role=7 AND " + archived_only;
             break;
         case "unified-junk": predicate = "b.role=5"; break;
         case "unified-trash": predicate = "b.role=6"; break;
         case "unified-snoozed": predicate = "EXISTS(SELECT 1 FROM snoozed_messages s WHERE s.message_id=m.id AND s.until_unix>strftime('%s','now'))"; break;
-        default: predicate = "m.mailbox_id=?"; bind_mailbox = true; break;
+        default:
+            // Apply the same logical Archive semantics when the user expands
+            // an account and opens its physical All Mail folder. Other folder
+            // roles retain the exact mailbox query.
+            predicate = "m.mailbox_id=? AND (b.role<>7 OR " + archived_only + ")";
+            bind_mailbox = true;
+            break;
         }
         if (mailbox_id != "unified-snoozed")
             predicate += " AND NOT EXISTS(SELECT 1 FROM snoozed_messages s WHERE s.message_id=m.id AND s.until_unix>strftime('%s','now'))";
@@ -2652,6 +3417,31 @@ public class CacheDatabase : Object, AccountStore {
         return (uint) statement.column_int (0);
     }
 
+    // Preserve the server's authoritative unread total for mail outside the
+    // bounded local window, but subtract cached unread All Mail rows which are
+    // hidden because their logical message is still owned by another standard
+    // mailbox such as Inbox or Sent.
+    // With an empty mailbox_id this returns the adjusted total for every
+    // account; otherwise it returns the account Archive mailbox's badge.
+    public uint archive_unread_count (string mailbox_id = "") throws MailError {
+        Sqlite.Statement statement;
+        string sql = "SELECT COALESCE(SUM(MAX(0,b.unread_count-(" +
+            "SELECT COUNT(*) FROM cached_messages m WHERE m.mailbox_id=b.id AND m.unread=1 AND EXISTS(" +
+            "SELECT 1 FROM cached_messages other " +
+            "JOIN cached_mailboxes other_box ON other_box.id=other.mailbox_id " +
+            "WHERE other.account_id=m.account_id AND m.internet_message_id<>'' " +
+            "AND other.internet_message_id=m.internet_message_id " +
+            "AND other_box.role IN (0,3,4,5,6))" +
+            "))),0) FROM cached_mailboxes b WHERE b.role=7";
+        if (mailbox_id != "") sql += " AND b.id=?";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not count visible unread Archive mail");
+        if (mailbox_id != "") statement.bind_text (1, mailbox_id);
+        if (statement.step () != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not count visible unread Archive mail");
+        return (uint) statement.column_int (0);
+    }
+
     public int cached_message_count (string account_id) throws MailError {
         Sqlite.Statement statement;
         if (database.prepare_v2 ("SELECT COUNT(*) FROM cached_messages WHERE account_id=?", -1, out statement) != Sqlite.OK)
@@ -2689,31 +3479,34 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public bool set_cached_read (string id, bool read) throws MailError {
-        string? changed_account = null;
+        var changed_accounts = new Gee.HashSet<string> ();
         bool changed = false;
         execute ("BEGIN IMMEDIATE");
         try {
-            Sqlite.Statement lookup;
-            if (database.prepare_v2 ("SELECT unread,mailbox_id FROM cached_messages WHERE id=?", -1, out lookup) != Sqlite.OK)
-                throw new MailError.STORAGE ("Could not prepare cached read-state update");
-            lookup.bind_text (1, id);
-            int row = lookup.step ();
-            if (row != Sqlite.ROW && row != Sqlite.DONE)
-                throw new MailError.STORAGE ("Could not inspect cached read state");
-            if (row == Sqlite.ROW) {
-                int previous = lookup.column_int (0);
-                string mailbox_id = lookup.column_text (1);
-                int unread = read ? 0 : 1;
-                if (previous != unread) {
+            foreach (var logical_id in logical_cached_message_ids (id)) {
+                Sqlite.Statement lookup;
+                if (database.prepare_v2 ("SELECT unread,mailbox_id FROM cached_messages WHERE id=?", -1, out lookup) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare cached read-state update");
+                lookup.bind_text (1, logical_id);
+                int row = lookup.step ();
+                if (row != Sqlite.ROW && row != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not inspect cached read state");
+                if (row == Sqlite.ROW) {
+                    int previous = lookup.column_int (0);
+                    string mailbox_id = lookup.column_text (1);
+                    int unread = read ? 0 : 1;
+                    if (previous == unread) continue;
                     changed = true;
-                    update_cached_flag (id, "unread", unread);
+                    update_cached_flag (logical_id, "unread", unread);
                     Sqlite.Statement count;
                     if (database.prepare_v2 ("UPDATE cached_mailboxes SET unread_count=MAX(0,unread_count+?) WHERE id=?", -1, out count) != Sqlite.OK)
                         throw new MailError.STORAGE ("Could not prepare mailbox unread-count update");
                     count.bind_int (1, unread - previous); count.bind_text (2, mailbox_id);
                     if (count.step () != Sqlite.DONE)
                         throw new MailError.STORAGE ("Could not update the mailbox unread count");
-                    changed_account = queue_message_state_rows (id, MessageStateField.READ, read);
+                    string? changed_account = queue_message_state_rows (
+                        logical_id, MessageStateField.READ, read);
+                    if (changed_account != null) changed_accounts.add (changed_account);
                 }
             }
             execute ("COMMIT");
@@ -2721,40 +3514,94 @@ public class CacheDatabase : Object, AccountStore {
             try { execute ("ROLLBACK"); } catch (MailError ignored) { }
             throw error;
         }
-        if (changed_account != null) mutation_queued (changed_account);
+        foreach (var account_id in changed_accounts) mutation_queued (account_id);
         return changed;
     }
-    public void set_cached_flagged (string id, bool flagged) throws MailError {
-        string? changed_account = null;
+    public bool set_cached_flagged (string id, bool flagged) throws MailError {
+        var changed_accounts = new Gee.HashSet<string> ();
+        bool changed = false;
         execute ("BEGIN IMMEDIATE");
         try {
-            update_cached_flag (id, "flagged", flagged ? 1 : 0);
-            changed_account = queue_message_state_rows (id, MessageStateField.FLAGGED, flagged);
+            foreach (var logical_id in logical_cached_message_ids (id)) {
+                Sqlite.Statement lookup;
+                if (database.prepare_v2 ("SELECT flagged FROM cached_messages WHERE id=?", -1, out lookup) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare cached flag-state inspection");
+                lookup.bind_text (1, logical_id);
+                int row = lookup.step ();
+                if (row != Sqlite.ROW && row != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not inspect cached flag state");
+                if (row != Sqlite.ROW || (lookup.column_int (0) != 0) == flagged) continue;
+                changed = true;
+                update_cached_flag (logical_id, "flagged", flagged ? 1 : 0);
+                string? changed_account = queue_message_state_rows (
+                    logical_id, MessageStateField.FLAGGED, flagged);
+                if (changed_account != null) changed_accounts.add (changed_account);
+            }
             execute ("COMMIT");
         } catch (MailError error) {
             try { execute ("ROLLBACK"); } catch (MailError ignored) { }
             throw error;
         }
-        if (changed_account != null) mutation_queued (changed_account);
+        foreach (var account_id in changed_accounts) mutation_queued (account_id);
+        return changed;
     }
 
-    public void set_cached_flag_color (string id, string color) throws MailError {
-        string? changed_account = null;
+    public bool set_cached_flag_color (string id, string color) throws MailError {
+        var changed_accounts = new Gee.HashSet<string> ();
+        bool changed = false;
         execute ("BEGIN IMMEDIATE");
         try {
-            Sqlite.Statement statement;
-            if (database.prepare_v2 ("UPDATE cached_messages SET flag_color=?,flagged=1 WHERE id=?", -1, out statement) != Sqlite.OK)
-                throw new MailError.STORAGE ("Could not prepare flag color update");
-            statement.bind_text (1, color); statement.bind_text (2, id);
-            if (statement.step () != Sqlite.DONE)
-                throw new MailError.STORAGE ("Could not update flag color");
-            changed_account = queue_message_state_rows (id, MessageStateField.FLAGGED, true);
+            foreach (var logical_id in logical_cached_message_ids (id)) {
+                Sqlite.Statement lookup;
+                if (database.prepare_v2 ("SELECT flagged,flag_color FROM cached_messages WHERE id=?", -1, out lookup) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare flag color inspection");
+                lookup.bind_text (1, logical_id);
+                int row = lookup.step ();
+                if (row != Sqlite.ROW && row != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not inspect flag color");
+                if (row != Sqlite.ROW) continue;
+                bool was_flagged = lookup.column_int (0) != 0;
+                if (was_flagged && lookup.column_text (1) == color) continue;
+                changed = true;
+                Sqlite.Statement statement;
+                if (database.prepare_v2 ("UPDATE cached_messages SET flag_color=?,flagged=1 WHERE id=?", -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare flag color update");
+                statement.bind_text (1, color); statement.bind_text (2, logical_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not update flag color");
+                if (!was_flagged) {
+                    string? changed_account = queue_message_state_rows (
+                        logical_id, MessageStateField.FLAGGED, true);
+                    if (changed_account != null) changed_accounts.add (changed_account);
+                }
+            }
             execute ("COMMIT");
         } catch (MailError error) {
             try { execute ("ROLLBACK"); } catch (MailError ignored) { }
             throw error;
         }
-        if (changed_account != null) mutation_queued (changed_account);
+        foreach (var account_id in changed_accounts) mutation_queued (account_id);
+        return changed;
+    }
+
+    // Gmail and some other providers cache the same logical email in Inbox,
+    // All Mail, and label folders. A state action applies to every physical
+    // copy so grouped favorites cannot be kept alive by a stale sibling.
+    private Gee.ArrayList<string> logical_cached_message_ids (string id) throws MailError {
+        var ids = new Gee.ArrayList<string> ();
+        Sqlite.Statement statement;
+        const string sql = "SELECT sibling.id FROM cached_messages selected " +
+            "JOIN cached_messages sibling ON sibling.account_id=selected.account_id " +
+            "AND ((selected.internet_message_id<>'' AND sibling.internet_message_id=selected.internet_message_id) " +
+            "OR sibling.id=selected.id) WHERE selected.id=? ORDER BY sibling.id";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare logical message state update");
+        statement.bind_text (1, id);
+        int row;
+        while ((row = statement.step ()) == Sqlite.ROW) ids.add (statement.column_text (0));
+        if (row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not resolve logical message copies");
+        return ids;
     }
 
     private void update_cached_flag (string id, string column, int value) throws MailError {
@@ -2911,11 +3758,13 @@ public class CacheDatabase : Object, AccountStore {
                     "id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged," +
                     "has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id," +
                     "in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size," +
-                    "reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,content_extracted) " +
+                    "reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,managed_draft_identity," +
+                    "draft_content_fingerprint,content_extracted) " +
                     "SELECT ?,?,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment," +
                     "conversation_count,has_remote_content,body_html,account_id,remote_uid," +
                     "internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size," +
-                    "reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,content_extracted " +
+                    "reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,managed_draft_identity," +
+                    "draft_content_fingerprint,content_extracted " +
                     "FROM cached_messages WHERE id=?";
                 if (database.prepare_v2 (copy_message, -1, out statement) != Sqlite.OK)
                     throw new MailError.STORAGE ("Could not prepare the local message copy");

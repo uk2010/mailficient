@@ -4,6 +4,7 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
     public signal void accounts_changed ();
 
     private CacheDatabase cache;
+    private MailSettingsStore settings;
     private CredentialStore credentials;
     private CredentialCleanupService credential_cleanup;
     private AccountProvisioningService? account_provisioner;
@@ -19,7 +20,8 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
                                  AccountProvisioningService? account_provisioner, MailEngine? engine,
                                  AccountSyncService? sync_service,
                                  OnlineAccountService online_accounts, bool onboarding = false) {
-        this.cache = cache; this.credentials = credentials; this.credential_cleanup = credential_cleanup;
+        this.cache = cache; this.settings = new MailSettingsStore (cache);
+        this.credentials = credentials; this.credential_cleanup = credential_cleanup;
         this.account_provisioner = account_provisioner;
         this.engine = engine; this.sync_service = sync_service;
         this.online_accounts = online_accounts;
@@ -161,10 +163,12 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
         filters.append (filter);
         dialog.filters = filters;
         dialog.default_filter = filter;
+        dialog.initial_folder = settings.file_dialog_initial_folder ();
         try {
             var root_window = get_root () as Gtk.Window;
             if (root_window == null) return;
             var file = yield dialog.open (root_window, null);
+            settings.remember_file_dialog_selection (file);
             var info = yield file.query_info_async (
                 FileAttribute.STANDARD_SIZE + "," + FileAttribute.STANDARD_TYPE,
                 FileQueryInfoFlags.NOFOLLOW_SYMLINKS, Priority.DEFAULT, null);
@@ -183,7 +187,7 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
             account_dialog.present (this);
             status.visible = false;
         } catch (Error error) {
-            if (!(error is IOError.CANCELLED)) show_profile_error (error);
+            if (!DialogErrors.was_cancelled (error)) show_profile_error (error);
         }
     }
 

@@ -1,4 +1,40 @@
 namespace Mailficient {
+private class MailboxRowContent : Gtk.Box {
+    private Gtk.Image mailbox_icon = new Gtk.Image ();
+    private Gtk.Label mailbox_label = new Gtk.Label ("");
+    private Gtk.Label count_label = new Gtk.Label ("");
+
+    public MailboxRowContent (Mailbox mailbox) {
+        Object (orientation: Gtk.Orientation.HORIZONTAL, spacing: 9);
+        set_margin_start (8); set_margin_end (8);
+        set_margin_top (6); set_margin_bottom (6);
+        append (mailbox_icon);
+        mailbox_label.xalign = 0; mailbox_label.hexpand = true;
+        append (mailbox_label);
+        count_label.add_css_class ("mailbox-count");
+        append (count_label);
+        update (mailbox);
+    }
+
+    public void update (Mailbox mailbox) {
+        mailbox_icon.icon_name = mailbox.icon_name;
+        mailbox_label.label = mailbox.name;
+        count_label.label = mailbox.unread_count.to_string ();
+        count_label.visible = mailbox.unread_count > 0;
+        if (mailbox.unread_count == 0) {
+            count_label.tooltip_text = null;
+            return;
+        }
+        string unit = mailbox.role == MailboxRole.DRAFTS ? "draft" :
+            (mailbox.id == CachedMailRepository.TASK_TODAY_ID ||
+             mailbox.id == CachedMailRepository.TASK_PLANNED_ID) ? "open task" :
+            mailbox.id == CachedMailRepository.LOCAL_OUTBOX_ID ? "queued message" :
+            "unread message";
+        count_label.tooltip_text = "%u %s%s".printf (mailbox.unread_count, unit,
+            mailbox.unread_count == 1 ? "" : "s");
+    }
+}
+
 public class MailboxSidebar : Gtk.Box {
     public signal void mailbox_selected (Mailbox mailbox);
     public signal void create_folder_requested (AccountSettings account, Mailbox? parent);
@@ -14,11 +50,16 @@ public class MailboxSidebar : Gtk.Box {
     private MailRepository repository;
     private CacheDatabase cache;
     private Gee.HashMap<string, Gtk.ListBoxRow> mailbox_rows = new Gee.HashMap<string, Gtk.ListBoxRow> ();
+    private Gee.HashMap<string, Gee.ArrayList<Gtk.ListBoxRow>> mailbox_row_copies =
+        new Gee.HashMap<string, Gee.ArrayList<Gtk.ListBoxRow>> ();
     private Gee.HashMap<string, Gtk.ListBox> mailbox_owners = new Gee.HashMap<string, Gtk.ListBox> ();
     private Gee.ArrayList<Gtk.ListBox> account_lists = new Gee.ArrayList<Gtk.ListBox> ();
     private Gee.HashSet<string> collapsed_accounts = new Gee.HashSet<string> ();
+    private Gee.HashSet<string> expanded_accounts = new Gee.HashSet<string> ();
     private Gee.HashMap<string, Mailbox> known_mailboxes = new Gee.HashMap<string, Mailbox> ();
+    private Gee.ArrayList<Mailbox> known_mailbox_order = new Gee.ArrayList<Mailbox> ();
     private string selected_mailbox_id = "";
+    private weak Gtk.ListBoxRow? active_row;
     private bool suppress_announcement;
     private uint smart_count_refresh_source;
 
@@ -43,6 +84,7 @@ public class MailboxSidebar : Gtk.Box {
                 var mailbox = row.get_data<Mailbox> ("mailbox");
                 if (mailbox != null) {
                     foreach (var account_list in account_lists) account_list.unselect_all ();
+                    mark_active_row (row);
                     announce_selection (mailbox);
                 }
             }
@@ -68,33 +110,20 @@ public class MailboxSidebar : Gtk.Box {
         reload ();
     }
 
-    private Gtk.Box row_content (Mailbox mailbox) {
-        var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
-        box.set_margin_start (8); box.set_margin_end (8); box.set_margin_top (6); box.set_margin_bottom (6);
-        box.append (new Gtk.Image.from_icon_name (mailbox.icon_name));
-        var label = new Gtk.Label (mailbox.name); label.xalign = 0; label.hexpand = true; box.append (label);
-        if (mailbox.unread_count > 0) {
-            var count = new Gtk.Label (mailbox.unread_count.to_string ());
-            count.add_css_class ("mailbox-count");
-            string unit = mailbox.role == MailboxRole.DRAFTS ? "draft" :
-                (mailbox.id == CachedMailRepository.TASK_TODAY_ID ||
-                 mailbox.id == CachedMailRepository.TASK_PLANNED_ID) ? "open task" :
-                mailbox.id == CachedMailRepository.LOCAL_OUTBOX_ID ? "queued message" : "unread message";
-            count.tooltip_text = "%u %s%s".printf (mailbox.unread_count, unit,
-                mailbox.unread_count == 1 ? "" : "s");
-            box.append (count);
-        }
-        return box;
-    }
-
     private Gtk.ListBoxRow create_row (Mailbox mailbox) {
         var row = new Gtk.ListBoxRow ();
         row.set_data<Mailbox> ("mailbox", mailbox);
-        row.set_child (row_content (mailbox));
+        row.set_child (new MailboxRowContent (mailbox));
         if (mailbox.account_id != "" || mailbox.role == MailboxRole.TRASH ||
             mailbox.role == MailboxRole.JUNK) {
             var context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
-            context_click.pressed.connect ((count, x, y) => show_folder_menu (row, mailbox));
+            context_click.pressed.connect ((count, x, y) => {
+                // Count refreshes replace the row's Mailbox snapshot. Resolve
+                // it at click time so folder actions never use stale names or
+                // provider paths captured by the original closure.
+                var current = row.get_data<Mailbox> ("mailbox");
+                if (current != null) show_folder_menu (row, current);
+            });
             row.add_controller (context_click);
         }
         return row;
@@ -103,6 +132,12 @@ public class MailboxSidebar : Gtk.Box {
     private void append_mailbox (Gtk.ListBox owner, Mailbox mailbox) {
         var row = create_row (mailbox); owner.append (row);
         if (owner == list) add_favorite_drag_and_drop (row, mailbox.id);
+        var copies = mailbox_row_copies[mailbox.id];
+        if (copies == null) {
+            copies = new Gee.ArrayList<Gtk.ListBoxRow> ();
+            mailbox_row_copies[mailbox.id] = copies;
+        }
+        copies.add (row);
         // Demo mode also mirrors its folders below Favorites. Prefer the first
         // visible occurrence so restoring Inbox selects the favorite row.
         if (!mailbox_rows.has_key (mailbox.id)) {
@@ -328,9 +363,14 @@ public class MailboxSidebar : Gtk.Box {
 
     private void add_account_group (string account_id, string display_name, string email,
                                     Gee.List<Mailbox> mailboxes, bool allow_folder_creation) {
+        bool first_account = account_lists.size == 0;
         var row = new Gtk.ListBoxRow (); row.selectable = false; row.activatable = false;
         var expander = new Gtk.Expander (null);
-        expander.expanded = !collapsed_accounts.contains (account_id);
+        // Account folders repeat several unified favorites. Keep them one
+        // click away without making the default navigation unnecessarily
+        // long; an explicitly expanded account remains expanded on restart.
+        expander.expanded = expanded_accounts.contains (account_id) &&
+            !collapsed_accounts.contains (account_id);
         expander.notify["expanded"].connect (() => {
             set_account_collapsed (account_id, !expander.expanded);
         });
@@ -361,6 +401,7 @@ public class MailboxSidebar : Gtk.Box {
                 list.unselect_all ();
                 foreach (var account_list in account_lists)
                     if (account_list != folders) account_list.unselect_all ();
+                mark_active_row (folder_row);
                 announce_selection (mailbox);
             }
         });
@@ -375,29 +416,68 @@ public class MailboxSidebar : Gtk.Box {
             }
             append_mailbox (folders, mailbox);
         }
-        expander.child = folders; row.set_child (expander); list.append (row);
+        expander.child = folders; row.set_child (expander);
+        if (first_account) {
+            var section = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            var separator = new Gtk.Separator (Gtk.Orientation.HORIZONTAL);
+            separator.set_margin_start (10); separator.set_margin_end (10);
+            separator.set_margin_top (10); separator.set_margin_bottom (8);
+            section.append (separator);
+            var heading = new Gtk.Label ("Accounts");
+            heading.xalign = 0; heading.add_css_class ("heading");
+            heading.set_margin_start (14); heading.set_margin_bottom (2);
+            section.append (heading);
+            row.set_header (section);
+        }
+        list.append (row);
     }
 
     private void load_collapsed_accounts () {
         try {
             foreach (var id in cache.preference ("collapsed-sidebar-accounts", "").split ("\n"))
                 if (id.strip () != "") collapsed_accounts.add (id.strip ());
+            foreach (var id in cache.preference ("expanded-sidebar-accounts", "").split ("\n"))
+                if (id.strip () != "") expanded_accounts.add (id.strip ());
         } catch (Error error) {
-            warning ("Could not load collapsed sidebar accounts: %s", error.message);
+            warning ("Could not load sidebar account state: %s", error.message);
         }
     }
 
     private void set_account_collapsed (string account_id, bool collapsed) {
-        bool changed = collapsed ? collapsed_accounts.add (account_id) :
+        bool collapsed_changed = collapsed ? collapsed_accounts.add (account_id) :
             collapsed_accounts.remove (account_id);
-        if (!changed) return;
-        var serialized = new StringBuilder ();
+        bool expanded_changed = collapsed ? expanded_accounts.remove (account_id) :
+            expanded_accounts.add (account_id);
+        if (!collapsed_changed && !expanded_changed) return;
+        var collapsed_serialized = new StringBuilder ();
         foreach (var id in collapsed_accounts) {
-            if (serialized.len > 0) serialized.append_c ('\n');
-            serialized.append (id);
+            if (collapsed_serialized.len > 0) collapsed_serialized.append_c ('\n');
+            collapsed_serialized.append (id);
         }
-        try { cache.set_preference ("collapsed-sidebar-accounts", serialized.str); }
+        var expanded_serialized = new StringBuilder ();
+        foreach (var id in expanded_accounts) {
+            if (expanded_serialized.len > 0) expanded_serialized.append_c ('\n');
+            expanded_serialized.append (id);
+        }
+        try {
+            cache.set_preference ("collapsed-sidebar-accounts", collapsed_serialized.str);
+            cache.set_preference ("expanded-sidebar-accounts", expanded_serialized.str);
+        }
         catch (Error error) { warning ("Could not save collapsed sidebar accounts: %s", error.message); }
+    }
+
+    private void mark_active_row (Gtk.ListBoxRow? row) {
+        if (active_row != null && active_row != row) {
+            active_row.remove_css_class ("active-mailbox");
+            active_row.unset_state_flags (Gtk.StateFlags.SELECTED);
+        }
+        active_row = row;
+        if (active_row != null) {
+            // GtkListBox owns selection, while the explicit state keeps the
+            // custom rounded row selected after its count child changes.
+            active_row.add_css_class ("active-mailbox");
+            active_row.set_state_flags (Gtk.StateFlags.SELECTED, false);
+        }
     }
 
     public void reload (bool announce = true) {
@@ -405,12 +485,18 @@ public class MailboxSidebar : Gtk.Box {
         DebugTrace.log ("sidebar", "reload begin announce=%s selected=%s".printf (announce.to_string (), selected_mailbox_id));
         suppress_announcement = !announce;
         string restore_id = selected_mailbox_id;
+        mark_active_row (null);
         Gtk.ListBoxRow? existing;
         while ((existing = list.get_row_at_index (0)) != null) list.remove (existing);
-        mailbox_rows.clear (); mailbox_owners.clear (); account_lists.clear ();
+        mailbox_rows.clear (); mailbox_row_copies.clear ();
+        mailbox_owners.clear (); account_lists.clear ();
         known_mailboxes.clear ();
+        known_mailbox_order.clear ();
         var mailboxes = repository.list_mailboxes ();
-        foreach (var mailbox in mailboxes) known_mailboxes[mailbox.id] = mailbox;
+        foreach (var mailbox in mailboxes) {
+            known_mailboxes[mailbox.id] = mailbox;
+            known_mailbox_order.add (mailbox);
+        }
         DebugTrace.log ("sidebar", "repository.list_mailboxes returned count=%d".printf (mailboxes.size));
         try {
             var accounts = cache.list_accounts ();
@@ -440,56 +526,75 @@ public class MailboxSidebar : Gtk.Box {
     public void refresh_counts () {
         var current = new Gee.HashMap<string, Mailbox> ();
         known_mailboxes.clear ();
+        known_mailbox_order.clear ();
         foreach (var mailbox in repository.list_mailboxes ()) {
             current[mailbox.id] = mailbox;
             known_mailboxes[mailbox.id] = mailbox;
+            known_mailbox_order.add (mailbox);
         }
         foreach (var id in mailbox_rows.keys) {
             var mailbox = current[id];
-            var row = mailbox_rows[id];
-            if (mailbox != null && row != null) row.set_child (row_content (mailbox));
+            if (mailbox != null) update_row_copies (id, mailbox);
         }
     }
 
-    // Reading a message changes one cached mailbox counter. Rebuilding every
-    // synthetic mailbox here performs several cache-wide smart-mailbox scans
-    // on GTK's main thread, which becomes increasingly expensive as mail is
-    // accumulated. Update the cheap role totals locally and defer a complete
-    // refresh only when a grouped/smart count may actually have changed.
-    public void message_marked_read (Message message) {
-        if (!message.unread) return;
+    // State-only actions update visible folder badges in place. An
+    // authoritative refresh is coalesced for provider duplicates and custom
+    // smart folders, but the message list and reading pane are left intact.
+    public void message_read_state_changed (Message message, bool unread) {
+        int delta = unread ? 1 : -1;
+        var affected = new Gee.HashSet<string> ();
+        affected.add (message.mailbox_id);
         var source = known_mailboxes[message.mailbox_id];
         if (source != null) {
             switch (source.role) {
-            case MailboxRole.INBOX: decrement_count ("unified-inbox"); break;
-            case MailboxRole.SENT: decrement_count ("unified-sent"); break;
-            case MailboxRole.ARCHIVE: decrement_count ("unified-archive"); break;
-            case MailboxRole.JUNK: decrement_count ("unified-junk"); break;
-            case MailboxRole.TRASH: decrement_count ("unified-trash"); break;
+            case MailboxRole.INBOX: affected.add ("unified-inbox"); break;
+            case MailboxRole.SENT: affected.add ("unified-sent"); break;
+            case MailboxRole.ARCHIVE: affected.add ("unified-archive"); break;
+            case MailboxRole.JUNK: affected.add ("unified-junk"); break;
+            case MailboxRole.TRASH: affected.add ("unified-trash"); break;
             default: break;
             }
         }
         try {
-            if (cache.message_is_snoozed (message.id)) decrement_count ("unified-snoozed");
-            if (message.flagged || repository.sender_is_vip (message)) queue_smart_count_refresh ();
+            if (cache.message_is_snoozed (message.id)) affected.add ("unified-snoozed");
+            if (message.flagged) affected.add (known_mailboxes.has_key ("unified-flagged") ?
+                "unified-flagged" : "flagged");
+            if (repository.sender_is_vip (message)) affected.add (known_mailboxes.has_key ("unified-vip") ?
+                "unified-vip" : "vip");
         } catch (Error error) {
             // The message was already updated durably. A later sync will
             // refresh any count whose auxiliary lookup was unavailable.
             warning ("Could not update a derived mailbox count: %s", error.message);
         }
-        foreach (var id in known_mailboxes.keys)
-            if (id.has_prefix (CachedMailRepository.SMART_MAILBOX_PREFIX)) {
-                queue_smart_count_refresh ();
-                break;
-            }
+        foreach (var id in affected) adjust_count (id, delta);
+        queue_smart_count_refresh ();
     }
 
-    private void decrement_count (string id) {
+    public void message_flag_state_changed (Message message, bool flagged) {
+        if (message.unread)
+            adjust_count (known_mailboxes.has_key ("unified-flagged") ?
+                "unified-flagged" : "flagged", flagged ? 1 : -1);
+        queue_smart_count_refresh ();
+    }
+
+    private void update_row_copies (string id, Mailbox mailbox) {
+        var copies = mailbox_row_copies[id];
+        if (copies == null) return;
+        foreach (var row in copies) {
+            row.set_data<Mailbox> ("mailbox", mailbox);
+            var content = row.child as MailboxRowContent;
+            if (content != null) content.update (mailbox);
+        }
+    }
+
+    private void adjust_count (string id, int delta) {
         var mailbox = known_mailboxes[id];
-        var row = mailbox_rows[id];
-        if (mailbox == null || row == null || mailbox.unread_count == 0) return;
-        mailbox.unread_count--;
-        row.set_child (row_content (mailbox));
+        if (mailbox == null) return;
+        int next = int.max (0, (int) mailbox.unread_count + delta);
+        if (next == (int) mailbox.unread_count) return;
+        mailbox.unread_count = (uint) next;
+        update_row_copies (id, mailbox);
     }
 
     private void queue_smart_count_refresh () {
@@ -511,21 +616,35 @@ public class MailboxSidebar : Gtk.Box {
         if (owner == list) {
             foreach (var account_list in account_lists) account_list.unselect_all ();
         } else {
+            var expander = owner.get_ancestor (typeof (Gtk.Expander)) as Gtk.Expander;
+            if (expander != null && !expander.expanded) expander.expanded = true;
             list.unselect_all ();
             foreach (var account_list in account_lists)
                 if (account_list != owner) account_list.unselect_all ();
         }
         if (owner.get_selected_row () == row) {
+            mark_active_row (row);
             var mailbox = row.get_data<Mailbox> ("mailbox");
             if (mailbox != null) announce_selection (mailbox);
         } else owner.select_row (row);
         return true;
     }
 
+    public Mailbox? mailbox_for_id (string id) {
+        return known_mailboxes[id];
+    }
+
+    public Gee.List<Mailbox> current_mailboxes () {
+        var result = new Gee.ArrayList<Mailbox> ();
+        result.add_all (known_mailbox_order);
+        return result;
+    }
+
     public void clear_selection () {
         selected_mailbox_id = "";
         list.unselect_all ();
         foreach (var account_list in account_lists) account_list.unselect_all ();
+        mark_active_row (null);
     }
 }
 }

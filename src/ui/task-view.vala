@@ -15,6 +15,8 @@ public class TaskView : Gtk.Box {
     private string query = "";
     private int64 focus_task_id;
     private uint reload_source;
+    private uint focus_source;
+    private bool mode_initialized;
 
     public TaskView (TaskService service) {
         Object (orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -30,7 +32,7 @@ public class TaskView : Gtk.Box {
         summary.xalign = 0; summary.add_css_class ("dim-label"); labels.append (summary);
         header.append (labels);
         show_completed.valign = Gtk.Align.CENTER;
-        show_completed.toggled.connect (reload);
+        show_completed.toggled.connect (queue_reload);
         header.append (show_completed);
         var add_content = new Adw.ButtonContent ();
         add_content.icon_name = "list-add-symbolic"; add_content.label = "New Task";
@@ -41,10 +43,12 @@ public class TaskView : Gtk.Box {
         append (header);
 
         task_list.selection_mode = Gtk.SelectionMode.NONE;
-        task_list.add_css_class ("boxed-list");
-        task_list.add_css_class ("task-list");
-        var list_clamp = new Adw.Clamp (); list_clamp.maximum_size = 920;
-        list_clamp.margin_start = 20; list_clamp.margin_end = 20; list_clamp.margin_bottom = 24;
+        task_list.show_separators = false;
+        task_list.valign = Gtk.Align.START;
+        var list_clamp = new Adw.Clamp (); list_clamp.maximum_size = 760;
+        list_clamp.valign = Gtk.Align.START;
+        list_clamp.margin_start = 24; list_clamp.margin_end = 24;
+        list_clamp.margin_top = 4; list_clamp.margin_bottom = 24;
         list_clamp.child = task_list;
         var scroller = new Gtk.ScrolledWindow ();
         scroller.hscrollbar_policy = Gtk.PolicyType.NEVER; scroller.child = list_clamp;
@@ -52,10 +56,6 @@ public class TaskView : Gtk.Box {
         empty_page.icon_name = "task-due-symbolic";
         empty_page.title = "Nothing due";
         empty_page.description = "Create a task or turn an email into a follow-up.";
-        var empty_add = new Gtk.Button.with_label ("Create Task");
-        empty_add.halign = Gtk.Align.CENTER; empty_add.add_css_class ("suggested-action");
-        empty_add.clicked.connect (() => edit_task.begin (null, null));
-        empty_page.child = empty_add;
 
         state_stack.hexpand = true; state_stack.vexpand = true;
         state_stack.transition_type = Gtk.StackTransitionType.CROSSFADE;
@@ -69,18 +69,21 @@ public class TaskView : Gtk.Box {
     }
 
     public void set_mode (TaskViewMode mode) {
+        bool unchanged = mode_initialized && this.mode == mode;
         this.mode = mode;
+        mode_initialized = true;
         heading.label = mode == TaskViewMode.TODAY ? "Today" : "Planned";
         empty_page.title = mode == TaskViewMode.TODAY ? "Nothing due today" : "No planned tasks";
         empty_page.description = mode == TaskViewMode.TODAY ?
             "You’re caught up. Add a task or turn an email into a follow-up." :
             "Create a task with a due date to start planning.";
-        reload ();
+        if (!unchanged) queue_reload ();
     }
 
     public void set_query (string query) {
+        if (this.query == query) return;
         this.query = query;
-        reload ();
+        queue_reload ();
     }
 
     public void new_task () { edit_task.begin (null, null); }
@@ -97,21 +100,40 @@ public class TaskView : Gtk.Box {
 
     public void focus_task (int64 task_id) {
         focus_task_id = task_id;
-        reload ();
+        queue_reload ();
     }
 
     public void reload () {
+        if (reload_source != 0) {
+            Source.remove (reload_source);
+            reload_source = 0;
+        }
+        cancel_focus ();
         Gtk.ListBoxRow? row;
         while ((row = task_list.get_row_at_index (0)) != null) task_list.remove (row);
         try {
             var tasks = service.list (mode, show_completed.active, query);
-            foreach (var task in tasks) task_list.append (build_row (task));
-            state_stack.visible_child_name = tasks.size == 0 ? "empty" : "tasks";
+            string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
+            string tomorrow = MailTask.date_for_unix (
+                new DateTime.now_local ().add_days (1).to_unix ());
+            string previous_section = "";
+            foreach (var task in tasks) {
+                var task_row = build_row (task);
+                if (mode == TaskViewMode.PLANNED) {
+                    string section = "%s:%s".printf (
+                        task.completed ? "completed" : "open", task.due_at);
+                    if (section != previous_section)
+                        task_row.set_header (date_header (task, today, tomorrow));
+                    previous_section = section;
+                }
+                task_list.append (task_row);
+            }
+            show_state (tasks.size == 0 ? "empty" : "tasks");
             string count = tasks.size == 1 ? "1 task" : "%d tasks".printf (tasks.size);
             summary.label = "%s · %s".printf (count, service.sync_status ());
         } catch (Error error) {
             summary.label = "Tasks could not be loaded";
-            state_stack.visible_child_name = "empty";
+            show_state ("empty");
             operation_failed (error);
         }
     }
@@ -124,8 +146,11 @@ public class TaskView : Gtk.Box {
     }
 
     private Gtk.ListBoxRow build_row (MailTask task) {
-        var row = new Gtk.ListBoxRow (); row.selectable = false;
+        var row = new Gtk.ListBoxRow (); row.selectable = false; row.activatable = false;
+        row.add_css_class ("card");
         row.add_css_class ("task-row");
+        row.margin_start = 2; row.margin_end = 2;
+        row.margin_top = 4; row.margin_bottom = 4;
         if (task.completed) row.add_css_class ("completed");
         string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
         bool overdue = !task.completed && task.due_on_or_before (today) && task.due_at != today;
@@ -133,7 +158,7 @@ public class TaskView : Gtk.Box {
 
         var content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
         content.margin_start = 14; content.margin_end = 10;
-        content.margin_top = 11; content.margin_bottom = 11;
+        content.margin_top = 9; content.margin_bottom = 9;
         var completed = new Gtk.CheckButton (); completed.active = task.completed;
         completed.valign = Gtk.Align.START;
         string completion_label = task.completed ? "Reopen %s".printf (task.title) :
@@ -175,7 +200,7 @@ public class TaskView : Gtk.Box {
         body.append (metadata);
         if (task.notes.strip () != "") {
             var notes = new Gtk.Label (task.notes); notes.xalign = 0;
-            notes.ellipsize = Pango.EllipsizeMode.END; notes.lines = 2;
+            notes.ellipsize = Pango.EllipsizeMode.END; notes.lines = 1;
             notes.add_css_class ("dim-label"); body.append (notes);
         }
         content.append (body);
@@ -198,9 +223,55 @@ public class TaskView : Gtk.Box {
 
         if (focus_task_id == task.id) {
             focus_task_id = 0;
-            Idle.add (() => { row.grab_focus (); return Source.REMOVE; });
+            Gtk.CheckButton focus_target = completed;
+            focus_source = Idle.add (() => {
+                focus_source = 0;
+                // Focusing GtkListBoxRow itself is unsafe if a second task
+                // reload detaches it while this deferred callback is pending.
+                // The checkbox is the task's stable, useful focus target and
+                // is focused only after GTK has mapped the replacement row.
+                if (focus_target.get_root () != null && focus_target.get_mapped ())
+                    focus_target.grab_focus ();
+                return Source.REMOVE;
+            });
         }
         return row;
+    }
+
+    private Gtk.Widget date_header (MailTask task, string today, string tomorrow) {
+        string label;
+        if (task.completed)
+            label = "Completed · %s".printf (friendly_date (task.due_at));
+        else if (task.due_at == today)
+            label = "Today";
+        else if (task.due_at == tomorrow)
+            label = "Tomorrow";
+        else if (task.due_on_or_before (today))
+            label = "Overdue · %s".printf (friendly_date (task.due_at));
+        else
+            label = friendly_date (task.due_at);
+        var header = new Gtk.Label (label);
+        header.xalign = 0;
+        header.add_css_class ("heading");
+        header.margin_start = 8; header.margin_end = 8;
+        header.margin_top = 12; header.margin_bottom = 2;
+        Accessibility.label (header, label + " tasks");
+        return header;
+    }
+
+    private void cancel_focus () {
+        if (focus_source == 0) return;
+        Source.remove (focus_source);
+        focus_source = 0;
+    }
+
+    private void show_state (string name) {
+        // Do not animate a ScrolledWindow/scrollbar subtree while this task
+        // view is itself hidden in MailWindow's stack. GTK can otherwise try
+        // to snapshot its internal gizmo before it has an allocation.
+        state_stack.transition_type = get_mapped () ?
+            Gtk.StackTransitionType.CROSSFADE : Gtk.StackTransitionType.NONE;
+        state_stack.visible_child_name = name;
     }
 
     private Gtk.Widget metadata_label (string text, string icon_name) {
@@ -319,6 +390,7 @@ public class TaskView : Gtk.Box {
 
     ~TaskView () {
         if (reload_source != 0) Source.remove (reload_source);
+        if (focus_source != 0) Source.remove (focus_source);
     }
 }
 }

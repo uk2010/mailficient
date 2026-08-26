@@ -95,6 +95,7 @@ sources = files(
   'storage/local-data-migration.vala',
   'storage/mail-settings-store.vala',
   'services/mail-engine.vala',
+  'ui/dialog-errors.vala',
   'ui/mail-window.vala',
   'ui/task-view.vala',
   'ui/toolbar-customization-dialog.vala',
@@ -127,12 +128,14 @@ sources = files(
 deps = [gtk, adw, gee, gio, json, sqlite, secret, webkit, xml, crypto, cairo, pangocairo]
 camel = dependency('camel-1.2', required: get_option('camel'))
 if camel.found()
+  edataserver = dependency('libedataserver-1.2')
   sources += files(
+    'services/camel-cache-namespace.vala',
     'services/camel-mail-engine.vala',
     'services/camel-live-mail-watch.vala',
     'services/received-attachment-store.vala',
   )
-  deps += camel
+  deps += [camel, edataserver]
   camel_vala_args = ['--define=HAVE_CAMEL']
   if camel.version().version_compare('<3.58')
     camel_vala_args += ['--define=EDS_LEGACY']

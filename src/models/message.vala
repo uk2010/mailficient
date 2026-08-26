@@ -56,9 +56,31 @@ public class Message : Object {
     }
 
     public string initials () {
-        var parts = sender_name.split (" ");
-        if (parts.length > 1) return "%c%c".printf (parts[0][0], parts[parts.length - 1][0]).up ();
-        return sender_name.substring (0, int.min (2, sender_name.length)).up ();
+        string name = sender_name.strip ();
+        if (name == "") return "?";
+
+        // Vala string indexes and substring lengths are byte based. Taking
+        // name[0] (or the first two bytes) can therefore split a multi-byte
+        // character and hand invalid UTF-8 to GtkLabel/GtkAccessible. Build
+        // the avatar text from complete Unicode code points instead.
+        var words = new Gee.ArrayList<string> ();
+        foreach (var part in name.split (" ")) {
+            string word = part.strip ();
+            if (word != "") words.add (word);
+        }
+        var result = new StringBuilder ();
+        if (words.size > 1) {
+            result.append_unichar (words[0].get_char ());
+            result.append_unichar (words[words.size - 1].get_char ());
+        } else {
+            int byte_offset = 0;
+            for (int count = 0; count < 2 && byte_offset < name.length; count++) {
+                unichar character = name.get_char (byte_offset);
+                result.append_unichar (character);
+                byte_offset += character.to_utf8 (null);
+            }
+        }
+        return result.str.up ();
     }
 
     public void add_attachment (Attachment attachment) { attachments.add (attachment); }

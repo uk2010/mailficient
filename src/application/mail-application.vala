@@ -155,12 +155,11 @@ public class MailApplication : Adw.Application {
                 repository = new CachedMailRepository (cache, demo_repository, demo_mode);
 #if HAVE_CAMEL
                 // Camel's folder-summary SQLite schema is private to the EDS
-                // release that created it. Do not reopen the pre-v3 cache:
-                // some upgrades abort inside Camel instead of reporting an
-                // error when an older folders.db lacks a required column.
-                // This cache is disposable; mail.db remains authoritative.
+                // branch that created it. Native and bundled builds may use
+                // different branches, so keep their disposable caches apart;
+                // mail.db remains the authoritative application store.
                 var camel_engine = new CamelMailEngine (credentials,
-                    Path.build_filename (directory, "camel-data"), Path.build_filename (directory, "camel-cache-v3"),
+                    Path.build_filename (directory, "camel-data"), CamelCacheNamespace.path_for (directory),
                     Path.build_filename (directory, "received-attachments"), online_accounts);
                 mail_engine = camel_engine;
                 account_provisioner = new AccountProvisioningService (cache, credentials,
@@ -247,7 +246,7 @@ public class MailApplication : Adw.Application {
                 received_attachment_service, draft_lifecycle, outbound_service, settings);
             compose.present ();
             if (Environment.get_variable ("MAILFICIENT_QA_DISCARD") == "1")
-                Timeout.add (700, () => { compose.close (); return Source.REMOVE; });
+                Timeout.add (700, () => { compose.request_close (); return Source.REMOVE; });
         }
         if (Environment.get_variable ("MAILFICIENT_QA_FORWARD") == "1")
             Timeout.add (900, () => {
@@ -353,7 +352,7 @@ public class MailApplication : Adw.Application {
     }
 
     protected override void shutdown () {
-        if (window != null) window.persist_layout ();
+        if (window != null) window.prepare_for_shutdown ();
         if (background_sync_source != 0) Source.remove (background_sync_source);
         if (startup_sync_source != 0) Source.remove (startup_sync_source);
         if (network_changed_handler != 0)

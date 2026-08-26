@@ -69,12 +69,12 @@ public class MailSettingsStore : Object {
     }
 
     public int window_width {
-        get { return clamp_int ((int) get_double ("window-width", 640), 640, 3840); }
+        get { return clamp_int ((int) get_double ("window-width", 1180), 640, 3840); }
         set { set_double ("window-width", clamp_int (value, 640, 3840)); }
     }
 
     public int window_height {
-        get { return clamp_int ((int) get_double ("window-height", 480), 480, 2160); }
+        get { return clamp_int ((int) get_double ("window-height", 800), 480, 2160); }
         set { set_double ("window-height", clamp_int (value, 480, 2160)); }
     }
 
@@ -96,6 +96,37 @@ public class MailSettingsStore : Object {
     public string selected_mailbox_id {
         owned get { return get_string ("selected-mailbox-id", ""); }
         set { set_string ("selected-mailbox-id", value); }
+    }
+
+    // Gtk's portal can otherwise reuse an unrelated application's most recent
+    // location (commonly Pictures/Screenshots). Mailficient keeps one shared
+    // location for opening, attaching, and exporting so each dialog resumes
+    // where the user last completed a file operation. Downloads is the calm,
+    // predictable first-use fallback requested by desktop mail users.
+    public File file_dialog_initial_folder () {
+        string uri = get_string ("last-file-dialog-folder-uri", "").strip ();
+        if (uri != "") {
+            var previous = File.new_for_uri (uri);
+            // A non-native URI was already accepted by the desktop portal;
+            // do not synchronously contact a possibly offline GVfs mount on
+            // the GTK thread merely to seed the next chooser.
+            if (!previous.is_native () ||
+                previous.query_file_type (FileQueryInfoFlags.NONE, null) ==
+                FileType.DIRECTORY) return previous;
+        }
+        string? downloads = Environment.get_user_special_dir (UserDirectory.DOWNLOAD);
+        if (downloads != null && downloads != "") {
+            var fallback = File.new_for_path (downloads);
+            if (fallback.query_file_type (FileQueryInfoFlags.NONE, null) ==
+                FileType.DIRECTORY) return fallback;
+        }
+        return File.new_for_path (Environment.get_home_dir ());
+    }
+
+    public void remember_file_dialog_selection (File selection) {
+        var parent = selection.get_parent ();
+        if (parent == null) return;
+        set_string ("last-file-dialog-folder-uri", parent.get_uri ());
     }
 
     public string message_sort {
@@ -210,7 +241,7 @@ public class MailSettingsStore : Object {
 
     private static int normalize_sync_interval (int value) {
         switch (value) {
-        case 0: case 5: case 15: case 30: case 60: return value;
+        case 0: case 1: case 5: case 15: case 30: case 60: return value;
         default: return 5;
         }
     }

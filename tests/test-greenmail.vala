@@ -218,10 +218,12 @@ private async void exercise_greenmail_end_to_end () throws Error {
         var draft_location = yield engine.save_remote_draft (remote_draft, cancellable);
         assert (draft_location != null);
 
-        // A wrong identity must not delete a UID that happens to be present.
-        assert (!(yield engine.delete_remote_draft (new PendingDraftDeletion (0,
+        // A wrong identity means the exact cleanup target is already absent:
+        // complete it without deleting the different UID occupant. The
+        // idempotent save below proves that occupant remained untouched.
+        assert (yield engine.delete_remote_draft (new PendingDraftDeletion (0,
             account.id, draft_location.mailbox_name, draft_location.remote_uid,
-            "not-the-managed-message-id@example.test"), cancellable)));
+            "not-the-managed-message-id@example.test"), cancellable));
         var idempotent_location = yield engine.save_remote_draft (remote_draft, cancellable);
         assert (idempotent_location != null);
         assert (idempotent_location.mailbox_name == draft_location.mailbox_name);

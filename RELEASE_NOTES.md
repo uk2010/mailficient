@@ -1,3 +1,24 @@
+# Mailficient 0.2.9
+
+Mailficient 0.2.9 is a stability, responsiveness, and interface-polish release
+covering the complete mail-reading, composing, folder, and task workflow.
+
+Highlights:
+
+- Speeds up incoming-mail checks with IMAP IDLE, shorter configurable polling,
+  persistent connections, incremental updates, and bounded background work
+- Makes Today and Planned open immediately without rebuilding hidden mail views
+- Fixes Camel cache schema warnings, invalid UTF-8 handling, GTK ownership
+  errors, and the memory corruption seen during repeated mail operations
+- Discards canceled empty reply and forward drafts without prompting or leaving
+  ghost drafts in their original conversations
+- Corrects HTML message rendering, Safe Sender behavior, flagged-folder removal,
+  archive membership, and post-move or post-delete selection
+- Starts attachment, inline-image, and export dialogs in Downloads or the most
+  recently used folder and adds contextual spelling replacements on right-click
+- Refines the task toolbar, preferences, message rows, neutral round contact
+  avatars, and adaptive visual styling
+
 # Mailficient 0.2.8
 
 Mailficient 0.2.8 completes the current desktop-productivity roadmap with new

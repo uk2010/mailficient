@@ -11,7 +11,16 @@ public class AttachmentSafety : Object {
         string name = candidate.replace ("/", "_").replace ("\\", "_").strip ();
         while (name.has_prefix (".")) name = name.substring (1);
         if (name == "" || name == "." || name == "..") return "attachment";
-        return name.length > 180 ? name.substring (0, 180) : name;
+        if (name.length <= 180) return name;
+
+        // Vala string lengths and substring offsets are byte based. Back up
+        // from the byte limit when it lands inside a multi-byte code point so
+        // filenames passed to Gtk labels, tooltips, and file dialogs remain
+        // valid UTF-8.
+        int boundary = 180;
+        while (boundary > 0 && ((((uint8) name[boundary]) & 0xc0) == 0x80))
+            boundary--;
+        return name.substring (0, boundary).make_valid ();
     }
 
     public static AttachmentPreviewKind preview_kind (string content_type, string filename) {

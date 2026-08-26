@@ -3,6 +3,10 @@ internal class SyncPassOutcome : Object {
     public bool completed { get; set; default = false; }
     public bool cancelled { get; set; default = false; }
     public bool more_messages_available { get; set; default = false; }
+    // Preserve the server's raw continuation state even when an issue stops
+    // automatic retries for this check. Initial-import notification suppression
+    // must remain active until a later authoritative pass says history is done.
+    public bool history_incomplete { get; set; default = false; }
     public int messages_downloaded { get; set; default = 0; }
     public int maintenance_items_processed { get; set; default = 0; }
     public bool retryable_failure { get; set; default = false; }
@@ -13,6 +17,7 @@ internal class SyncPassOutcome : Object {
 internal class SyncProgressContext : Object {
     public int messages_total { get; set; default = 0; }
     public int messages_completed { get; set; default = 0; }
+    public double last_fraction { get; set; default = 0; }
 }
 
 public class AccountSyncService : Object {
@@ -45,6 +50,15 @@ public class AccountSyncService : Object {
     private Gee.HashSet<string> sync_again = new Gee.HashSet<string> ();
     private Gee.HashMap<string, uint> queued_flush_sources = new Gee.HashMap<string, uint> ();
     private Gee.HashMap<string, uint> queued_history_sources = new Gee.HashMap<string, uint> ();
+    // Scheduled bounded passes are one logical mail check. Retain their
+    // counters so the next fresh backend session cannot restart progress at
+    // zero or report its per-session completion as logical completion.
+    private Gee.HashMap<string, SyncProgressContext> progress_contexts =
+        new Gee.HashMap<string, SyncProgressContext> ();
+    // Keep user actions responsive while coalescing repeated flag/move events.
+    // Tests use a shorter interval to exercise the same scheduling path
+    // deterministically without adding five seconds to the suite.
+    internal uint pending_flush_delay_milliseconds = 5000;
     // A bounded account check may span several fresh Camel sessions. Keep only
     // the small NewMailSummary sample here and publish once when that logical
     // backfill finishes, instead of notifying five times per 250-message pass.
@@ -94,14 +108,43 @@ public class AccountSyncService : Object {
     private void schedule_pending_flush (string account_id) {
         uint existing = queued_flush_sources.has_key (account_id) ? queued_flush_sources[account_id] : 0;
         if (existing != 0) Source.remove (existing);
-        queued_flush_sources[account_id] = Timeout.add_seconds (5, () => {
+        queued_flush_sources[account_id] = Timeout.add (
+            uint.max (1, pending_flush_delay_milliseconds), () => {
             queued_flush_sources.unset (account_id);
+            // A sync pass and a standalone mutation flush both use the same
+            // account-scoped Camel store. Running an Empty Junk/Trash request
+            // beside synchronize() can make provider callbacks race folder
+            // teardown, a lifecycle hazard consistent with native allocator
+            // corruption. The active sync flushes this durable queue itself;
+            // retain a delayed wake-up only as a fallback if that pass fails
+            // before doing so.
+            if (syncing_accounts.contains (account_id)) {
+                schedule_pending_flush (account_id);
+                return Source.REMOVE;
+            }
             flush_pending.begin (account_id);
             return Source.REMOVE;
         });
     }
 
+    private async void wait_for_active_flush (string account_id) {
+        if (!flushing_accounts.contains (account_id)) return;
+        ulong handler_id = 0;
+        handler_id = pending_flush_finished.connect ((finished_account_id) => {
+            if (finished_account_id != account_id) return;
+            disconnect (handler_id);
+            wait_for_active_flush.callback ();
+        });
+        yield;
+    }
+
     public async void sync_account (AccountSettings account, Cancellable? cancellable = null) {
+        if (suppressed_accounts.contains (account.id)) return;
+        // The timeout callback checks syncing_accounts before it starts a
+        // standalone flush. Complete the opposite half of that exclusion here
+        // so a sync cannot begin while an already-started remote mutation is
+        // still using the account's Camel objects.
+        yield wait_for_active_flush (account.id);
         if (suppressed_accounts.contains (account.id)) return;
         if (syncing_accounts.contains (account.id)) {
             sync_again.add (account.id);
@@ -128,8 +171,11 @@ public class AccountSyncService : Object {
         var effective_cancellable = cancellable ?? new Cancellable ();
         sync_cancellables[account.id] = effective_cancellable;
         SyncPassOutcome? last_outcome = null;
-        var progress_context = new SyncProgressContext ();
-        int messages_downloaded_this_check = 0;
+        var progress_context = progress_contexts[account.id];
+        if (progress_context == null) {
+            progress_context = new SyncProgressContext ();
+            progress_contexts[account.id] = progress_context;
+        }
         bool allow_notifications = !initial_backfill_accounts.contains (account.id);
         do {
             sync_again.remove (account.id);
@@ -137,8 +183,9 @@ public class AccountSyncService : Object {
             yield perform_sync (account, effective_cancellable, allow_notifications,
                 progress_context, last_outcome);
             accumulate_new_mail (account, last_outcome.new_mail);
-            messages_downloaded_this_check += last_outcome.messages_downloaded;
             progress_context.messages_completed += last_outcome.messages_downloaded;
+            progress_context.messages_total = int.max (progress_context.messages_total,
+                progress_context.messages_completed);
             if (last_outcome.more_messages_available) {
                 // The cache is checkpointed before perform_sync returns. Remove
                 // the account's Camel services now so the next bounded pass owns
@@ -166,13 +213,23 @@ public class AccountSyncService : Object {
                     "Downloaded %d of %d messages — continuing in background".printf (
                         progress_context.messages_completed, progress_context.messages_total) :
                     "Refreshing synchronized drafts — continuing in background";
-                progress_changed (account.id, fraction, continuation_detail);
+                report_progress (account.id, progress_context, fraction,
+                    continuation_detail);
                 if (!sync_again.contains (account.id)) schedule_history_continuation (account);
             }
         } while (!suppressed_accounts.contains (account.id) && sync_again.contains (account.id));
-        if (!suppressed_accounts.contains (account.id) && last_outcome != null && last_outcome.completed) {
+        bool logical_completion = !suppressed_accounts.contains (account.id) &&
+            last_outcome != null && last_outcome.completed &&
+            !last_outcome.more_messages_available;
+        if (logical_completion) {
+            report_progress (account.id, progress_context, 1, "Mail is up to date", true);
+            progress_contexts.unset (account.id);
+        } else if (last_outcome == null || !last_outcome.completed) {
+            progress_contexts.unset (account.id);
+        }
+        if (logical_completion) {
             synchronized (account.id);
-            mail_check_completed (account.id, messages_downloaded_this_check);
+            mail_check_completed (account.id, progress_context.messages_completed);
             if (last_outcome.warning != null) failed (account.id, last_outcome.warning);
         } else if (!suppressed_accounts.contains (account.id) && last_outcome != null &&
                    last_outcome.cancelled) {
@@ -181,7 +238,8 @@ public class AccountSyncService : Object {
         if (!suppressed_accounts.contains (account.id) && last_outcome != null &&
             last_outcome.completed && !last_outcome.more_messages_available) {
             publish_new_mail (account.id);
-            initial_backfill_accounts.remove (account.id);
+            if (!last_outcome.history_incomplete)
+                initial_backfill_accounts.remove (account.id);
         }
         else if (last_outcome == null || !last_outcome.completed)
             pending_new_mail.unset (account.id);
@@ -218,7 +276,12 @@ public class AccountSyncService : Object {
                     remote_drafts.add (remote_draft);
                 junk_filter.apply (batch);
                 mail_rules.apply (batch);
-                mail_available (account.id);
+                // Camel publishes the complete folder inventory before it
+                // starts fetching messages. Persist that metadata immediately,
+                // but do not wake the message list for an inventory-only batch.
+                // The synchronized edge reconciles mailbox structure and
+                // counts once the authoritative snapshot is stored.
+                if (batch.messages.size > 0) mail_available (account.id);
                 if (allow_notifications && established_cache && known_ids != null) {
                     var inbox_ids = new Gee.HashSet<string> ();
                     foreach (var mailbox in batch.mailboxes)
@@ -236,6 +299,15 @@ public class AccountSyncService : Object {
             if (property.name != "progress" && property.name != "detail" &&
                 property.name != "messages-to-download" && property.name != "messages-downloaded")
                 return;
+            // connect_incoming_account() reuses this SyncState and changes its
+            // connection detail before synchronize() clears the prior pass's
+            // message counters. Do not fold those stale counters into the
+            // logical total for the next bounded pass.
+            if (progress_state.phase != SyncPhase.SYNCHRONIZING) {
+                report_progress (account.id, progress_context,
+                    progress_context.last_fraction, progress_state.detail);
+                return;
+            }
             if (progress_state.messages_to_download > 0) {
                 int candidate_total = progress_context.messages_completed +
                     progress_state.messages_to_download;
@@ -244,20 +316,32 @@ public class AccountSyncService : Object {
                 int completed = progress_context.messages_completed +
                     progress_state.messages_downloaded;
                 double fraction = completed / (double) progress_context.messages_total;
-                progress_changed (account.id, fraction,
+                report_progress (account.id, progress_context, fraction,
                     "Downloaded %d of %d messages".printf (
                         completed, progress_context.messages_total));
             } else if (progress_context.messages_total > 0) {
                 double fraction = progress_context.messages_completed /
                     (double) progress_context.messages_total;
-                progress_changed (account.id, fraction,
+                report_progress (account.id, progress_context, fraction,
                     "Downloaded %d of %d messages — checking messages…".printf (
                         progress_context.messages_completed, progress_context.messages_total));
+            } else if (property.name == "progress") {
+                report_progress (account.id, progress_context,
+                    progress_state.progress, progress_state.detail);
             } else {
-                progress_changed (account.id, progress_state.progress, progress_state.detail);
+                // At synchronize() entry Camel clears counters and detail
+                // before lowering a stale per-session progress value. Preserve
+                // the logical fraction until that progress notification lands.
+                report_progress (account.id, progress_context,
+                    progress_context.last_fraction, progress_state.detail);
             }
         });
-        progress_changed (account.id, progress_state.progress, progress_state.detail);
+        string initial_detail = progress_context.messages_total > 0 ?
+            "Downloaded %d of %d messages — checking messages…".printf (
+                progress_context.messages_completed, progress_context.messages_total) :
+            "Checking messages…";
+        report_progress (account.id, progress_context,
+            progress_context.last_fraction, initial_detail);
         try {
             // Confirmed SMTP deliveries only need local cleanup and must not
             // wait for a network connection to return.
@@ -274,6 +358,7 @@ public class AccountSyncService : Object {
                 cache.cached_extracted_message_ids (account.id) : new Gee.HashSet<string> ();
             var snapshot = yield engine.synchronize (account.id, extracted_ids, cancellable);
             if (suppressed_accounts.contains (account.id)) return;
+            outcome.history_incomplete = snapshot.more_messages_available;
             if (batch_error != null) throw batch_error;
             cache.store_sync_result (snapshot);
             foreach (var remote_draft in snapshot.remote_drafts)
@@ -334,6 +419,21 @@ public class AccountSyncService : Object {
         }
     }
 
+    private void report_progress (string account_id, SyncProgressContext context,
+                                  double fraction, string detail,
+                                  bool logical_completion = false) {
+        // Backend progress is scoped to one Camel session. A bounded history
+        // import may need several such sessions, so never expose a session's
+        // 100% until the returned snapshot confirms there is no continuation.
+        // MailWindow rounds the fraction to a whole-number percentage. Keep a
+        // non-final session at 99% or below so it cannot visibly claim 100%.
+        double bounded = logical_completion ? 1 : double.min (fraction, 0.99);
+        bounded = double.max (0, bounded);
+        bounded = double.max (context.last_fraction, bounded);
+        context.last_fraction = bounded;
+        progress_changed (account_id, bounded, detail);
+    }
+
     private void accumulate_new_mail (AccountSettings account, NewMailSummary? addition) {
         if (addition == null || addition.total == 0 ||
             suppressed_accounts.contains (account.id)) return;
@@ -368,27 +468,44 @@ public class AccountSyncService : Object {
     public void cancel () {
         if (active != null) active.cancel ();
         foreach (var cancellable in sync_cancellables.values) cancellable.cancel ();
+        // A logical backfill remains active during its 250 ms inter-pass gap,
+        // but has no Cancellable that can later publish a terminal edge. Tell
+        // the UI about those stopped checks before discarding their contexts.
+        var stopped_accounts = new Gee.HashSet<string> ();
+        foreach (var account_id in progress_contexts.keys)
+            if (!syncing_accounts.contains (account_id)) stopped_accounts.add (account_id);
+        foreach (var account_id in queued_history_sources.keys)
+            if (!syncing_accounts.contains (account_id)) stopped_accounts.add (account_id);
         foreach (var source in queued_history_sources.values)
             if (source != 0) Source.remove (source);
         queued_history_sources.clear ();
+        progress_contexts.clear ();
         pending_new_mail.clear ();
         // Cancellation pauses a bounded initial import; it does not turn the
         // remaining server history into a live arrival. Retain this marker so
         // an in-process resume remains silent until a no-more-work pass.
         live_mail.cancel_all ();
+        foreach (var account_id in stopped_accounts) cancelled (account_id);
     }
 
     public void suppress_account (string account_id) {
+        bool stopped_active_sync = progress_contexts.has_key (account_id) ||
+            queued_history_sources.has_key (account_id);
         suppressed_accounts.add (account_id);
         live_mail.suppress_account (account_id);
         uint history_source = queued_history_sources.has_key (account_id) ?
             queued_history_sources[account_id] : 0;
         if (history_source != 0) Source.remove (history_source);
         queued_history_sources.unset (account_id);
+        progress_contexts.unset (account_id);
         pending_new_mail.unset (account_id);
         initial_backfill_accounts.remove (account_id);
         var cancellable = sync_cancellables[account_id];
         if (cancellable != null) cancellable.cancel ();
+        // sync_account deliberately suppresses its later terminal signals once
+        // this account is hidden. Publish exactly one edge here so a window
+        // that already saw progress can retire its account-scoped UI state.
+        if (stopped_active_sync) cancelled (account_id);
     }
 
     public void resume_account (string account_id) {

@@ -3,7 +3,9 @@ namespace Mailficient {
 // connected. That is discovery, not a reconnect, and must not start expensive
 // mail work while the first window is being drawn.
 public class StartupSyncGate : Object {
-    public const uint GRACE_SECONDS = 10;
+    // Let the first window finish drawing, but do not make startup mail wait
+    // ten seconds before the first connection attempt.
+    public const uint GRACE_SECONDS = 2;
     private bool enabled;
     private bool last_available;
 

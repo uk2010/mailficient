@@ -21,6 +21,7 @@ internal class FolderDownloadPlan : Object {
     public Mailbox mailbox;
     public Camel.Folder folder;
     public Gee.ArrayList<string> unseen_uids = new Gee.ArrayList<string> ();
+    public Gee.HashSet<string> unread_uids = new Gee.HashSet<string> ();
     // Provider drafts are mutable even when their IMAP UID does not change.
     // Re-read cached Drafts messages after genuinely new mail so an edit made
     // by another client is reconciled by its content fingerprint.
@@ -194,7 +195,14 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
     // yielded between downloads, so a large mailbox does not monopolize GTK
     // or require building one giant in-memory result.
     internal const int SYNC_BATCH_SIZE = 5;
-    internal const int UID_SCAN_YIELD_INTERVAL = 50;
+    // Make the first durable Inbox rows visible before slower secondary-folder
+    // refreshes. These attempts still consume the normal account-wide session
+    // budget; this changes latency, not the amount of work in one pass.
+    internal const int INBOX_PREFETCH_LIMIT = SYNC_BATCH_SIZE;
+    // Keep synchronous Camel summary traversal below half of a 60 Hz frame.
+    // A count-based checkpoint is unreliable because get_message_info() and
+    // provider summary lookups can have very different costs per UID.
+    internal const int64 UID_TRAVERSAL_TIME_SLICE_USEC = 8 * 1000;
     private signal void account_connection_finished (string account_id);
     private static bool camel_initialized;
     private PersonalCamelSession session;
@@ -618,11 +626,16 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             int folder_total = int.max (1, result.mailboxes.size);
             int total_unseen = 0;
             var plans = new Gee.ArrayList<FolderDownloadPlan> ();
+            int processed = 0;
+            int downloaded = 0;
+            int vanished = 0;
+            int maintenance_processed = 0;
 
-            // Inventory every subscribed folder before retrieving any MIME
-            // content. This gives the UI a real total before the first message
-            // download and keeps folder scanning separate from MIME work.
-            foreach (var mailbox in result.mailboxes) {
+            // Scan Inbox first and stream one bounded batch before slower
+            // secondary folders. The loop still inventories every subscribed
+            // folder before the remaining MIME work, preserving the final
+            // authoritative reconciliation and its complete download total.
+            foreach (var mailbox in inbox_first_mailboxes (result.mailboxes)) {
                 if (cancellable != null) cancellable.set_error_if_cancelled ();
                 state.detail = "Checking messages…";
                 state.progress = 0.03 + (0.17 * folder_index / folder_total);
@@ -645,30 +658,39 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
                     var plan = new FolderDownloadPlan (mailbox, folder);
                     result.begin_remote_inventory (mailbox.id);
                     int unread_count = 0;
+                    int64 uid_scan_slice_started = GLib.get_monotonic_time ();
                     for (int index = 0; index < (int) uids.length; index++) {
                         string uid = uids[index];
                         string message_id = "%s:%s".printf (mailbox.id, uid);
                         var info = folder.get_message_info (uid);
-                        if (info == null) continue;
-                        uint32 flags = info.get_flags ();
-                        // Draft cleanup uses a precise \Deleted flag without a
-                        // folder-wide expunge. Treat those copies as absent so
-                        // they cannot be re-imported while awaiting server purge.
-                        if ((flags & Camel.MessageFlags.DELETED) != 0) continue;
-                        result.record_remote_uid (mailbox.id, uid);
-                        if ((flags & Camel.MessageFlags.SEEN) == 0)
-                            unread_count++;
-                        if (cached_message_ids != null && cached_message_ids.contains (message_id)) {
-                            result.states.add (new RemoteMessageState (message_id,
-                                (flags & Camel.MessageFlags.SEEN) == 0,
-                                (flags & Camel.MessageFlags.FLAGGED) != 0));
-                            if (mailbox.role == MailboxRole.DRAFTS)
-                                plan.draft_refresh_uids.add (uid);
-                        } else plan.unseen_uids.add (uid);
-                        // Camel's folder summary traversal is synchronous. Give
-                        // GTK a chance to paint and dispatch input on large folders.
-                        if ((index + 1) % UID_SCAN_YIELD_INTERVAL == 0)
+                        if (info != null) {
+                            uint32 flags = info.get_flags ();
+                            // Draft cleanup uses a precise \Deleted flag without a
+                            // folder-wide expunge. Treat those copies as absent so
+                            // they cannot be re-imported while awaiting server purge.
+                            if ((flags & Camel.MessageFlags.DELETED) == 0) {
+                                result.record_remote_uid (mailbox.id, uid);
+                                if ((flags & Camel.MessageFlags.SEEN) == 0) {
+                                    unread_count++;
+                                    plan.unread_uids.add (uid);
+                                }
+                                if (cached_message_ids != null && cached_message_ids.contains (message_id)) {
+                                    result.states.add (new RemoteMessageState (message_id,
+                                        (flags & Camel.MessageFlags.SEEN) == 0,
+                                        (flags & Camel.MessageFlags.FLAGGED) != 0));
+                                    if (mailbox.role == MailboxRole.DRAFTS)
+                                        plan.draft_refresh_uids.add (uid);
+                                } else plan.unseen_uids.add (uid);
+                            }
+                        }
+                        // Check after every summary, including null/deleted ones,
+                        // so a costly final lookup cannot defer the next GTK turn.
+                        int64 current_time = GLib.get_monotonic_time ();
+                        if (uid_traversal_time_slice_expired (
+                                uid_scan_slice_started, current_time)) {
                             yield yield_to_main_context (cancellable);
+                            uid_scan_slice_started = GLib.get_monotonic_time ();
+                        }
                     }
                     // FolderInfo is read before refresh_info() and can still
                     // contain the previous unread total. We have just scanned
@@ -684,6 +706,59 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
                     }
                     total_unseen += plan.unseen_uids.size;
                     plans.add (plan);
+
+                    // An IDLE arrival otherwise waits behind refresh_info() for
+                    // every subscribed folder before its first MIME fetch. Take
+                    // at most one account-wide batch from Inbox now, remove the
+                    // attempted UIDs from the later plan, and count every
+                    // attempt against MAX_MESSAGES_PER_SYNC_SESSION.
+                    if (mailbox.role == MailboxRole.INBOX &&
+                        processed < INBOX_PREFETCH_LIMIT) {
+                        var prefetch_uids = take_inbox_prefetch_uids (
+                            plan.unseen_uids, processed);
+                        var batch = new MailSyncResult (account_id);
+                        batch.mailboxes.add (plan.mailbox);
+                        // Keep the count unknown until every folder has been
+                        // inventoried. Publishing the Inbox-only denominator
+                        // here could briefly report 5/5, then regress to 5/N.
+                        foreach (var uid in prefetch_uids) {
+                            if (cancellable != null) cancellable.set_error_if_cancelled ();
+                            var info = plan.folder.get_message_info (uid);
+                            if (info == null) {
+                                forget_vanished_uid (result, plan.mailbox,
+                                    plan.unread_uids, uid);
+                                vanished++;
+                                processed++;
+                                continue;
+                            }
+                            state.detail = "Getting new Inbox messages…";
+                            try {
+                                Camel.MimeMessage? mime = yield get_message_repairing_empty_cache (
+                                    plan.folder, uid, cancellable);
+                                if (mime == null) {
+                                    forget_vanished_uid (result, plan.mailbox,
+                                        plan.unread_uids, uid);
+                                    vanished++;
+                                } else {
+                                    var conversion = yield message_from_camel (
+                                        account_id, plan.mailbox, uid, info, mime, cancellable);
+                                    batch.messages.add (conversion.message);
+                                    mime = null;
+                                    downloaded++;
+                                    state.messages_downloaded = downloaded;
+                                }
+                            } catch (Error message_error) {
+                                if (message_error is IOError.CANCELLED) throw message_error;
+                                result.record_issue (plan.mailbox.name,
+                                    normalize_error (message_error));
+                                warning ("Could not cache message metadata for %s/%s: %s",
+                                    plan.mailbox.remote_name, uid, message_error.message);
+                            }
+                            processed++;
+                            yield yield_to_main_context (cancellable);
+                        }
+                        if (batch.messages.size > 0) sync_batch_ready (batch);
+                    }
                 } catch (Error folder_error) {
                     if (folder_error is IOError.CANCELLED) throw folder_error;
                     var normalized = normalize_error (folder_error);
@@ -708,14 +783,11 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             int download_target = int.min (MAX_MESSAGES_PER_SYNC_SESSION,
                 total_unseen + refreshable_drafts);
             state.messages_to_download = total_unseen;
-            state.messages_downloaded = 0;
+            state.messages_downloaded = downloaded;
             state.detail = total_unseen == 0 ? "Mail is up to date" :
-                "Downloaded 0 of %d messages".printf (total_unseen);
+                "Downloaded %d of %d messages".printf (downloaded, total_unseen);
             state.progress = total_unseen == 0 ? 0.95 : 0.20;
 
-            int processed = 0;
-            int downloaded = 0;
-            int maintenance_processed = 0;
             // New messages always consume the account-wide budget first. A
             // second phase uses any remainder to revalidate cached Draft UIDs.
             // This prevents a large Drafts folder from starving Inbox history.
@@ -736,34 +808,69 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
                     if (cancellable != null) cancellable.set_error_if_cancelled ();
                     string uid = candidates[index];
                     var info = plan.folder.get_message_info (uid);
-                    if (info == null) continue;
-                    state.detail = "Downloaded %d of %d messages — %s".printf (
-                        downloaded, total_unseen, plan.mailbox.name);
-                    state.progress = 0.20 + (0.75 * processed / (double) int.max (1, download_target));
-                    try {
-                        Camel.MimeMessage? mime = yield plan.folder.get_message (
-                            uid, Priority.DEFAULT, cancellable);
-                        if (mime == null)
-                            throw new MailError.CONNECTION ("The server returned an empty message");
-                        var conversion = yield message_from_camel (
-                            account_id, plan.mailbox, uid, info, mime, cancellable);
-                        batch.messages.add (conversion.message);
-                        if (plan.mailbox.role == MailboxRole.DRAFTS)
-                            batch.remote_drafts.add (remote_draft_from_camel (
-                                account_id, plan.mailbox, uid, info, mime, conversion));
-                        mime = null;
-                        if (phase == 0) downloaded++;
+                    if (info == null) {
+                        forget_vanished_uid (result, plan.mailbox,
+                            plan.unread_uids, uid);
+                        if (phase == 0) vanished++;
                         else {
                             draft_refreshes.complete (plan.mailbox.id, uid);
                             maintenance_processed++;
                         }
-                        state.messages_downloaded = downloaded;
-                        state.detail = "Downloaded %d of %d messages — %s".printf (
-                            downloaded, total_unseen, plan.mailbox.name);
-                        if (batch.messages.size >= SYNC_BATCH_SIZE) {
-                            sync_batch_ready (batch);
-                            batch = new MailSyncResult (account_id);
-                            batch.mailboxes.add (plan.mailbox);
+                        processed++;
+                        continue;
+                    }
+                    state.detail = "Downloaded %d of %d messages — %s".printf (
+                        downloaded, total_unseen, plan.mailbox.name);
+                    state.progress = 0.20 + (0.75 * processed / (double) int.max (1, download_target));
+                    try {
+                        Camel.MimeMessage? mime = yield get_message_repairing_empty_cache (
+                            plan.folder, uid, cancellable);
+                        if (mime == null) {
+                            // The message vanished between the refreshed UID
+                            // inventory and its MIME download. Keep this pass's
+                            // inventory authoritative without reporting a
+                            // transient provider race as a cache failure.
+                            forget_vanished_uid (result, plan.mailbox,
+                                plan.unread_uids, uid);
+                            if (phase == 0) vanished++;
+                            else {
+                                draft_refreshes.complete (plan.mailbox.id, uid);
+                                maintenance_processed++;
+                            }
+                        } else {
+                            var conversion = yield message_from_camel (
+                                account_id, plan.mailbox, uid, info, mime, cancellable);
+                            batch.messages.add (conversion.message);
+                            if (plan.mailbox.role == MailboxRole.DRAFTS) {
+                                var remote_draft = remote_draft_from_camel (
+                                    account_id, plan.mailbox, uid, info, mime, conversion);
+                                batch.remote_drafts.add (remote_draft);
+                                batch.verified_draft_copies.add (remote_draft);
+                            } else if (plan.mailbox.role == MailboxRole.ARCHIVE &&
+                                       has_managed_remote_draft_identity (mime)) {
+                                // Gmail All Mail can expose a Drafts sibling
+                                // with a different UID, and some pipelines
+                                // strip Message-ID from that sibling. Carry
+                                // its verified extension-header identity for
+                                // cache filtering without importing it as a
+                                // second editable draft.
+                                batch.verified_draft_copies.add (remote_draft_from_camel (
+                                    account_id, plan.mailbox, uid, info, mime, conversion));
+                            }
+                            mime = null;
+                            if (phase == 0) downloaded++;
+                            else {
+                                draft_refreshes.complete (plan.mailbox.id, uid);
+                                maintenance_processed++;
+                            }
+                            state.messages_downloaded = downloaded;
+                            state.detail = "Downloaded %d of %d messages — %s".printf (
+                                downloaded, total_unseen, plan.mailbox.name);
+                            if (batch.messages.size >= SYNC_BATCH_SIZE) {
+                                sync_batch_ready (batch);
+                                batch = new MailSyncResult (account_id);
+                                batch.mailboxes.add (plan.mailbox);
+                            }
                         }
                     } catch (Error message_error) {
                         if (message_error is IOError.CANCELLED) throw message_error;
@@ -786,7 +893,8 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
                 maintenance_remaining += draft_refreshes.remaining_count (plan.mailbox.id);
             result.maintenance_items_processed = maintenance_processed;
             result.maintenance_items_remaining = maintenance_remaining;
-            result.more_messages_available = total_unseen > downloaded || maintenance_remaining > 0;
+            result.more_messages_available = total_unseen > downloaded + vanished ||
+                maintenance_remaining > 0;
             if (result.terminal_error == null) {
                 state.detail = "Finishing mail update…"; state.progress = 0.98;
                 try { yield store.synchronize (false, Priority.DEFAULT, cancellable); }
@@ -832,6 +940,103 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
         return int.min (int.max (0, folder_available), remaining);
     }
 
+    internal static Gee.ArrayList<Mailbox> inbox_first_mailboxes (
+            Gee.List<Mailbox> mailboxes) {
+        var ordered = new Gee.ArrayList<Mailbox> ();
+        foreach (var mailbox in mailboxes)
+            if (mailbox.role == MailboxRole.INBOX) ordered.add (mailbox);
+        foreach (var mailbox in mailboxes)
+            if (mailbox.role != MailboxRole.INBOX) ordered.add (mailbox);
+        return ordered;
+    }
+
+    internal static int bounded_inbox_prefetch_count (int folder_available,
+                                                       int already_processed) {
+        int remaining = int.max (0,
+            INBOX_PREFETCH_LIMIT - int.max (0, already_processed));
+        return int.min (int.max (0, folder_available), remaining);
+    }
+
+    internal static Gee.ArrayList<string> take_inbox_prefetch_uids (
+            Gee.ArrayList<string> candidates, int already_processed) {
+        var selected = new Gee.ArrayList<string> ();
+        int count = bounded_inbox_prefetch_count (
+            candidates.size, already_processed);
+        for (int index = 0; index < count; index++)
+            // Camel's IMAP UID arrays are oldest-to-newest. Pull from the end
+            // so a newly arrived message is not left behind an older partial
+            // history import, while the remaining plan keeps its stable order.
+            selected.add (candidates.remove_at (candidates.size - 1));
+        return selected;
+    }
+
+    internal static void forget_vanished_uid (MailSyncResult result,
+                                               Mailbox mailbox,
+                                               Gee.Set<string> unread_uids,
+                                               string uid) {
+        result.forget_remote_uid (mailbox.id, uid);
+        if (unread_uids.remove (uid) && mailbox.unread_count > 0)
+            mailbox.unread_count--;
+    }
+
+    private async Camel.MimeMessage? get_message_repairing_empty_cache (
+        Camel.Folder folder, string uid, Cancellable? cancellable) throws Error {
+        try {
+            Camel.MimeMessage? message = yield folder.get_message (
+                uid, Priority.DEFAULT, cancellable);
+            if (message == null)
+                throw new MailError.CONNECTION ("The server returned an empty message");
+            return message;
+        } catch (Error first_error) {
+            if (first_error is IOError.CANCELLED) throw first_error;
+            if (!remove_zero_byte_message_cache (folder, uid)) throw first_error;
+        }
+
+        // EDS 3.56 can leave a zero-byte IMAPX `cur` entry after an
+        // interrupted cache copy or a UID that disappears during FETCH. Once
+        // the exact invalid regular file is removed, refresh the summary so a
+        // vanished message is not retried or reported as a mail error.
+        yield folder.refresh_info (Priority.DEFAULT, cancellable);
+        var refreshed_info = folder.get_message_info (uid);
+        if (refreshed_info == null ||
+            (refreshed_info.get_flags () & Camel.MessageFlags.DELETED) != 0)
+            return null;
+
+        Camel.MimeMessage? retry = yield folder.get_message (
+            uid, Priority.DEFAULT, cancellable);
+        if (retry == null)
+            throw new MailError.CONNECTION ("The server returned an empty message");
+        return retry;
+    }
+
+    private static bool remove_zero_byte_message_cache (Camel.Folder folder,
+                                                         string uid) {
+        folder.lock ();
+        try {
+            string filename = folder.get_filename (uid);
+            return remove_zero_byte_cache_file (File.new_for_path (filename));
+        } catch (Error error) {
+            return false;
+        } finally {
+            folder.unlock ();
+        }
+    }
+
+    internal static bool remove_zero_byte_cache_file (File file) {
+        try {
+            var info = file.query_info (
+                FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE,
+                FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+            if (info.get_file_type () != FileType.REGULAR || info.get_size () != 0)
+                return false;
+            return file.delete (null);
+        } catch (Error error) {
+            // A missing file means Camel already invalidated it. Other file
+            // types and inaccessible paths are deliberately left untouched.
+            return false;
+        }
+    }
+
     internal static async void yield_to_main_context (Cancellable? cancellable = null) throws Error {
         Idle.add (() => {
             yield_to_main_context.callback ();
@@ -839,6 +1044,15 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
         });
         yield;
         if (cancellable != null) cancellable.set_error_if_cancelled ();
+    }
+
+    internal static bool uid_traversal_time_slice_expired (int64 started_at_usec,
+                                                            int64 current_time_usec) {
+        // A monotonic clock should not move backwards, but treating a negative
+        // delta as unexpired avoids an accidental yield storm if a platform
+        // clock source is corrected.
+        int64 elapsed = current_time_usec - started_at_usec;
+        return elapsed >= UID_TRAVERSAL_TIME_SLICE_USEC;
     }
 
     private static void collect_mailboxes (Camel.FolderInfo? node, string account_id,
@@ -987,7 +1201,7 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
         string? summary_preview = info.dup_preview ();
         string preview = summary_preview == null ? "" : summary_preview;
         if (plain == "") plain = preview;
-        bool remote_content = html.down ().contains ("src=\"http") || html.down ().contains ("src='http") || html.down ().contains ("url(http");
+        bool remote_content = HtmlSanitizer.has_remote_content (html);
         uint32 flags = info.get_flags ();
         int64 received = info.get_date_received (); if (received <= 0) received = info.get_date_sent ();
         var message = new Message ("%s:%s".printf (mailbox.id, uid), mailbox.id, sender_name, sender_address, recipients,
@@ -1029,9 +1243,8 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
         string managed_id = (mime.get_header ("X-Mailficient-Draft-ID") ?? "").strip ();
         string revision_text = (mime.get_header ("X-Mailficient-Draft-Revision") ?? "").strip ();
         int64 managed_revision = 0;
-        bool managed = Uuid.string_is_valid (managed_id) &&
-            int64.try_parse (revision_text, out managed_revision) && managed_revision > 0 &&
-            internet_message_id == Draft.remote_message_id_for (managed_id, managed_revision);
+        bool managed = is_managed_remote_draft_identity (managed_id,
+            revision_text, internet_message_id, out managed_revision);
         string local_id;
         if (managed) local_id = managed_id;
         else {
@@ -1062,6 +1275,31 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
         draft.mark_saved ();
         return new RemoteDraftSnapshot (draft, mailbox.remote_name, uid,
             internet_message_id, managed, DraftFingerprint.calculate (draft, uid));
+    }
+
+    internal static bool is_managed_remote_draft_identity (
+        string managed_id, string revision_text, string internet_message_id,
+        out int64 managed_revision) {
+        managed_revision = 0;
+        bool managed_headers = Uuid.string_is_valid (managed_id) &&
+            int64.try_parse (revision_text, out managed_revision) &&
+            managed_revision > 0;
+        if (!managed_headers) return false;
+        string expected_message_id = Draft.remote_message_id_for (
+            managed_id, managed_revision);
+        // Some IMAP pipelines strip Message-ID while preserving extension
+        // headers. The UUID/revision pair still gives this provider Drafts
+        // snapshot a stable identity. A present but mismatched Message-ID is
+        // never accepted as managed.
+        return internet_message_id == "" || internet_message_id == expected_message_id;
+    }
+
+    private static bool has_managed_remote_draft_identity (Camel.MimeMessage mime) {
+        int64 revision;
+        return is_managed_remote_draft_identity (
+            (mime.get_header ("X-Mailficient-Draft-ID") ?? "").strip (),
+            (mime.get_header ("X-Mailficient-Draft-Revision") ?? "").strip (),
+            bare_message_id (mime.get_message_id () ?? ""), out revision);
     }
 
     internal static string remote_draft_plain_body (string mime_plain, string mime_html) {
@@ -1194,40 +1432,170 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
                                         int64 maximum_bytes = MAX_RECEIVED_TEXT_PART_BYTES) throws Error {
         if (maximum_bytes <= 0)
             throw new IOError.MESSAGE_TOO_LARGE ("The message text exceeds the safe in-memory limit");
-        normalize_text_charset (content);
-        var output = new MemoryOutputStream.resizable ();
-        var bounded = new BoundedAttachmentOutputStream (output, maximum_bytes);
+        string? declared_charset = normalize_text_charset (content);
+
+        // Camel decodes Content-Transfer-Encoding here, but deliberately does
+        // not translate the MIME charset. Keep those two operations separate
+        // so quoted-printable/base64 is decoded exactly once.
+        var decoded_output = new MemoryOutputStream.resizable ();
+        var bounded = new BoundedAttachmentOutputStream (decoded_output, maximum_bytes);
         content.decode_to_output_stream_sync (bounded);
-        output.close ();
-        var bytes = output.steal_as_bytes ();
-        unowned uint8[] data = bytes.get_data ();
-        var text = new StringBuilder.sized (data.length + 1);
-        text.append_len ((string) data, (ssize_t) data.length);
-        return text.str.make_valid ();
+        decoded_output.close ();
+        var decoded_bytes = decoded_output.steal_as_bytes ();
+        unowned uint8[] data = decoded_bytes.get_data ();
+
+        int offset = utf_bom_length (data);
+        string? bom_charset = charset_from_bom (data);
+        if (bom_charset == "UTF-8")
+            return utf8_text_from_bytes (data, offset);
+
+        string? charset = bom_charset;
+        if (charset == null && declared_charset != null &&
+            charset_supported (declared_charset)) charset = declared_charset;
+        if (charset == null) charset = charset_from_html_meta (data);
+        if (charset == null && ((string) data).validate_len (data.length))
+            return utf8_text_from_bytes (data, 0);
+        if (charset == null) charset = "windows-1252";
+        charset = windows_charset_for_mislabelled_iso (charset, data, offset);
+
+        return convert_decoded_text (data, offset, charset, maximum_bytes);
     }
 
-    internal static void normalize_text_charset (Camel.DataWrapper content) {
+    internal static string? normalize_text_charset (Camel.DataWrapper content) {
         unowned Camel.ContentType? content_type = content.get_mime_type_field ();
-        if (content_type == null) return;
+        if (content_type == null) return null;
         unowned string? declared = content_type.param ("charset");
-        if (declared == null || declared.strip () == "") return;
+        if (declared == null || declared.strip () == "") return null;
 
-        string charset = declared.strip ();
+        string charset = declared.strip ().replace ("\"", "").replace ("'", "");
         // Some broken bulk-mail generators leak quoted-printable's "=" as
         // "3D" into MIME parameters (for example charset=3DUTF-8).
         while (charset.length > 2 &&
                charset.substring (0, 2).ascii_casecmp ("3D") == 0)
             charset = charset.substring (2);
+        if (charset.length == 0 || charset.length > 64) return null;
+        for (int index = 0; index < charset.length; index++) {
+            char character = charset[index];
+            if (!(character.isalnum () || character == '-' || character == '_' ||
+                  character == '.')) return null;
+        }
+        return charset;
+    }
 
-        bool supported = true;
+    private static bool charset_supported (string charset) {
         try {
             new CharsetConverter ("UTF-8", charset);
+            return true;
         } catch (Error error) {
-            supported = false;
+            return false;
         }
-        if (!supported) charset = "UTF-8";
-        if (charset.ascii_casecmp (declared) != 0)
-            content_type.set_param ("charset", charset);
+    }
+
+    private static string? charset_from_bom (uint8[] data) {
+        if (data.length >= 3 && data[0] == 0xef && data[1] == 0xbb && data[2] == 0xbf)
+            return "UTF-8";
+        if (data.length >= 2 && data[0] == 0xff && data[1] == 0xfe)
+            return "UTF-16LE";
+        if (data.length >= 2 && data[0] == 0xfe && data[1] == 0xff)
+            return "UTF-16BE";
+        return null;
+    }
+
+    private static int utf_bom_length (uint8[] data) {
+        string? charset = charset_from_bom (data);
+        if (charset == "UTF-8") return 3;
+        if (charset != null) return 2;
+        return 0;
+    }
+
+    private static string? charset_from_html_meta (uint8[] data) {
+        int length = int.min (8192, data.length);
+        var ascii = new StringBuilder.sized (length + 1);
+        for (int index = 0; index < length; index++) {
+            uint8 byte = data[index];
+            ascii.append_c (byte >= 0x20 && byte <= 0x7e ? (char) byte : ' ');
+        }
+        string head = ascii.str.down ();
+        int search_from = 0;
+        while (search_from < head.length) {
+            int found = head.index_of ("charset", search_from);
+            if (found < 0) return null;
+            int index = found + "charset".length;
+            while (index < head.length && head[index].isspace ()) index++;
+            if (index >= head.length || head[index] != '=') {
+                search_from = index;
+                continue;
+            }
+            index++;
+            while (index < head.length && head[index].isspace ()) index++;
+            if (index < head.length && (head[index] == '\'' || head[index] == '\"')) index++;
+            int start = index;
+            while (index < head.length) {
+                char character = head[index];
+                if (!(character.isalnum () || character == '-' || character == '_' ||
+                      character == '.')) break;
+                index++;
+            }
+            if (index > start) {
+                string candidate = head.substring (start, index - start);
+                if (charset_supported (candidate)) return candidate;
+            }
+            search_from = int.max (index, found + 1);
+        }
+        return null;
+    }
+
+    private static string windows_charset_for_mislabelled_iso (
+        string charset, uint8[] data, int offset) {
+        if (!charset.down ().has_prefix ("iso-8859-")) return charset;
+        for (int index = offset; index < data.length; index++) {
+            if (data[index] >= 0x80 && data[index] <= 0x9f) {
+                string windows = Camel.Charset.iso_to_windows (charset);
+                // Camel returns names such as "windows-cp1252" while
+                // GLib/iconv uses the equivalent "windows-1252" spelling.
+                if (windows.down ().has_prefix ("windows-cp"))
+                    return "windows-" + windows.substring ("windows-cp".length);
+                return windows;
+            }
+        }
+        return charset;
+    }
+
+    private static string convert_decoded_text (uint8[] data, int offset,
+                                                string charset,
+                                                int64 maximum_bytes) throws Error {
+        if (charset.ascii_casecmp ("utf-8") == 0 ||
+            charset.ascii_casecmp ("utf8") == 0)
+            return utf8_text_from_bytes (data, offset);
+
+        uint8[] source = data[offset:data.length];
+        var converted_output = new MemoryOutputStream.resizable ();
+        var bounded = new BoundedAttachmentOutputStream (
+            converted_output, maximum_bytes);
+        var converter = new CharsetConverter ("UTF-8", charset);
+        // Preserve malformed legacy bytes as visible escape sequences instead
+        // of silently discarding the surrounding message text.
+        converter.set_use_fallback (true);
+        var converting = new ConverterOutputStream (bounded, converter);
+        size_t written;
+        converting.write_all (source, out written);
+        converting.close ();
+        converted_output.close ();
+        var converted_bytes = converted_output.steal_as_bytes ();
+        unowned uint8[] converted = converted_bytes.get_data ();
+        return utf8_text_from_bytes (converted, 0);
+    }
+
+    private static string utf8_text_from_bytes (uint8[] data, int offset) {
+        var text = new StringBuilder.sized (data.length - offset + 1);
+        for (int index = offset; index < data.length; index++) {
+            // WebKit load_html() consumes a NUL-terminated UTF-8 string. HTML
+            // defines embedded NUL as a replacement character, never a
+            // premature end to the document.
+            if (data[index] == 0) text.append_unichar (0xfffd);
+            else text.append_c ((char) data[index]);
+        }
+        return text.str.make_valid ();
     }
 
     private static string format_timestamp (int64 unix_time) {
@@ -1331,14 +1699,67 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             if (info == null) return true;
             var candidate = yield folder.get_message (
                 deletion.remote_uid, Priority.DEFAULT, cancellable);
-            if (candidate == null || bare_message_id (candidate.get_message_id () ?? "") !=
-                bare_message_id (deletion.expected_message_id))
-                return false;
+            if (candidate == null) return true;
+            if (!(yield remote_draft_matches_deletion (
+                    deletion, info, candidate, cancellable))) {
+                // The provider reused this UID for different content. The
+                // target is no longer present, so retire network work rather
+                // than downloading and hashing the replacement forever. A
+                // suppressing tombstone remains durable and will requeue exact
+                // cleanup if an already-fetched stale target appears later.
+                return true;
+            }
             folder.set_message_flags (deletion.remote_uid,
                 Camel.MessageFlags.DELETED, Camel.MessageFlags.DELETED);
             yield folder.synchronize (false, Priority.DEFAULT, cancellable);
             return true;
         } catch (Error error) { throw normalize_error (error); }
+    }
+
+    private async bool remote_draft_matches_deletion (
+        PendingDraftDeletion deletion, Camel.MessageInfo info,
+        Camel.MimeMessage candidate, Cancellable? cancellable) throws Error {
+        if (deletion.expected_message_id.strip () != "")
+            return remote_draft_matches_expected_identity (
+                candidate, deletion.expected_message_id);
+        string expected_fingerprint = deletion.expected_fingerprint.strip ();
+        if (expected_fingerprint == "") return false;
+
+        // A third-party draft may legitimately have no Message-ID. Its exact
+        // imported MIME fingerprint is then the only safe deletion token. The
+        // folder+UID alone is insufficient because providers can reuse UIDs.
+        var mailbox = new Mailbox (
+            mailbox_id (deletion.account_id, deletion.mailbox_name),
+            leaf_folder_name (deletion.mailbox_name) ?? "Drafts",
+            "document-edit-symbolic", MailboxRole.DRAFTS, 0,
+            deletion.account_id, deletion.mailbox_name);
+        var conversion = yield message_from_camel (deletion.account_id, mailbox,
+            deletion.remote_uid, info, candidate, cancellable);
+        var snapshot = remote_draft_from_camel (deletion.account_id, mailbox,
+            deletion.remote_uid, info, candidate, conversion);
+        return remote_draft_matches_expected_fingerprint (
+            snapshot, expected_fingerprint);
+    }
+
+    internal static bool remote_draft_matches_expected_fingerprint (
+        RemoteDraftSnapshot snapshot, string expected_fingerprint) {
+        string expected = expected_fingerprint.strip ();
+        return expected != "" && snapshot.internet_message_id.strip () == "" &&
+            snapshot.content_fingerprint == expected;
+    }
+
+    internal static bool remote_draft_matches_expected_identity (
+        Camel.MimeMessage candidate, string expected_message_id) {
+        string expected = bare_message_id (expected_message_id);
+        string actual = bare_message_id (candidate.get_message_id () ?? "");
+        if (expected == "") return false;
+        if (actual != "") return actual == expected;
+        string managed_id = (candidate.get_header ("X-Mailficient-Draft-ID") ?? "").strip ();
+        string revision_text = (candidate.get_header (
+            "X-Mailficient-Draft-Revision") ?? "").strip ();
+        int64 revision;
+        return is_managed_remote_draft_identity (managed_id, revision_text, "",
+            out revision) && Draft.remote_message_id_for (managed_id, revision) == expected;
     }
 
     private async Camel.Folder? find_remote_drafts_folder (
@@ -1849,8 +2270,19 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
 #else
         var uids = folder.dup_uids ();
 #endif
-        for (uint index = 0; index < uids.length; index++)
+        int64 uid_traversal_slice_started = GLib.get_monotonic_time ();
+        for (uint index = 0; index < uids.length; index++) {
             folder.set_message_flags (uids[index], deleted, deleted);
+            // set_message_flags() is synchronous and a Junk folder can contain
+            // thousands of UIDs. Let GTK dispatch paint/input between bounded
+            // slices instead of making GNOME report the window as unresponsive.
+            int64 current_time = GLib.get_monotonic_time ();
+            if (uid_traversal_time_slice_expired (
+                    uid_traversal_slice_started, current_time)) {
+                yield yield_to_main_context (cancellable);
+                uid_traversal_slice_started = GLib.get_monotonic_time ();
+            }
+        }
         yield folder.synchronize (true, Priority.DEFAULT, cancellable);
     }
 
