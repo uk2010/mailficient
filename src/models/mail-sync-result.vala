@@ -4,10 +4,16 @@ public class MailSyncResult : Object {
     public Gee.ArrayList<Mailbox> mailboxes { get; private set; default = new Gee.ArrayList<Mailbox> (); }
     public Gee.ArrayList<Message> messages { get; private set; default = new Gee.ArrayList<Message> (); }
     public Gee.ArrayList<RemoteMessageState> states { get; private set; default = new Gee.ArrayList<RemoteMessageState> (); }
+    public Gee.ArrayList<RemoteDraftSnapshot> remote_drafts { get; private set; default = new Gee.ArrayList<RemoteDraftSnapshot> (); }
     public Gee.ArrayList<string> issues { get; private set; default = new Gee.ArrayList<string> (); }
     public bool folder_inventory_complete { get; set; default = false; }
     public bool more_messages_available { get; set; default = false; }
     public int messages_to_download { get; set; default = 0; }
+    // Mutable provider Drafts with an existing UID are periodically re-read.
+    // These counters let AccountSyncService continue that bounded maintenance
+    // without misreporting it as newly downloaded mail.
+    public int maintenance_items_processed { get; set; default = 0; }
+    public int maintenance_items_remaining { get; set; default = 0; }
     public Error? terminal_error;
     private Gee.HashMap<string, Gee.HashSet<string>> remote_uids = new Gee.HashMap<string, Gee.HashSet<string>> ();
 
@@ -16,12 +22,14 @@ public class MailSyncResult : Object {
     }
 
     public void record_remote_uid (string mailbox_id, string uid) {
+        begin_remote_inventory (mailbox_id);
         var inventory = remote_uids[mailbox_id];
-        if (inventory == null) {
-            inventory = new Gee.HashSet<string> ();
-            remote_uids[mailbox_id] = inventory;
-        }
         inventory.add (uid);
+    }
+
+    public void begin_remote_inventory (string mailbox_id) {
+        if (!remote_uids.has_key (mailbox_id))
+            remote_uids[mailbox_id] = new Gee.HashSet<string> ();
     }
 
     public Gee.Set<string>? remote_uids_for (string mailbox_id) {

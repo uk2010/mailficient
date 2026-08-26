@@ -17,11 +17,14 @@ Requires:       libxml2
 Requires:       gnupg2
 Recommends:     gnome-keyring
 Recommends:     gsettings-desktop-schemas
+Recommends:     enchant2
+Recommends:     hunspell-en-US
 
 %description
 Mailficient is a native GTK4 and Libadwaita desktop email client with standard
 IMAP and SMTP support, secure credential storage, offline mail, search, drafts,
-attachments, and safe HTML message display.
+attachments, tasks, calendar invitations, compose safeguards, automation, and
+phishing-aware message display.
 
 %prep
 
@@ -37,7 +40,8 @@ install -d \
     %{buildroot}%{_datadir}/dbus-1/services \
     %{buildroot}%{_datadir}/doc/mailficient \
     %{buildroot}%{_datadir}/icons/hicolor \
-    %{buildroot}%{_datadir}/metainfo
+    %{buildroot}%{_datadir}/metainfo \
+    %{buildroot}%{_sysconfdir}/xdg/autostart
 
 sed 's|@LIBDIR@|%{_libdir}|g' \
     %{mailficient_source_root}/packaging/rpm/mailficient \
@@ -87,6 +91,11 @@ fi
 sed 's|^Exec=.*$|Exec=/usr/bin/mailficient|' \
     %{mailficient_app_tree}/share/applications/com.local.Mailficient.desktop \
     > %{buildroot}%{_datadir}/applications/com.local.Mailficient.desktop
+sed 's|^Exec=.*$|Exec=/usr/bin/mailficient --background|' \
+    %{mailficient_source_root}/data/com.local.Mailficient.Background.desktop \
+    > %{buildroot}%{_sysconfdir}/xdg/autostart/com.local.Mailficient.Background.desktop
+chmod 0644 \
+    %{buildroot}%{_sysconfdir}/xdg/autostart/com.local.Mailficient.Background.desktop
 sed 's|Exec=/app/bin/mailficient|Exec=/usr/bin/mailficient|' \
     %{mailficient_app_tree}/share/dbus-1/services/com.local.Mailficient.service \
     > %{buildroot}%{_datadir}/dbus-1/services/com.local.Mailficient.service
@@ -127,6 +136,7 @@ fi
 %{_bindir}/mailficient-addressbook-probe
 %endif
 %{_libdir}/mailficient/
+%config(noreplace) %{_sysconfdir}/xdg/autostart/com.local.Mailficient.Background.desktop
 %{_datadir}/applications/com.local.Mailficient.desktop
 %{_datadir}/dbus-1/services/com.local.Mailficient.service
 %{_datadir}/icons/hicolor/*/apps/com.local.Mailficient.png
@@ -134,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Tue Aug 25 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.8-1
+- Add compose safeguards, tasks, calendar RSVP, message safety, advanced rules,
+  Quick Steps, server search, and release polish.
+
 * Sun Aug 23 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.7-1
 - Clear and persist unread state when messages are opened directly.
 

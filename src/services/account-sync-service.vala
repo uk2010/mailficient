@@ -4,7 +4,10 @@ internal class SyncPassOutcome : Object {
     public bool cancelled { get; set; default = false; }
     public bool more_messages_available { get; set; default = false; }
     public int messages_downloaded { get; set; default = 0; }
+    public int maintenance_items_processed { get; set; default = 0; }
+    public bool retryable_failure { get; set; default = false; }
     public UserFacingError? warning { get; set; }
+    public NewMailSummary? new_mail { get; set; }
 }
 
 internal class SyncProgressContext : Object {
@@ -17,6 +20,7 @@ public class AccountSyncService : Object {
     public signal void failed (string account_id, UserFacingError error);
     public signal void cancelled (string account_id);
     public signal void new_message (Message message);
+    public signal void new_mail_summary (NewMailSummary summary);
     public signal void mail_available (string account_id);
     public signal void pass_completed (string account_id);
     public signal void mail_check_completed (string account_id, int messages_downloaded);
@@ -30,6 +34,8 @@ public class AccountSyncService : Object {
     private JunkFilterService junk_filter;
     private MailRuleService mail_rules;
     private VacationResponderService vacation_responder;
+    private DraftSyncService draft_sync;
+    private LiveMailCoordinator live_mail = new LiveMailCoordinator ();
     private Cancellable? active;
     private Gee.HashSet<string> suppressed_accounts = new Gee.HashSet<string> ();
     private Gee.HashSet<string> flushing_accounts = new Gee.HashSet<string> ();
@@ -39,16 +45,50 @@ public class AccountSyncService : Object {
     private Gee.HashSet<string> sync_again = new Gee.HashSet<string> ();
     private Gee.HashMap<string, uint> queued_flush_sources = new Gee.HashMap<string, uint> ();
     private Gee.HashMap<string, uint> queued_history_sources = new Gee.HashMap<string, uint> ();
+    // A bounded account check may span several fresh Camel sessions. Keep only
+    // the small NewMailSummary sample here and publish once when that logical
+    // backfill finishes, instead of notifying five times per 250-message pass.
+    private Gee.HashMap<string, NewMailSummary> pending_new_mail =
+        new Gee.HashMap<string, NewMailSummary> ();
+    // The first account import is not an arrival event. Keep suppression across
+    // all fresh sessions needed to drain it, even though pass two has a cache.
+    private Gee.HashSet<string> initial_backfill_accounts = new Gee.HashSet<string> ();
 
     public AccountSyncService (CacheDatabase cache, MailEngine engine, OutboundService outbound,
-                               JunkFilterService junk_filter) {
+                               JunkFilterService junk_filter,
+                               AttachmentService? attachment_service = null) {
         this.cache = cache;
         this.engine = engine;
         this.outbound = outbound;
         this.junk_filter = junk_filter;
         this.mail_rules = new MailRuleService (cache);
         this.vacation_responder = new VacationResponderService (cache, outbound);
+        this.draft_sync = new DraftSyncService (cache, engine, attachment_service);
         cache.mutation_queued.connect (schedule_pending_flush);
+        weak AccountSyncService weak_service = this;
+        engine.live_mail_changed.connect ((account_id) => {
+            if (weak_service != null) weak_service.live_mail.live_mail_changed (account_id);
+        });
+        engine.live_mail_unavailable.connect ((account_id) => {
+            if (weak_service != null) weak_service.live_mail.live_mail_unavailable (account_id);
+        });
+        live_mail.sync_requested.connect ((account_id, reason) => {
+            if (weak_service != null) weak_service.handle_live_sync_request (account_id);
+        });
+    }
+
+    private void handle_live_sync_request (string account_id) {
+        try {
+            var account = cache.find_account (account_id);
+            if (account == null) {
+                live_mail.suppress_account (account_id);
+                return;
+            }
+            sync_account.begin (account);
+        } catch (Error error) {
+            live_mail.sync_failed (account_id, false);
+            failed (account_id, UserFacingError.from_error (error));
+        }
     }
 
     private void schedule_pending_flush (string account_id) {
@@ -74,30 +114,60 @@ public class AccountSyncService : Object {
             return;
         }
         syncing_accounts.add (account.id);
+        if (!initial_backfill_accounts.contains (account.id)) {
+            try {
+                if (cache.cached_message_count (account.id) == 0)
+                    initial_backfill_accounts.add (account.id);
+            } catch (Error error) {
+                syncing_accounts.remove (account.id);
+                failed (account.id, UserFacingError.from_error (error));
+                account_sync_finished (account.id);
+                return;
+            }
+        }
         var effective_cancellable = cancellable ?? new Cancellable ();
         sync_cancellables[account.id] = effective_cancellable;
         SyncPassOutcome? last_outcome = null;
         var progress_context = new SyncProgressContext ();
         int messages_downloaded_this_check = 0;
-        bool allow_notifications = true;
+        bool allow_notifications = !initial_backfill_accounts.contains (account.id);
         do {
             sync_again.remove (account.id);
             last_outcome = new SyncPassOutcome ();
             yield perform_sync (account, effective_cancellable, allow_notifications,
                 progress_context, last_outcome);
+            accumulate_new_mail (account, last_outcome.new_mail);
             messages_downloaded_this_check += last_outcome.messages_downloaded;
             progress_context.messages_completed += last_outcome.messages_downloaded;
             if (last_outcome.more_messages_available) {
+                // The cache is checkpointed before perform_sync returns. Remove
+                // the account's Camel services now so the next bounded pass owns
+                // a fresh backend session instead of retaining the prior MIME and
+                // folder-summary object graph across the whole history import.
+                try {
+                    yield engine.disconnect_account (account.id, effective_cancellable);
+                } catch (Error error) {
+                    last_outcome.more_messages_available = false;
+                    last_outcome.completed = false;
+                    if (error is IOError.CANCELLED) last_outcome.cancelled = true;
+                    else {
+                        last_outcome.retryable_failure = is_retryable_live_error (error);
+                        failed (account.id, UserFacingError.from_error (error));
+                    }
+                    break;
+                }
                 // A bounded pass keeps Get Mail responsive. Continue older
                 // history in the background so a single check still drains
                 // every message instead of stopping at the per-pass limit.
                 pass_completed (account.id);
                 double fraction = progress_context.messages_total > 0 ?
                     progress_context.messages_completed / (double) progress_context.messages_total : 0;
-                progress_changed (account.id, fraction,
+                string continuation_detail = progress_context.messages_total > 0 ?
                     "Downloaded %d of %d messages — continuing in background".printf (
-                        progress_context.messages_completed, progress_context.messages_total));
-                schedule_history_continuation (account);
+                        progress_context.messages_completed, progress_context.messages_total) :
+                    "Refreshing synchronized drafts — continuing in background";
+                progress_changed (account.id, fraction, continuation_detail);
+                if (!sync_again.contains (account.id)) schedule_history_continuation (account);
             }
         } while (!suppressed_accounts.contains (account.id) && sync_again.contains (account.id));
         if (!suppressed_accounts.contains (account.id) && last_outcome != null && last_outcome.completed) {
@@ -107,6 +177,21 @@ public class AccountSyncService : Object {
         } else if (!suppressed_accounts.contains (account.id) && last_outcome != null &&
                    last_outcome.cancelled) {
             cancelled (account.id);
+        }
+        if (!suppressed_accounts.contains (account.id) && last_outcome != null &&
+            last_outcome.completed && !last_outcome.more_messages_available) {
+            publish_new_mail (account.id);
+            initial_backfill_accounts.remove (account.id);
+        }
+        else if (last_outcome == null || !last_outcome.completed)
+            pending_new_mail.unset (account.id);
+        if (last_outcome != null) {
+            if (last_outcome.retryable_failure)
+                live_mail.sync_failed (account.id, true);
+            else if (last_outcome.completed)
+                live_mail.sync_succeeded (account.id);
+            else if (!last_outcome.cancelled)
+                live_mail.sync_failed (account.id, false);
         }
         if (sync_cancellables[account.id] == effective_cancellable)
             sync_cancellables.unset (account.id);
@@ -122,27 +207,25 @@ public class AccountSyncService : Object {
         Error? batch_error = null;
         bool established_cache = false;
         Gee.Set<string>? known_ids = null;
-        int announced = 0;
-        var announced_ids = new Gee.HashSet<string> ();
+        var new_mail = new NewMailSummary (account.id, account.email);
+        var remote_drafts = new Gee.ArrayList<RemoteDraftSnapshot> ();
         ulong batch_handler = engine.sync_batch_ready.connect ((batch) => {
             if (batch.account_id != account.id || suppressed_accounts.contains (account.id) || batch_error != null)
                 return;
             try {
                 cache.store_sync_result (batch);
+                foreach (var remote_draft in batch.remote_drafts)
+                    remote_drafts.add (remote_draft);
                 junk_filter.apply (batch);
                 mail_rules.apply (batch);
                 mail_available (account.id);
-                if (allow_notifications && established_cache && known_ids != null && announced < 5) {
+                if (allow_notifications && established_cache && known_ids != null) {
                     var inbox_ids = new Gee.HashSet<string> ();
                     foreach (var mailbox in batch.mailboxes)
                         if (mailbox.role == MailboxRole.INBOX) inbox_ids.add (mailbox.id);
                     foreach (var message in batch.messages) {
-                        if (announced >= 5) break;
                         if (message.unread && inbox_ids.contains (message.mailbox_id) &&
-                            !known_ids.contains (message.id)) {
-                            new_message (message); announced++;
-                            announced_ids.add (message.id);
-                        }
+                            !known_ids.contains (message.id)) new_mail.add (message);
                     }
                 }
             } catch (Error error) {
@@ -193,30 +276,40 @@ public class AccountSyncService : Object {
             if (suppressed_accounts.contains (account.id)) return;
             if (batch_error != null) throw batch_error;
             cache.store_sync_result (snapshot);
+            foreach (var remote_draft in snapshot.remote_drafts)
+                remote_drafts.add (remote_draft);
             junk_filter.apply (snapshot);
             mail_rules.apply (snapshot);
+            try {
+                // Import while the received-attachment cache paths emitted by
+                // Camel are still referenced by this completed sync pass.
+                draft_sync.reconcile_remote_deletions (snapshot);
+                yield draft_sync.import_remote_drafts (remote_drafts, cancellable);
+            } catch (Error draft_error) {
+                snapshot.record_issue ("Drafts", draft_error);
+            }
+            try { yield draft_sync.synchronize_account (account.id, cancellable); }
+            catch (Error draft_error) { snapshot.record_issue ("Drafts", draft_error); }
             yield vacation_responder.respond (snapshot, cancellable);
             yield flush_pending (account.id, cancellable);
             int cached_after = cache.cached_message_count (account.id);
             outcome.messages_downloaded = int.max (
                 int.max (0, cached_after - cached_before), progress_state.messages_downloaded);
-            if (allow_notifications && established_cache && known_ids != null && announced < 5) {
+            outcome.maintenance_items_processed = snapshot.maintenance_items_processed;
+            if (allow_notifications && established_cache && known_ids != null) {
                 var inbox_ids = new Gee.HashSet<string> ();
                 foreach (var mailbox in snapshot.mailboxes)
                     if (mailbox.role == MailboxRole.INBOX) inbox_ids.add (mailbox.id);
                 foreach (var message in snapshot.messages) {
-                    if (announced >= 5) break;
                     if (message.unread && inbox_ids.contains (message.mailbox_id) &&
-                        !known_ids.contains (message.id) && !announced_ids.contains (message.id)) {
-                        new_message (message); announced++;
-                        announced_ids.add (message.id);
-                    }
+                        !known_ids.contains (message.id)) new_mail.add (message);
                 }
             }
             outcome.completed = true;
             if (snapshot.more_messages_available && snapshot.issues.size == 0 &&
                 snapshot.terminal_error == null) {
-                if (outcome.messages_downloaded > 0) outcome.more_messages_available = true;
+                if (outcome.messages_downloaded > 0 || outcome.maintenance_items_processed > 0)
+                    outcome.more_messages_available = true;
                 else outcome.warning = UserFacingError.from_error (new MailError.PARTIAL_SYNC (
                     "The server reported more mail, but this pass could not save another message. Automatic backfill stopped to avoid an endless retry."));
             }
@@ -226,13 +319,38 @@ public class AccountSyncService : Object {
                 else issue_error = new MailError.PARTIAL_SYNC (snapshot.issue_summary ());
                 outcome.warning = UserFacingError.from_error (issue_error);
             }
+            if (snapshot.terminal_error != null)
+                outcome.retryable_failure = is_retryable_live_error (snapshot.terminal_error);
         } catch (Error error) {
             if (error is IOError.CANCELLED) outcome.cancelled = true;
-            else failed (account.id, UserFacingError.from_error (error));
+            else {
+                outcome.retryable_failure = is_retryable_live_error (error);
+                failed (account.id, UserFacingError.from_error (error));
+            }
         } finally {
             engine.disconnect (batch_handler);
             progress_state.disconnect (progress_handler);
+            outcome.new_mail = new_mail;
         }
+    }
+
+    private void accumulate_new_mail (AccountSettings account, NewMailSummary? addition) {
+        if (addition == null || addition.total == 0 ||
+            suppressed_accounts.contains (account.id)) return;
+        var aggregate = pending_new_mail[account.id];
+        if (aggregate == null) {
+            aggregate = new NewMailSummary (account.id, account.email);
+            pending_new_mail[account.id] = aggregate;
+        }
+        aggregate.merge (addition);
+    }
+
+    private void publish_new_mail (string account_id) {
+        var summary = pending_new_mail[account_id];
+        pending_new_mail.unset (account_id);
+        if (summary == null || summary.total == 0) return;
+        foreach (var message in summary.samples) new_message (message);
+        new_mail_summary (summary);
     }
 
     public async void sync_all () {
@@ -253,20 +371,34 @@ public class AccountSyncService : Object {
         foreach (var source in queued_history_sources.values)
             if (source != 0) Source.remove (source);
         queued_history_sources.clear ();
+        pending_new_mail.clear ();
+        // Cancellation pauses a bounded initial import; it does not turn the
+        // remaining server history into a live arrival. Retain this marker so
+        // an in-process resume remains silent until a no-more-work pass.
+        live_mail.cancel_all ();
     }
 
     public void suppress_account (string account_id) {
         suppressed_accounts.add (account_id);
+        live_mail.suppress_account (account_id);
         uint history_source = queued_history_sources.has_key (account_id) ?
             queued_history_sources[account_id] : 0;
         if (history_source != 0) Source.remove (history_source);
         queued_history_sources.unset (account_id);
+        pending_new_mail.unset (account_id);
+        initial_backfill_accounts.remove (account_id);
         var cancellable = sync_cancellables[account_id];
         if (cancellable != null) cancellable.cancel ();
     }
 
     public void resume_account (string account_id) {
         suppressed_accounts.remove (account_id);
+        live_mail.resume_account (account_id);
+    }
+
+    internal static bool is_retryable_live_error (Error error) {
+        return error is MailError.CONNECTION || error is MailError.OFFLINE ||
+            error is MailError.TIMEOUT || error is MailError.RATE_LIMITED;
     }
 
     private void schedule_history_continuation (AccountSettings account) {

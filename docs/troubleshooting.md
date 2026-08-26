@@ -10,6 +10,24 @@ If Mailficient reports **Some mail could not be updated**, successful folders an
 
 When Mailficient finds a legacy `personal-mail` data directory and no current `mailficient` directory, it copies the legacy database and private files through an atomic staging migration. Saved draft and received-attachment paths are rewritten to their new location. If migration reports an error, the original legacy directory has not been replaced or deleted; correct the disk-space or permission problem and choose Try Again.
 
+## Draft synchronization and background delivery
+
+Mailficient presents one unified, editable **Drafts** favorite. Provider Drafts folders are synchronized into it and are intentionally hidden from account folder groups so the same provider message does not also appear as a raw read-only row.
+
+If an imported draft shows **Not available locally** for an attachment, the provider part could not be cached within Mailficient's outgoing attachment limits or was unavailable during synchronization. The draft is intentionally blocked from sending so an attachment is never silently omitted. Remove the placeholder or obtain the file and reattach it before sending.
+
+Native packages start a current-session background-delivery worker as soon as a configured account has durable work; their XDG autostart entry covers later logins. Flatpak asks for desktop Background permission after a real-account Draft or Outbox item first needs it and starts the worker only after the desktop grants that request. Demo data never prompts or starts a worker. If scheduled mail remains queued after its due time, check that Mailficient is allowed to run in the background in the desktop's application permissions, then launch Mailficient once to retry. Denying or disabling the permission does not lose the message: keep Mailficient open for a foreground check or launch it later. An item shown as **Sending in the background** is temporarily read-only because another process owns its delivery claim.
+
+Immediately sent messages wait in Outbox for the **Undo Send** interval selected under **Preferences → Composing**. The editor closes when that 5–30 second deadline ends and background delivery becomes eligible. If Undo reports that the window already ended, do not delete or edit the row while it is being prepared; check Outbox for its current delivery state.
+
+## Calendar invitations
+
+If an invitation shows **Open in Calendar to Respond** instead of **Accept**, **Tentative**, and **Decline**, first check the note beneath the card. Response buttons require a request that lists the exact configured address for that mail account and a build with EDS calendar support; cancellations and invitations addressed only to someone else are intentionally not actionable. For a native source build, install the libecal and libical development packages from the README and configure with `-Dcalendar=enabled`. The portable fallback still opens the original bounded `.ics` data in the registered desktop calendar and never claims that it recorded an RSVP.
+
+If a direct response or **Create Meeting from Email** fails, make sure Evolution Data Server is running and GNOME Calendar has an enabled, writable default calendar. A read-only default must be changed in the calendar application. Flatpak builds also require the packaged `org.gnome.evolution.dataserver.Calendar8` session-bus permission; reinstall the checked manifest if a locally altered package omitted it. Snap's `calendar-service` interface does not auto-connect; connect it with `sudo snap connect mailficient:calendar-service` to enable direct EDS access, or continue with the safe **Open in Calendar** fallback.
+
+The response confirmation's **Send a response to the organizer** checkbox is independent of the calendar update. Leave it off to change only the calendar, or enable it to let EDS send the iTIP reply. Creating a meeting from an email always suppresses automatic invitation delivery: review the saved event in GNOME Calendar and send from there only if intended.
+
 - If Meson cannot find GTK or Camel, install the development packages listed in the README, not only runtime libraries.
 - If the window cannot connect to a display, launch from an active GNOME session or run interface smoke tests under Xvfb.
 - If Secret Service is unavailable, start GNOME Keyring; do not fall back to plaintext credential files.
@@ -18,8 +36,9 @@ When Mailficient finds a legacy `personal-mail` data directory and no current `m
 - If Outbox says delivery could not be confirmed, check the provider's Sent mailbox before choosing **Send Again**. The previous SMTP attempt may have succeeded even though its final response was lost. Mailficient never retries this state automatically.
 - If Outbox says **Message was not sent**, a temporary server response or preparation failure kept it from submission. It remains queued and no duplicate-delivery confirmation is needed. If it says **Mail server rejected this message**, a permanent 5xx response has paused automatic retry; expand Technical Details, correct the recipient or message, and choose Try Again.
 - Demo mode never contacts a server and is available without an account.
-- If a compose window is closed, choose **Save Draft** to keep it in the local Drafts mailbox. Draft attachments are private local copies and remain available after restart. **Discard** removes both the database entry and those private copies.
+- If a compose window is closed, choose **Save Draft** to keep it in the unified Drafts mailbox and synchronize it to the configured provider. Draft attachments are private local copies and remain available after restart. **Discard** removes the database entry, its private copies, and the exact synchronized provider copy when one exists.
 - Configure a separate plain-text signature for each sending identity from **Mailficient menu → Preferences → Composing**. Existing drafts retain their saved body and are not given a duplicate signature when reopened.
+- Spell checking is entirely local. If only common typing errors are detected, install an Enchant or Aspell dictionary for the desktop locale, then reopen the composer. Disabling **Check spelling while typing** removes the underlines without changing message text.
 - Recipient suggestions are local and private: type part of a cached sender's name or address in To, Cc, or Bcc, press **Down**, then **Enter**. Suggestions appear only after that correspondent exists in the local cache.
 - Drafts and queued messages are stored in `$XDG_DATA_HOME/mailficient/mail.db` (normally `~/.local/share/mailficient/mail.db`). Passwords are never stored there.
 - If the local database cannot be opened, Mailficient shows a recovery window instead of silently exiting. Review **Technical Details**, correct disk-space or file-permission problems, and choose **Try Again**. Mailficient does not automatically delete, rename, or replace `mail.db`; keep a copy before performing any manual recovery.

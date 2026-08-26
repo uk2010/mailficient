@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Mailficient//Visual QA//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:visual-qa-review@mailficient.local
+SEQUENCE:1
+DTSTART:20260910T150000Z
+DTEND:20260910T160000Z
+SUMMARY:Product review and launch planning
+DESCRIPTION:Review the final launch checklist\, confirm owners\, and agree on the rollout date.
+LOCATION:Design Studio · Room 4
+RRULE:FREQ=WEEKLY;COUNT=3
+ORGANIZER;CN=Maya Chen:mailto:maya@example.net
+ATTENDEE;CN=Alex Morgan;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:alex@example.com
+END:VEVENT
+END:VCALENDAR

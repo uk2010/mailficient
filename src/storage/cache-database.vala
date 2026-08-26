@@ -2,11 +2,16 @@ namespace Mailficient {
 public class CacheDatabase : Object, AccountStore {
     public const int MESSAGE_LIST_LIMIT = 500;
     public const int MAX_CONVERSATION_MESSAGES = 100;
+    public const int BUSY_TIMEOUT_MILLISECONDS = 5000;
     // Recipient completion is invoked from GTK entry change handlers.  Never
     // walk an unbounded mailbox here: a large local archive would otherwise
     // make the compose window (and its Send button) appear to hang.
     public const int RECIPIENT_CANDIDATE_MESSAGE_LIMIT = 500;
     public signal void mutation_queued (string account_id);
+    // Successful local saves may need a provider Drafts upload. The
+    // application uses this edge-trigger to request Flatpak background access;
+    // the background service itself verifies the durable database state.
+    public signal void remote_draft_work_queued (string account_id);
     private Sqlite.Database database;
     private Sqlite.Statement? bulk_message_statement;
     private bool bulk_sync_mode;
@@ -14,7 +19,10 @@ public class CacheDatabase : Object, AccountStore {
     public CacheDatabase (string path) throws MailError {
         if (Sqlite.Database.open (path, out database) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not open the mail cache");
-        execute ("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+        // The GUI and the background delivery process intentionally share this
+        // WAL database. Give short overlapping writes time to serialize rather
+        // than surfacing a transient SQLITE_BUSY as lost mail state.
+        execute ("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
         migrate ();
     }
 
@@ -38,10 +46,19 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY, value TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS vip_senders(address TEXT PRIMARY KEY COLLATE NOCASE);" +
             "CREATE TABLE IF NOT EXISTS trusted_remote_senders(address TEXT PRIMARY KEY COLLATE NOCASE,created_at INTEGER NOT NULL);" +
+            "CREATE TABLE IF NOT EXISTS safe_senders(address TEXT PRIMARY KEY COLLATE NOCASE,created_at INTEGER NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS junk_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,kind INTEGER NOT NULL,pattern TEXT NOT NULL COLLATE NOCASE,UNIQUE(kind,pattern));" +
             "CREATE TABLE IF NOT EXISTS mail_labels(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,color TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS mail_rules(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,account_id TEXT NOT NULL," +
             "field INTEGER NOT NULL,pattern TEXT NOT NULL,action INTEGER NOT NULL,value TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);" +
+            "CREATE TABLE IF NOT EXISTS mail_rule_conditions(rule_id INTEGER NOT NULL,position INTEGER NOT NULL,field INTEGER NOT NULL," +
+            "operator INTEGER NOT NULL,pattern TEXT NOT NULL,is_exception INTEGER NOT NULL DEFAULT 0," +
+            "PRIMARY KEY(rule_id,is_exception,position),FOREIGN KEY(rule_id) REFERENCES mail_rules(id) ON DELETE CASCADE);" +
+            "CREATE TABLE IF NOT EXISTS mail_rule_actions(rule_id INTEGER NOT NULL,position INTEGER NOT NULL,action INTEGER NOT NULL,value TEXT NOT NULL," +
+            "PRIMARY KEY(rule_id,position),FOREIGN KEY(rule_id) REFERENCES mail_rules(id) ON DELETE CASCADE);" +
+            "CREATE TABLE IF NOT EXISTS quick_steps(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,account_id TEXT NOT NULL DEFAULT '',position INTEGER NOT NULL DEFAULT 0);" +
+            "CREATE TABLE IF NOT EXISTS quick_step_actions(quick_step_id INTEGER NOT NULL,position INTEGER NOT NULL,action INTEGER NOT NULL,value TEXT NOT NULL," +
+            "PRIMARY KEY(quick_step_id,position),FOREIGN KEY(quick_step_id) REFERENCES quick_steps(id) ON DELETE CASCADE);" +
             "CREATE TABLE IF NOT EXISTS smart_mailboxes(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,query TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS mail_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,due_at TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0,notes TEXT NOT NULL,message_id TEXT NOT NULL DEFAULT '');" +
             "CREATE TABLE IF NOT EXISTS mail_templates(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE," +
@@ -56,6 +73,10 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE TABLE IF NOT EXISTS vacation_reply_log(account_id TEXT NOT NULL,sender TEXT NOT NULL COLLATE NOCASE,replied_at INTEGER NOT NULL," +
             "PRIMARY KEY(account_id,sender));" +
             "CREATE TABLE IF NOT EXISTS pending_credential_cleanup(account_id TEXT PRIMARY KEY,created_at INTEGER NOT NULL);" +
+            "CREATE TABLE IF NOT EXISTS pending_remote_draft_deletions(" +
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL,mailbox_name TEXT NOT NULL,remote_uid TEXT NOT NULL," +
+            "expected_message_id TEXT NOT NULL,created_at INTEGER NOT NULL," +
+            "UNIQUE(account_id,mailbox_name,remote_uid,expected_message_id));" +
             "CREATE TABLE IF NOT EXISTS cached_messages(" +
             "id TEXT PRIMARY KEY, mailbox_id TEXT NOT NULL, sender_name TEXT NOT NULL, sender_address TEXT NOT NULL, recipients TEXT NOT NULL," +
             "subject TEXT NOT NULL, preview TEXT NOT NULL, body TEXT NOT NULL, timestamp TEXT NOT NULL, unread INTEGER NOT NULL, flagged INTEGER NOT NULL," +
@@ -93,6 +114,13 @@ public class CacheDatabase : Object, AccountStore {
         ensure_column ("cached_messages", "cc_recipients", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("cached_messages", "security_status", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("cached_messages", "flag_color", "TEXT NOT NULL DEFAULT 'red'");
+        ensure_column ("cached_messages", "bcc_recipients", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "message_size", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("cached_messages", "reply_to", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "authentication_results", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "list_unsubscribe", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "list_unsubscribe_post", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("cached_messages", "raw_headers", "TEXT NOT NULL DEFAULT ''");
         // Older builds ignored top-level text/plain and text/html MIME bodies
         // and cached only the server preview. A zero value makes those rows
         // eligible for the normal bounded sync backfill.
@@ -104,12 +132,39 @@ public class CacheDatabase : Object, AccountStore {
         ensure_column ("drafts", "sign_message", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("drafts", "encrypt_message", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("drafts", "security_identity", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("drafts", "revision", "INTEGER NOT NULL DEFAULT 1");
+        ensure_column ("drafts", "remote_mailbox", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("drafts", "remote_uid", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("drafts", "remote_revision", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("drafts", "remote_internet_message_id", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("drafts", "remote_content_fingerprint", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("drafts", "remote_owned", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("drafts", "remote_sync_owner", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("drafts", "remote_sync_until", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("accounts", "authentication", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("accounts", "online_account_path", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("message_attachments", "content_id", "TEXT NOT NULL DEFAULT ''");
         ensure_column ("message_attachments", "remote_part_index", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("draft_attachments", "content_id", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("draft_attachments", "remote_part_index", "INTEGER NOT NULL DEFAULT 0");
         ensure_column ("outbox", "delivery_state", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("outbox", "lease_owner", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("outbox", "lease_until", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("outbox", "undo_until", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("outbox", "undo_previous_state", "INTEGER NOT NULL DEFAULT -1");
+        ensure_column ("outbox", "undo_previous_attempts", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("outbox", "undo_previous_next_attempt_at", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("outbox", "undo_previous_last_error", "TEXT NOT NULL DEFAULT ''");
+        ensure_column ("mail_tasks", "reminder_at", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_tasks", "recurrence", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_tasks", "recurrence_interval", "INTEGER NOT NULL DEFAULT 1");
+        ensure_column ("mail_tasks", "created_at", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_tasks", "completed_at", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_tasks", "reminder_sent_at", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_rules", "position", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_rules", "match_mode", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column ("mail_rules", "stop_processing", "INTEGER NOT NULL DEFAULT 0");
+        normalize_mail_rule_positions ();
         execute ("CREATE INDEX IF NOT EXISTS cached_messages_mailbox_date ON cached_messages(mailbox_id,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_unread_date ON cached_messages(mailbox_id,unread DESC,date_unix DESC);" +
             "CREATE INDEX IF NOT EXISTS cached_messages_mailbox_flagged_date ON cached_messages(mailbox_id,flagged DESC,date_unix DESC);" +
@@ -121,7 +176,16 @@ public class CacheDatabase : Object, AccountStore {
             "CREATE INDEX IF NOT EXISTS cached_mailboxes_account_role ON cached_mailboxes(account_id,role);" +
             "CREATE INDEX IF NOT EXISTS message_labels_label_message ON message_labels(label_id,message_id);" +
             "CREATE INDEX IF NOT EXISTS snoozed_messages_until ON snoozed_messages(until_unix);" +
-            "CREATE INDEX IF NOT EXISTS message_header_index_lookup ON message_header_index(account_id,header_id);");
+            "CREATE INDEX IF NOT EXISTS message_header_index_lookup ON message_header_index(account_id,header_id);" +
+            "CREATE INDEX IF NOT EXISTS drafts_remote_sync ON drafts(account_id,revision,remote_revision);" +
+            "CREATE INDEX IF NOT EXISTS pending_remote_draft_deletions_account ON pending_remote_draft_deletions(account_id,id);" +
+            "CREATE INDEX IF NOT EXISTS outbox_delivery_schedule ON outbox(delivery_state,next_attempt_at,lease_until);" +
+            "CREATE INDEX IF NOT EXISTS mail_tasks_due ON mail_tasks(completed,due_at);" +
+            "CREATE INDEX IF NOT EXISTS mail_tasks_reminders ON mail_tasks(completed,reminder_at,reminder_sent_at);" +
+            "CREATE INDEX IF NOT EXISTS mail_tasks_message ON mail_tasks(message_id,completed);");
+        execute ("CREATE INDEX IF NOT EXISTS mail_rules_position ON mail_rules(position,id);" +
+            "CREATE INDEX IF NOT EXISTS quick_steps_position ON quick_steps(position,id);" +
+            "CREATE INDEX IF NOT EXISTS safe_senders_created ON safe_senders(created_at);");
     }
 
     public string preference (string key, string fallback = "") throws MailError {
@@ -225,27 +289,190 @@ public class CacheDatabase : Object, AccountStore {
 
     public Gee.ArrayList<MailRule> list_mail_rules () throws MailError {
         var result = new Gee.ArrayList<MailRule> (); Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT id,name,account_id,field,pattern,action,value,enabled FROM mail_rules ORDER BY name COLLATE NOCASE", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("SELECT id,name,account_id,field,pattern,action,value,enabled,position,match_mode,stop_processing FROM mail_rules ORDER BY position,id", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare mail-rule loading");
-        int row; while ((row = statement.step ()) == Sqlite.ROW)
-            result.add (new MailRule (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
+        int row; while ((row = statement.step ()) == Sqlite.ROW) {
+            var rule = new MailRule (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
                 (MailRuleField) statement.column_int (3), statement.column_text (4),
-                (MailRuleAction) statement.column_int (5), statement.column_text (6), statement.column_int (7) != 0));
+                (MailRuleAction) statement.column_int (5), statement.column_text (6), statement.column_int (7) != 0,
+                statement.column_int (8), (MailRuleMatchMode) statement.column_int (9), statement.column_int (10) != 0);
+            load_mail_rule_parts (rule); result.add (rule);
+        }
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load mail rules"); return result;
+    }
+
+    private void load_mail_rule_parts (MailRule rule) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT field,operator,pattern,is_exception FROM mail_rule_conditions WHERE rule_id=? ORDER BY is_exception,position", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare rule-condition loading");
+        statement.bind_int64 (1, rule.id); int row; bool has_parts = false;
+        while ((row = statement.step ()) == Sqlite.ROW) {
+            if (!has_parts) { rule.replace_legacy_parts (); has_parts = true; }
+            var condition = new MailRuleCondition ((MailRuleField) statement.column_int (0),
+                statement.column_text (2), (MailRuleOperator) statement.column_int (1));
+            if (statement.column_int (3) != 0) rule.exceptions.add (condition);
+            else rule.conditions.add (condition);
+        }
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load rule conditions");
+        if (!has_parts) return;
+        if (database.prepare_v2 ("SELECT action,value FROM mail_rule_actions WHERE rule_id=? ORDER BY position", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare rule-action loading");
+        statement.bind_int64 (1, rule.id);
+        while ((row = statement.step ()) == Sqlite.ROW)
+            rule.operations.add (new MailRuleOperation ((MailRuleAction) statement.column_int (0), statement.column_text (1)));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load rule actions");
     }
 
     public void add_mail_rule (string name, string account_id, MailRuleField field, string pattern,
                                MailRuleAction action, string value = "") throws MailError {
         string clean_name = name.strip (); string clean_pattern = pattern.strip ();
         if (clean_name == "" || clean_pattern == "") throw new MailError.STORAGE ("Rule name and match text are required");
-        if ((action == MailRuleAction.LABEL || action == MailRuleAction.MOVE) && value.strip () == "") throw new MailError.STORAGE ("Enter a value for this rule");
+        save_mail_rule (new MailRule (0, clean_name, account_id.strip (), field,
+            clean_pattern, action, value.strip ()));
+    }
+
+    public MailRule save_mail_rule (MailRule rule) throws MailError {
+        if (rule.name.strip () == "" || rule.conditions.size == 0 || rule.operations.size == 0)
+            throw new MailError.STORAGE ("A rule needs a name, condition, and action");
+        foreach (var condition in rule.conditions)
+            if (condition.pattern.strip () == "")
+                throw new MailError.STORAGE ("Every rule condition needs a value");
+        foreach (var exception in rule.exceptions)
+            if (exception.pattern.strip () == "")
+                throw new MailError.STORAGE ("Every rule exception needs a value");
+        validate_rule_operations (rule.operations);
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement; int64 id = rule.id;
+            var first_condition = rule.conditions[0]; var first_action = rule.operations[0];
+            if (id <= 0) {
+                const string insert = "INSERT INTO mail_rules(name,account_id,field,pattern,action,value,enabled,position,match_mode,stop_processing) " +
+                    "VALUES(?,?,?,?,?,?,?,(SELECT COALESCE(MAX(position),-1)+1 FROM mail_rules),?,?) RETURNING id,position";
+                if (database.prepare_v2 (insert, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare rule creation");
+                statement.bind_text (1, rule.name.strip ()); statement.bind_text (2, rule.account_id.strip ());
+                statement.bind_int (3, (int) first_condition.field); statement.bind_text (4, first_condition.pattern);
+                statement.bind_int (5, (int) first_action.action); statement.bind_text (6, first_action.value);
+                statement.bind_int (7, rule.enabled ? 1 : 0); statement.bind_int (8, (int) rule.match_mode);
+                statement.bind_int (9, rule.stop_processing ? 1 : 0);
+                if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not create the rule");
+                id = statement.column_int64 (0); rule.position = statement.column_int (1);
+                statement.reset ();
+            } else {
+                const string update = "UPDATE mail_rules SET name=?,account_id=?,field=?,pattern=?,action=?,value=?,enabled=?,position=?,match_mode=?,stop_processing=? WHERE id=?";
+                if (database.prepare_v2 (update, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare rule editing");
+                statement.bind_text (1, rule.name.strip ()); statement.bind_text (2, rule.account_id.strip ());
+                statement.bind_int (3, (int) first_condition.field); statement.bind_text (4, first_condition.pattern);
+                statement.bind_int (5, (int) first_action.action); statement.bind_text (6, first_action.value);
+                statement.bind_int (7, rule.enabled ? 1 : 0); statement.bind_int (8, rule.position);
+                statement.bind_int (9, (int) rule.match_mode); statement.bind_int (10, rule.stop_processing ? 1 : 0);
+                statement.bind_int64 (11, id);
+                if (statement.step () != Sqlite.DONE || database.changes () != 1)
+                    throw new MailError.STORAGE ("The rule no longer exists");
+            }
+            var saved = new MailRule (id, rule.name.strip (), rule.account_id.strip (), first_condition.field,
+                first_condition.pattern, first_action.action, first_action.value, rule.enabled, rule.position,
+                rule.match_mode, rule.stop_processing);
+            saved.replace_legacy_parts (); saved.conditions.add_all (rule.conditions);
+            saved.exceptions.add_all (rule.exceptions); saved.operations.add_all (rule.operations);
+            save_mail_rule_parts (saved); execute ("COMMIT"); return saved;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    private void save_mail_rule_parts (MailRule rule) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("INSERT INTO mail_rules(name,account_id,field,pattern,action,value,enabled) VALUES(?,?,?,?,?,?,1)", -1, out statement) != Sqlite.OK)
-            throw new MailError.STORAGE ("Could not prepare mail-rule storage");
-        statement.bind_text (1, clean_name); statement.bind_text (2, account_id);
-        statement.bind_int (3, (int) field); statement.bind_text (4, clean_pattern);
-        statement.bind_int (5, (int) action); statement.bind_text (6, value.strip ());
-        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save the mail rule");
+        foreach (var sql in new string[] { "DELETE FROM mail_rule_conditions WHERE rule_id=?", "DELETE FROM mail_rule_actions WHERE rule_id=?" }) {
+            if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare rule detail replacement");
+            statement.bind_int64 (1, rule.id);
+            if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not replace rule details");
+        }
+        int position = 0;
+        foreach (var condition in rule.conditions) save_rule_condition (rule.id, position++, condition, false);
+        position = 0;
+        foreach (var exception in rule.exceptions) save_rule_condition (rule.id, position++, exception, true);
+        position = 0;
+        foreach (var operation in rule.operations) {
+            if (database.prepare_v2 ("INSERT INTO mail_rule_actions(rule_id,position,action,value) VALUES(?,?,?,?)", -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare rule-action storage");
+            statement.bind_int64 (1, rule.id); statement.bind_int (2, position++);
+            statement.bind_int (3, (int) operation.action); statement.bind_text (4, operation.value);
+            if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save a rule action");
+        }
+    }
+
+    private void save_rule_condition (int64 rule_id, int position, MailRuleCondition condition,
+                                      bool exception) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("INSERT INTO mail_rule_conditions(rule_id,position,field,operator,pattern,is_exception) VALUES(?,?,?,?,?,?)", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare rule-condition storage");
+        statement.bind_int64 (1, rule_id); statement.bind_int (2, position);
+        statement.bind_int (3, (int) condition.field); statement.bind_int (4, (int) condition.operator);
+        statement.bind_text (5, condition.pattern); statement.bind_int (6, exception ? 1 : 0);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save a rule condition");
+    }
+
+    private static void validate_rule_operations (Gee.List<MailRuleOperation> operations) throws MailError {
+        bool terminal_transfer_seen = false;
+        foreach (var operation in operations) {
+            if ((operation.action == MailRuleAction.LABEL || operation.action == MailRuleAction.MOVE ||
+                 operation.action == MailRuleAction.COPY) && operation.value.strip () == "")
+                throw new MailError.STORAGE ("Label, move, and copy actions require a destination");
+            bool terminal_transfer = operation.action == MailRuleAction.ARCHIVE ||
+                operation.action == MailRuleAction.TRASH ||
+                operation.action == MailRuleAction.MOVE;
+            if (terminal_transfer && terminal_transfer_seen)
+                throw new MailError.STORAGE (
+                    "A rule or Quick Step can move a message only once");
+            if (operation.action == MailRuleAction.COPY && terminal_transfer_seen)
+                throw new MailError.STORAGE (
+                    "Place copy actions before the move action");
+            if (terminal_transfer) terminal_transfer_seen = true;
+        }
+    }
+
+    public void set_mail_rule_enabled (int64 id, bool enabled) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("UPDATE mail_rules SET enabled=? WHERE id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare the rule toggle");
+        statement.bind_int (1, enabled ? 1 : 0); statement.bind_int64 (2, id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update the rule");
+    }
+
+    public void move_mail_rule (int64 id, int direction) throws MailError {
+        if (direction == 0) return;
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            if (database.prepare_v2 ("SELECT position FROM mail_rules WHERE id=?", -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare rule ordering");
+            statement.bind_int64 (1, id);
+            if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("The rule no longer exists");
+            int position = statement.column_int (0); string comparison = direction < 0 ? "<" : ">";
+            string ordering = direction < 0 ? "DESC" : "ASC";
+            string neighbor_sql = "SELECT id,position FROM mail_rules WHERE position%s? ORDER BY position %s,id %s LIMIT 1".printf (
+                comparison, ordering, ordering);
+            if (database.prepare_v2 (neighbor_sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare neighboring rule lookup");
+            statement.bind_int (1, position);
+            if (statement.step () == Sqlite.ROW) {
+                int64 neighbor_id = statement.column_int64 (0); int neighbor_position = statement.column_int (1);
+                if (database.prepare_v2 ("UPDATE mail_rules SET position=CASE id WHEN ? THEN ? WHEN ? THEN ? END WHERE id IN (?,?)", -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare rule reordering");
+                statement.bind_int64 (1, id); statement.bind_int (2, neighbor_position);
+                statement.bind_int64 (3, neighbor_id); statement.bind_int (4, position);
+                statement.bind_int64 (5, id); statement.bind_int64 (6, neighbor_id);
+                if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not reorder the rule");
+            }
+            execute ("COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
     }
 
     public void remove_mail_rule (int64 id) throws MailError {
@@ -254,6 +481,64 @@ public class CacheDatabase : Object, AccountStore {
             throw new MailError.STORAGE ("Could not prepare mail-rule deletion");
         statement.bind_int64 (1, id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete the mail rule");
+    }
+
+    public Gee.ArrayList<QuickStep> list_quick_steps () throws MailError {
+        var result = new Gee.ArrayList<QuickStep> (); Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT id,name,account_id,position FROM quick_steps ORDER BY position,id", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Quick Step loading");
+        int row; while ((row = statement.step ()) == Sqlite.ROW) {
+            var step = new QuickStep (statement.column_int64 (0), statement.column_text (1),
+                statement.column_text (2), statement.column_int (3));
+            Sqlite.Statement actions;
+            if (database.prepare_v2 ("SELECT action,value FROM quick_step_actions WHERE quick_step_id=? ORDER BY position", -1, out actions) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare Quick Step actions");
+            actions.bind_int64 (1, step.id); int action_row;
+            while ((action_row = actions.step ()) == Sqlite.ROW)
+                step.operations.add (new MailRuleOperation ((MailRuleAction) actions.column_int (0), actions.column_text (1)));
+            if (action_row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Quick Step actions");
+            result.add (step);
+        }
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Quick Steps");
+        return result;
+    }
+
+    public QuickStep add_quick_step (string name, string account_id,
+                                     Gee.List<MailRuleOperation> operations) throws MailError {
+        string clean = name.strip (); if (clean == "" || operations.size == 0)
+            throw new MailError.STORAGE ("A Quick Step needs a name and at least one action");
+        validate_rule_operations (operations); execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            const string insert = "INSERT INTO quick_steps(name,account_id,position) VALUES(?,?,(SELECT COALESCE(MAX(position),-1)+1 FROM quick_steps)) RETURNING id,position";
+            if (database.prepare_v2 (insert, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare Quick Step creation");
+            statement.bind_text (1, clean); statement.bind_text (2, account_id.strip ());
+            if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not create the Quick Step");
+            var step = new QuickStep (statement.column_int64 (0), clean, account_id.strip (), statement.column_int (1));
+            statement.reset ();
+            int position = 0;
+            foreach (var operation in operations) {
+                step.operations.add (operation);
+                if (database.prepare_v2 ("INSERT INTO quick_step_actions(quick_step_id,position,action,value) VALUES(?,?,?,?)", -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare Quick Step action storage");
+                statement.bind_int64 (1, step.id); statement.bind_int (2, position++);
+                statement.bind_int (3, (int) operation.action); statement.bind_text (4, operation.value);
+                if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save the Quick Step action");
+            }
+            execute ("COMMIT"); return step;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    public void remove_quick_step (int64 id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("DELETE FROM quick_steps WHERE id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Quick Step deletion");
+        statement.bind_int64 (1, id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete the Quick Step");
     }
 
     public Gee.ArrayList<SmartMailbox> list_smart_mailboxes () throws MailError {
@@ -296,32 +581,177 @@ public class CacheDatabase : Object, AccountStore {
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete Smart Mailbox");
     }
 
+    private static MailTask mail_task_from_row (Sqlite.Statement statement) {
+        return new MailTask (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
+            statement.column_int (3) != 0, statement.column_text (4), statement.column_text (5),
+            statement.column_int64 (6), (TaskRecurrence) statement.column_int (7), statement.column_int (8),
+            statement.column_int64 (9), statement.column_int64 (10), statement.column_int64 (11));
+    }
+
+    private const string MAIL_TASK_COLUMNS =
+        "id,title,due_at,completed,notes,message_id,reminder_at,recurrence,recurrence_interval,created_at,completed_at,reminder_sent_at";
+
     public Gee.ArrayList<MailTask> list_mail_tasks () throws MailError {
         var result = new Gee.ArrayList<MailTask> (); Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT id,title,due_at,completed,notes,message_id FROM mail_tasks ORDER BY completed,due_at", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("SELECT " + MAIL_TASK_COLUMNS + " FROM mail_tasks ORDER BY completed,due_at,title COLLATE NOCASE", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare task loading");
         int row; while ((row = statement.step ()) == Sqlite.ROW)
-            result.add (new MailTask (statement.column_int64 (0), statement.column_text (1), statement.column_text (2),
-                statement.column_int (3) != 0, statement.column_text (4), statement.column_text (5)));
+            result.add (mail_task_from_row (statement));
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load tasks");
         return result;
     }
 
+    public MailTask? find_mail_task (int64 id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT " + MAIL_TASK_COLUMNS + " FROM mail_tasks WHERE id=?", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task lookup");
+        statement.bind_int64 (1, id); int row = statement.step ();
+        if (row == Sqlite.DONE) return null;
+        if (row != Sqlite.ROW) throw new MailError.STORAGE ("Could not load the task");
+        return mail_task_from_row (statement);
+    }
+
     public void add_mail_task (string title, string due_at, string notes = "", string message_id = "") throws MailError {
+        create_mail_task (title, due_at, notes, message_id);
+    }
+
+    public MailTask create_mail_task (string title, string due_at, string notes = "", string message_id = "",
+                                      int64 reminder_at = 0, TaskRecurrence recurrence = TaskRecurrence.NONE,
+                                      int recurrence_interval = 1) throws MailError {
         if (title.strip () == "") throw new MailError.STORAGE ("Task title is required");
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("INSERT INTO mail_tasks(title,due_at,completed,notes,message_id) VALUES(?,?,0,?,?)", -1, out statement) != Sqlite.OK)
+        const string sql = "INSERT INTO mail_tasks(title,due_at,completed,notes,message_id,reminder_at,recurrence,recurrence_interval,created_at,completed_at,reminder_sent_at) " +
+            "VALUES(?,?,0,?,?,?,?,?,strftime('%s','now'),0,0) RETURNING " + MAIL_TASK_COLUMNS;
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare task storage");
-        statement.bind_text (1, title.strip ()); statement.bind_text (2, due_at.strip ()); statement.bind_text (3, notes.strip ()); statement.bind_text (4, message_id);
-        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save task");
+        statement.bind_text (1, title.strip ()); statement.bind_text (2, due_at.strip ());
+        statement.bind_text (3, notes.strip ()); statement.bind_text (4, message_id.strip ());
+        statement.bind_int64 (5, int64.max (0, reminder_at)); statement.bind_int (6, (int) recurrence);
+        statement.bind_int (7, int.max (1, recurrence_interval));
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not save task");
+        return mail_task_from_row (statement);
+    }
+
+    public MailTask update_mail_task (int64 id, string title, string due_at, string notes,
+                                      int64 reminder_at, TaskRecurrence recurrence,
+                                      int recurrence_interval) throws MailError {
+        if (title.strip () == "") throw new MailError.STORAGE ("Task title is required");
+        Sqlite.Statement statement;
+        const string sql = "UPDATE mail_tasks SET title=?,due_at=?,notes=?,reminder_at=?,recurrence=?,recurrence_interval=?," +
+            "reminder_sent_at=CASE WHEN reminder_at<>? THEN 0 ELSE reminder_sent_at END WHERE id=? RETURNING " + MAIL_TASK_COLUMNS;
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task editing");
+        int64 bounded_reminder = int64.max (0, reminder_at);
+        statement.bind_text (1, title.strip ()); statement.bind_text (2, due_at.strip ());
+        statement.bind_text (3, notes.strip ()); statement.bind_int64 (4, bounded_reminder);
+        statement.bind_int (5, (int) recurrence); statement.bind_int (6, int.max (1, recurrence_interval));
+        statement.bind_int64 (7, bounded_reminder); statement.bind_int64 (8, id);
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not update the task");
+        return mail_task_from_row (statement);
     }
 
     public void set_mail_task_completed (int64 id, bool completed) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("UPDATE mail_tasks SET completed=? WHERE id=?", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("UPDATE mail_tasks SET completed=?,completed_at=CASE WHEN ? THEN strftime('%s','now') ELSE 0 END WHERE id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare task update");
-        statement.bind_int (1, completed ? 1 : 0); statement.bind_int64 (2, id);
+        statement.bind_int (1, completed ? 1 : 0); statement.bind_int (2, completed ? 1 : 0);
+        statement.bind_int64 (3, id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update task");
+    }
+
+    // Completing a recurring occurrence and creating its successor is one
+    // durable operation. A crash can therefore never silently end a series.
+    public MailTask? complete_mail_task_occurrence (int64 id, int64 completed_at) throws MailError {
+        var task = find_mail_task (id);
+        if (task == null) throw new MailError.STORAGE ("The task no longer exists");
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            if (database.prepare_v2 ("UPDATE mail_tasks SET completed=1,completed_at=? WHERE id=?", -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare task completion");
+            statement.bind_int64 (1, completed_at); statement.bind_int64 (2, id);
+            if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not complete the task");
+
+            MailTask? next = null;
+            if (task.recurrence != TaskRecurrence.NONE) {
+                string next_due = task.next_due_date ();
+                int64 next_reminder = 0;
+                var old_due = MailTask.parse_due_date (task.due_at);
+                var new_due = MailTask.parse_due_date (next_due);
+                if (task.reminder_at > 0 && old_due != null && new_due != null)
+                    next_reminder = new_due.to_unix () + (task.reminder_at - old_due.to_unix ());
+                const string insert_sql = "INSERT INTO mail_tasks(title,due_at,completed,notes,message_id,reminder_at,recurrence,recurrence_interval,created_at,completed_at,reminder_sent_at) " +
+                    "VALUES(?,?,0,?,?,?,?,?,?,0,0) RETURNING " + MAIL_TASK_COLUMNS;
+                if (database.prepare_v2 (insert_sql, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the next recurring task");
+                statement.bind_text (1, task.title); statement.bind_text (2, next_due);
+                statement.bind_text (3, task.notes); statement.bind_text (4, task.message_id);
+                statement.bind_int64 (5, next_reminder); statement.bind_int (6, (int) task.recurrence);
+                statement.bind_int (7, task.recurrence_interval); statement.bind_int64 (8, completed_at);
+                if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not create the next recurring task");
+                next = mail_task_from_row (statement);
+                // RETURNING keeps the SQLite statement active after its ROW.
+                // Consume DONE before COMMIT or SQLite correctly refuses to
+                // commit while the cursor is still in progress.
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not finish the next recurring task");
+            }
+            execute ("COMMIT");
+            return next;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    public Gee.ArrayList<MailTask> due_mail_task_reminders (int64 now) throws MailError {
+        var result = new Gee.ArrayList<MailTask> (); Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT " + MAIL_TASK_COLUMNS +
+            " FROM mail_tasks WHERE completed=0 AND reminder_at>0 AND reminder_at<=? AND reminder_sent_at=0 ORDER BY reminder_at", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task reminders");
+        statement.bind_int64 (1, now); int row;
+        while ((row = statement.step ()) == Sqlite.ROW) result.add (mail_task_from_row (statement));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load task reminders");
+        return result;
+    }
+
+    public void mark_mail_task_reminder_sent (int64 id, int64 sent_at) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("UPDATE mail_tasks SET reminder_sent_at=? WHERE id=? AND completed=0", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task reminder delivery");
+        statement.bind_int64 (1, sent_at); statement.bind_int64 (2, id);
+        if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not record task reminder delivery");
+    }
+
+    public MailTask? open_mail_task_for_message (string message_id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT " + MAIL_TASK_COLUMNS +
+            " FROM mail_tasks WHERE message_id=? AND completed=0 ORDER BY due_at LIMIT 1", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare linked task lookup");
+        statement.bind_text (1, message_id); int row = statement.step ();
+        if (row == Sqlite.DONE) return null;
+        if (row != Sqlite.ROW) throw new MailError.STORAGE ("Could not load the linked task");
+        return mail_task_from_row (statement);
+    }
+
+    public int incomplete_mail_task_count_for_message (string message_id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT COUNT(*) FROM mail_tasks WHERE message_id=? AND completed=0", -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare linked task counting");
+        statement.bind_text (1, message_id);
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not count linked tasks");
+        return statement.column_int (0);
+    }
+
+    public int mail_task_count (bool due_today = false, int64 now = 0) throws MailError {
+        Sqlite.Statement statement;
+        string sql = "SELECT COUNT(*) FROM mail_tasks WHERE completed=0";
+        if (due_today) sql += " AND due_at<=?";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare task counting");
+        if (due_today) statement.bind_text (1, MailTask.date_for_unix (now > 0 ? now : new DateTime.now_local ().to_unix ()));
+        if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not count tasks");
+        return statement.column_int (0);
     }
 
     public void remove_mail_task (int64 id) throws MailError {
@@ -480,6 +910,37 @@ public class CacheDatabase : Object, AccountStore {
         execute ("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
     }
 
+    private void normalize_mail_rule_positions () throws MailError {
+        Sqlite.Statement statement;
+        const string inspect = "SELECT COUNT(*),COUNT(DISTINCT position)," +
+            "COALESCE(MIN(position),0),COALESCE(MAX(position),-1) FROM mail_rules";
+        if (database.prepare_v2 (inspect, -1, out statement) != Sqlite.OK ||
+            statement.step () != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not inspect mail-rule ordering");
+        int count = statement.column_int (0);
+        if (count == statement.column_int (1) &&
+            (count == 0 || (statement.column_int (2) == 0 &&
+             statement.column_int (3) == count - 1))) return;
+        statement.reset ();
+
+        // Pre-advanced-rule databases gave every migrated row position zero.
+        // Snapshot the old (position,id) order first so updates cannot affect
+        // the ranking that later updates observe, and replace it atomically.
+        execute ("BEGIN IMMEDIATE");
+        try {
+            execute ("CREATE TEMP TABLE mail_rule_position_upgrade(" +
+                "id INTEGER PRIMARY KEY,new_position INTEGER NOT NULL);" +
+                "INSERT INTO mail_rule_position_upgrade(id,new_position) " +
+                "SELECT id,ROW_NUMBER() OVER (ORDER BY position,id)-1 FROM mail_rules;" +
+                "UPDATE mail_rules SET position=(SELECT new_position FROM " +
+                "mail_rule_position_upgrade WHERE id=mail_rules.id);" +
+                "DROP TABLE mail_rule_position_upgrade;COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
     private void execute (string sql) throws MailError {
         string? message = null;
         if (database.exec (sql, null, out message) != Sqlite.OK)
@@ -489,14 +950,23 @@ public class CacheDatabase : Object, AccountStore {
     public void save_draft (Draft draft) throws MailError {
         execute ("BEGIN IMMEDIATE");
         try {
+            ensure_draft_mutable (draft.id, false);
             save_draft_rows (draft);
             execute ("COMMIT"); draft.mark_saved ();
         } catch (MailError error) { try { execute ("ROLLBACK"); } catch (MailError ignored) { } throw error; }
+        notify_remote_draft_work (draft.account_id);
     }
 
     private void save_draft_rows (Draft draft) throws MailError {
         Sqlite.Statement statement;
-        const string sql = "INSERT OR REPLACE INTO drafts(id,account_id,recipients_to,cc,bcc,subject,body_text,in_reply_to,references_header,modified_at,body_html,body_format,security_protocol,sign_message,encrypt_message,security_identity) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        const string sql = "INSERT INTO drafts(id,account_id,recipients_to,cc,bcc,subject,body_text,in_reply_to,references_header,modified_at,body_html,body_format,security_protocol,sign_message,encrypt_message,security_identity,revision) " +
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET " +
+            "account_id=excluded.account_id,recipients_to=excluded.recipients_to,cc=excluded.cc,bcc=excluded.bcc,subject=excluded.subject," +
+            "body_text=excluded.body_text,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,modified_at=excluded.modified_at," +
+            "body_html=excluded.body_html,body_format=excluded.body_format,security_protocol=excluded.security_protocol,sign_message=excluded.sign_message," +
+            "encrypt_message=excluded.encrypt_message,security_identity=excluded.security_identity,revision=excluded.revision," +
+            "remote_owned=CASE WHEN excluded.revision>drafts.remote_revision AND drafts.remote_uid<>'' THEN 1 ELSE drafts.remote_owned END " +
+            "WHERE excluded.revision>=drafts.revision";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare draft save");
         statement.bind_text (1, draft.id); statement.bind_text (2, draft.account_id); statement.bind_text (3, draft.to);
         statement.bind_text (4, draft.cc); statement.bind_text (5, draft.bcc); statement.bind_text (6, draft.subject);
@@ -504,24 +974,28 @@ public class CacheDatabase : Object, AccountStore {
         statement.bind_text (11, draft.body_html); statement.bind_text (12, draft.body_format);
         statement.bind_int (13, (int) draft.security_protocol); statement.bind_int (14, draft.sign_message ? 1 : 0);
         statement.bind_int (15, draft.encrypt_message ? 1 : 0); statement.bind_text (16, draft.security_identity);
+        statement.bind_int64 (17, int64.max (1, draft.revision));
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save the draft");
+        if (database.changes () != 1)
+            throw new MailError.STORAGE ("A newer copy of this draft was already saved");
         if (database.prepare_v2 ("DELETE FROM draft_attachments WHERE draft_id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare attachment storage");
         statement.bind_text (1, draft.id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update draft attachments");
         foreach (var attachment in draft.attachments) {
-            if (database.prepare_v2 ("INSERT INTO draft_attachments(draft_id,id,path,name,size,content_type,content_id) VALUES(?,?,?,?,?,?,?)", -1, out statement) != Sqlite.OK)
+            if (database.prepare_v2 ("INSERT INTO draft_attachments(draft_id,id,path,name,size,content_type,content_id,remote_part_index) VALUES(?,?,?,?,?,?,?,?)", -1, out statement) != Sqlite.OK)
                 throw new MailError.STORAGE ("Could not prepare attachment storage");
             statement.bind_text (1, draft.id); statement.bind_text (2, attachment.id); statement.bind_text (3, attachment.path);
             statement.bind_text (4, attachment.name); statement.bind_int64 (5, attachment.size); statement.bind_text (6, attachment.content_type);
             statement.bind_text (7, attachment.content_id);
+            statement.bind_int (8, attachment.remote_part_index);
             if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save a draft attachment");
         }
     }
 
     public Draft? load_draft (string id) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT account_id,recipients_to,cc,bcc,subject,body_text,in_reply_to,references_header,modified_at,body_html,body_format,security_protocol,sign_message,encrypt_message,security_identity FROM drafts WHERE id=?", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("SELECT account_id,recipients_to,cc,bcc,subject,body_text,in_reply_to,references_header,modified_at,body_html,body_format,security_protocol,sign_message,encrypt_message,security_identity,revision,remote_mailbox,remote_uid,remote_revision,remote_internet_message_id,remote_content_fingerprint,remote_owned FROM drafts WHERE id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare draft load");
         statement.bind_text (1, id);
         int result = statement.step (); if (result == Sqlite.DONE) return null;
@@ -534,11 +1008,16 @@ public class CacheDatabase : Object, AccountStore {
         draft.security_protocol = (MessageSecurityProtocol) statement.column_int (11);
         draft.sign_message = statement.column_int (12) != 0; draft.encrypt_message = statement.column_int (13) != 0;
         draft.security_identity = statement.column_text (14);
-        if (database.prepare_v2 ("SELECT id,path,name,size,content_type,content_id FROM draft_attachments WHERE draft_id=? ORDER BY rowid", -1, out statement) != Sqlite.OK)
+        draft.revision = statement.column_int64 (15); draft.remote_mailbox = statement.column_text (16);
+        draft.remote_uid = statement.column_text (17); draft.remote_revision = statement.column_int64 (18);
+        draft.remote_internet_message_id = statement.column_text (19);
+        draft.remote_content_fingerprint = statement.column_text (20);
+        draft.remote_owned = statement.column_int (21) != 0;
+        if (database.prepare_v2 ("SELECT id,path,name,size,content_type,content_id,remote_part_index FROM draft_attachments WHERE draft_id=? ORDER BY rowid", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare draft attachment loading");
         statement.bind_text (1, id);
         while ((result = statement.step ()) == Sqlite.ROW)
-            draft.attachments.add (new Attachment (statement.column_text (0), statement.column_text (1), statement.column_text (2), statement.column_int64 (3), statement.column_text (4), statement.column_text (5)));
+            draft.attachments.add (new Attachment (statement.column_text (0), statement.column_text (1), statement.column_text (2), statement.column_int64 (3), statement.column_text (4), statement.column_text (5), statement.column_int (6)));
         if (result != Sqlite.DONE) throw new MailError.STORAGE ("Could not load draft attachments");
         draft.mark_saved (); return draft;
     }
@@ -563,12 +1042,371 @@ public class CacheDatabase : Object, AccountStore {
         return statement.column_int (0);
     }
 
-    public void queue_for_sending (Draft draft, int64 not_before = 0) throws MailError {
+    public Gee.ArrayList<Draft> list_pending_draft_uploads (string account_id) throws MailError {
+        recover_expired_draft_sync_claims ();
+        Sqlite.Statement statement;
+        const string sql = "SELECT d.id FROM drafts d WHERE d.account_id=? AND d.revision>d.remote_revision " +
+            "AND d.remote_sync_owner='' AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id) ORDER BY d.modified_at";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare remote draft synchronization");
+        statement.bind_text (1, account_id);
+        var ids = new Gee.ArrayList<string> (); int row;
+        while ((row = statement.step ()) == Sqlite.ROW) ids.add (statement.column_text (0));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load drafts awaiting synchronization");
+        var drafts = new Gee.ArrayList<Draft> ();
+        foreach (var id in ids) {
+            var draft = load_draft (id);
+            if (draft != null) drafts.add (draft);
+        }
+        return drafts;
+    }
+
+    public bool has_pending_remote_draft_work (string account_id) throws MailError {
+        recover_expired_draft_sync_claims ();
+        Sqlite.Statement statement;
+        const string sql = "SELECT EXISTS(" +
+            "SELECT 1 FROM drafts d WHERE d.account_id=? AND d.revision>d.remote_revision " +
+            "AND d.remote_sync_owner='' AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id) " +
+            "UNION ALL SELECT 1 FROM pending_remote_draft_deletions p WHERE p.account_id=? LIMIT 1)";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare background Drafts work inspection");
+        statement.bind_text (1, account_id); statement.bind_text (2, account_id);
+        if (statement.step () != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not inspect background Drafts work");
+        return statement.column_int (0) != 0;
+    }
+
+    public bool import_remote_draft (RemoteDraftSnapshot snapshot, Draft imported) throws MailError {
         execute ("BEGIN IMMEDIATE");
         try {
-            save_draft_rows (draft);
             Sqlite.Statement statement;
-            if (database.prepare_v2 ("INSERT INTO outbox(id,draft_id,attempts,next_attempt_at,last_error,delivery_state) VALUES(?,?,0,?,'',0) ON CONFLICT(draft_id) DO UPDATE SET next_attempt_at=excluded.next_attempt_at,delivery_state=0", -1, out statement) != Sqlite.OK)
+            const string lookup = "SELECT revision,remote_revision,remote_mailbox,remote_uid," +
+                "remote_internet_message_id,remote_content_fingerprint,remote_owned," +
+                "EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id) FROM drafts d WHERE id=?";
+            if (database.prepare_v2 (lookup, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare provider draft import");
+            statement.bind_text (1, imported.id);
+            int row = statement.step ();
+            bool exists = row == Sqlite.ROW;
+            int64 local_revision = exists ? statement.column_int64 (0) : 0;
+            int64 synced_revision = exists ? statement.column_int64 (1) : 0;
+            string old_mailbox = exists ? statement.column_text (2) : "";
+            string old_uid = exists ? statement.column_text (3) : "";
+            string old_message_id = exists ? statement.column_text (4) : "";
+            string old_fingerprint = exists ? statement.column_text (5) : "";
+            bool old_owned = exists && statement.column_int (6) != 0;
+            bool in_outbox = exists && statement.column_int (7) != 0;
+            if (!exists && row != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not inspect the provider draft");
+
+            // Local unsynchronized edits and Outbox ownership always win over
+            // a provider snapshot. The pending upload will reconcile them.
+            if (in_outbox || (exists && local_revision > synced_revision)) {
+                execute ("COMMIT");
+                return false;
+            }
+
+            int64 advertised_revision = int64.max (1, snapshot.draft.revision);
+            if (exists && snapshot.managed_by_mailficient && advertised_revision < synced_revision) {
+                execute ("COMMIT");
+                return false;
+            }
+            bool external_same_revision_edit = false;
+            if (exists && snapshot.managed_by_mailficient && advertised_revision == synced_revision) {
+                bool exact_duplicate = old_fingerprint != "" &&
+                    old_fingerprint == snapshot.content_fingerprint;
+                if (exact_duplicate &&
+                    (old_mailbox != snapshot.mailbox_name || old_uid != snapshot.remote_uid)) {
+                    // A concurrent append produced the same deterministic
+                    // revision twice. Keep the already adopted location.
+                    queue_remote_draft_deletion (snapshot.draft.account_id,
+                        snapshot.mailbox_name, snapshot.remote_uid,
+                        snapshot.internet_message_id);
+                }
+                if (exact_duplicate) {
+                    execute ("COMMIT");
+                    return false;
+                }
+                // A provider client can preserve our custom headers while
+                // changing the actual draft. Import it, then upload the next
+                // revision so all clients converge on a fresh identity.
+                external_same_revision_edit = true;
+            }
+            // UID and Message-ID are identities, not content versions. Several
+            // IMAP providers allow another client to replace a draft body while
+            // retaining both, so only the fingerprint proves it is unchanged.
+            if (!external_same_revision_edit && exists &&
+                old_fingerprint != "" && old_fingerprint == snapshot.content_fingerprint &&
+                old_mailbox == snapshot.mailbox_name && old_uid == snapshot.remote_uid &&
+                old_message_id == snapshot.internet_message_id) {
+                execute ("COMMIT");
+                return false;
+            }
+
+            int64 imported_revision = external_same_revision_edit ? local_revision + 1 :
+                snapshot.managed_by_mailficient ? advertised_revision :
+                (exists ? int64.max (local_revision + 1, advertised_revision) : advertised_revision);
+            int64 mapped_remote_revision = external_same_revision_edit ? advertised_revision : imported_revision;
+            imported.revision = imported_revision;
+            imported.modified_at = snapshot.draft.modified_at;
+            save_draft_rows (imported);
+            if (old_owned && old_uid != "" &&
+                (old_mailbox != snapshot.mailbox_name || old_uid != snapshot.remote_uid))
+                queue_remote_draft_deletion (snapshot.draft.account_id, old_mailbox, old_uid,
+                    old_message_id == "" ? Draft.remote_message_id_for (imported.id, synced_revision) :
+                    old_message_id);
+            const string update = "UPDATE drafts SET remote_mailbox=?,remote_uid=?,remote_revision=?," +
+                "remote_internet_message_id=?,remote_content_fingerprint=?,remote_owned=?," +
+                "remote_sync_owner='',remote_sync_until=0 WHERE id=?";
+            if (database.prepare_v2 (update, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare provider draft mapping");
+            statement.bind_text (1, snapshot.mailbox_name); statement.bind_text (2, snapshot.remote_uid);
+            statement.bind_int64 (3, mapped_remote_revision); statement.bind_text (4, snapshot.internet_message_id);
+            statement.bind_text (5, snapshot.content_fingerprint);
+            statement.bind_int (6, snapshot.managed_by_mailficient ? 1 : 0); statement.bind_text (7, imported.id);
+            if (statement.step () != Sqlite.DONE || database.changes () != 1)
+                throw new MailError.STORAGE ("Could not preserve the provider draft mapping");
+            execute ("COMMIT"); imported.remote_mailbox = snapshot.mailbox_name;
+            imported.remote_uid = snapshot.remote_uid; imported.remote_revision = mapped_remote_revision;
+            imported.remote_internet_message_id = snapshot.internet_message_id;
+            imported.remote_content_fingerprint = snapshot.content_fingerprint;
+            imported.remote_owned = snapshot.managed_by_mailficient; imported.mark_saved ();
+            return true;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    // Reconcile provider-side deletion only for Drafts mailboxes whose full UID
+    // inventory completed. Unsynchronized local edits survive and become a new
+    // upload; an unchanged local mirror follows a deletion made on another
+    // device. Returned drafts let the caller clean private attachment copies.
+    public Gee.ArrayList<Draft> reconcile_remote_draft_deletions (
+        MailSyncResult snapshot) throws MailError {
+        var removed = new Gee.ArrayList<Draft> ();
+        if (!snapshot.folder_inventory_complete) return removed;
+        foreach (var mailbox in snapshot.mailboxes) {
+            if (mailbox.role != MailboxRole.DRAFTS) continue;
+            var inventory = snapshot.remote_uids_for (mailbox.id);
+            if (inventory == null) continue;
+            execute ("BEGIN IMMEDIATE");
+            try {
+                // Acquire the writer lock before selecting candidates. A
+                // foreground autosave cannot turn an observed clean mirror into
+                // a local edit between this read and the delete below.
+                Sqlite.Statement statement;
+                const string sql = "SELECT d.id,d.remote_uid,d.revision,d.remote_revision " +
+                    "FROM drafts d WHERE d.account_id=? AND d.remote_mailbox=? AND d.remote_uid<>'' " +
+                    "AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id)";
+                if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare provider draft deletion reconciliation");
+                statement.bind_text (1, snapshot.account_id);
+                statement.bind_text (2, mailbox.remote_name);
+                var missing = new Gee.ArrayList<string> ();
+                var preserve = new Gee.ArrayList<string> ();
+                int row;
+                while ((row = statement.step ()) == Sqlite.ROW) {
+                    if (inventory.contains (statement.column_text (1))) continue;
+                    if (statement.column_int64 (2) > statement.column_int64 (3))
+                        preserve.add (statement.column_text (0));
+                    else
+                        missing.add (statement.column_text (0));
+                }
+                if (row != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not inspect provider draft deletions");
+                foreach (var id in preserve) {
+                    if (database.prepare_v2 ("UPDATE drafts SET remote_mailbox='',remote_uid='',remote_revision=0," +
+                                             "remote_internet_message_id='',remote_content_fingerprint='',remote_owned=1 " +
+                                             "WHERE id=?", -1, out statement) != Sqlite.OK)
+                        throw new MailError.STORAGE ("Could not preserve an edited provider draft");
+                    statement.bind_text (1, id);
+                    if (statement.step () != Sqlite.DONE)
+                        throw new MailError.STORAGE ("Could not preserve an edited provider draft");
+                }
+                foreach (var id in missing) {
+                    var draft = load_draft (id);
+                    if (draft != null) removed.add (draft);
+                    delete_bound ("DELETE FROM drafts WHERE id=?", id);
+                }
+                execute ("COMMIT");
+            } catch (MailError error) {
+                try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+                throw error;
+            }
+        }
+        return removed;
+    }
+
+    public bool claim_draft_upload (string draft_id, string owner, int64 lease_until) throws MailError {
+        recover_expired_draft_sync_claims ();
+        Sqlite.Statement statement;
+        const string sql = "UPDATE drafts SET remote_sync_owner=?,remote_sync_until=? WHERE id=? " +
+            "AND revision>remote_revision AND remote_sync_owner='' " +
+            "AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=drafts.id)";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare the remote draft claim");
+        statement.bind_text (1, owner); statement.bind_int64 (2, lease_until); statement.bind_text (3, draft_id);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not claim the remote draft update");
+        return database.changes () == 1;
+    }
+
+    public void release_draft_upload (string draft_id, string owner) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("UPDATE drafts SET remote_sync_owner='',remote_sync_until=0 WHERE id=? AND remote_sync_owner=?", -1,
+                                 out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare the remote draft claim release");
+        statement.bind_text (1, draft_id); statement.bind_text (2, owner);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not release the remote draft claim");
+    }
+
+    private void recover_expired_draft_sync_claims () throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("UPDATE drafts SET remote_sync_owner='',remote_sync_until=0 WHERE remote_sync_owner<>'' AND remote_sync_until<=strftime('%s','now')", -1,
+                                 out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare expired remote draft recovery");
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not recover expired remote draft work");
+    }
+
+    public void record_remote_draft_uploaded (string draft_id, string account_id,
+                                              int64 uploaded_revision,
+                                              RemoteDraftLocation location,
+                                              string claim_owner,
+                                              string content_fingerprint) throws MailError {
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            const string lookup = "SELECT account_id,remote_mailbox,remote_uid,remote_internet_message_id,remote_revision,revision,remote_sync_owner," +
+                "EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id=d.id) FROM drafts d WHERE id=?";
+            if (database.prepare_v2 (lookup, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare remote draft reconciliation");
+            statement.bind_text (1, draft_id);
+            int row = statement.step ();
+            string previous_mailbox = "";
+            string previous_uid = "";
+            string previous_message_id = "";
+            int64 previous_revision = 0;
+            int64 current_revision = 0;
+            bool current_draft = false;
+            bool owns_claim = false;
+            if (row == Sqlite.ROW) {
+                current_draft = statement.column_text (0) == account_id && statement.column_int (7) == 0;
+                owns_claim = current_draft && statement.column_text (6) == claim_owner;
+                previous_mailbox = statement.column_text (1);
+                previous_uid = statement.column_text (2);
+                previous_message_id = statement.column_text (3);
+                previous_revision = statement.column_int64 (4);
+                current_revision = statement.column_int64 (5);
+            } else if (row != Sqlite.DONE) {
+                throw new MailError.STORAGE ("Could not reconcile the remote draft");
+            }
+
+            // A stale worker may finish just after another process reclaimed
+            // the lease.  If the local revision is still unchanged and no copy
+            // of it was recorded yet, atomically adopt this completion and
+            // invalidate the competing claim.  Otherwise its exact location is
+            // redundant and must be cleaned up, never left as an orphan.
+            bool canonical_same_revision = current_draft &&
+                previous_revision == uploaded_revision &&
+                remote_location_precedes (location.mailbox_name, location.remote_uid,
+                    previous_mailbox, previous_uid);
+            bool adopt_upload = current_draft && (owns_claim || canonical_same_revision ||
+                (current_revision == uploaded_revision && previous_revision < uploaded_revision));
+            if (!adopt_upload) {
+                bool already_adopted = current_draft && previous_revision == uploaded_revision &&
+                    previous_mailbox == location.mailbox_name && previous_uid == location.remote_uid;
+                if (!already_adopted)
+                    queue_remote_draft_deletion (account_id, location.mailbox_name, location.remote_uid,
+                        Draft.remote_message_id_for (draft_id, uploaded_revision));
+            } else {
+                if (previous_uid != "" && previous_revision > 0 &&
+                    (previous_mailbox != location.mailbox_name || previous_uid != location.remote_uid))
+                    queue_remote_draft_deletion (account_id, previous_mailbox, previous_uid,
+                        previous_message_id == "" ? Draft.remote_message_id_for (draft_id, previous_revision) :
+                        previous_message_id);
+                if (database.prepare_v2 ("UPDATE drafts SET remote_mailbox=?,remote_uid=?,remote_revision=?,remote_internet_message_id=?,remote_content_fingerprint=?,remote_owned=1,remote_sync_owner='',remote_sync_until=0 " +
+                                         "WHERE id=? AND account_id=?", -1,
+                                         out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare remote draft storage");
+                statement.bind_text (1, location.mailbox_name); statement.bind_text (2, location.remote_uid);
+                statement.bind_int64 (3, uploaded_revision);
+                statement.bind_text (4, Draft.remote_message_id_for (draft_id, uploaded_revision));
+                statement.bind_text (5, content_fingerprint);
+                statement.bind_text (6, draft_id); statement.bind_text (7, account_id);
+                if (statement.step () != Sqlite.DONE || database.changes () != 1)
+                    throw new MailError.STORAGE ("Could not preserve the remote draft location");
+            }
+            execute ("COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    private static bool remote_location_precedes (string candidate_mailbox, string candidate_uid,
+                                                   string current_mailbox, string current_uid) {
+        int mailbox_order = strcmp (candidate_mailbox, current_mailbox);
+        if (mailbox_order != 0) return mailbox_order < 0;
+        uint64 candidate_number = 0; uint64 current_number = 0;
+        bool candidate_numeric = uint64.try_parse (candidate_uid, out candidate_number);
+        bool current_numeric = uint64.try_parse (current_uid, out current_number);
+        if (candidate_numeric && current_numeric) return candidate_number < current_number;
+        return strcmp (candidate_uid, current_uid) < 0;
+    }
+
+    public Gee.ArrayList<PendingDraftDeletion> list_pending_remote_draft_deletions (
+        string account_id) throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "SELECT id,mailbox_name,remote_uid,expected_message_id " +
+            "FROM pending_remote_draft_deletions WHERE account_id=? ORDER BY id";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare remote draft cleanup");
+        statement.bind_text (1, account_id);
+        var result = new Gee.ArrayList<PendingDraftDeletion> (); int row;
+        while ((row = statement.step ()) == Sqlite.ROW)
+            result.add (new PendingDraftDeletion (statement.column_int64 (0), account_id,
+                statement.column_text (1), statement.column_text (2), statement.column_text (3)));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load remote draft cleanup");
+        return result;
+    }
+
+    public void complete_remote_draft_deletion (int64 id) throws MailError {
+        delete_bound_int64 ("DELETE FROM pending_remote_draft_deletions WHERE id=?", id);
+    }
+
+    public int pending_remote_draft_deletion_count () throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT COUNT(*) FROM pending_remote_draft_deletions", -1,
+                                 out statement) != Sqlite.OK || statement.step () != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not count remote draft cleanup");
+        return statement.column_int (0);
+    }
+
+    public void queue_for_sending (Draft draft, int64 not_before = 0,
+                                   bool allow_uncertain_resend = false) throws MailError {
+        execute ("BEGIN IMMEDIATE");
+        try {
+            ensure_draft_mutable (draft.id, allow_uncertain_resend);
+            save_draft_rows (draft);
+            Sqlite.Statement ownership;
+            if (database.prepare_v2 ("UPDATE drafts SET remote_owned=1 WHERE id=? AND remote_uid<>''", -1,
+                                     out ownership) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare remote draft ownership");
+            ownership.bind_text (1, draft.id);
+            if (ownership.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not preserve remote draft ownership");
+            // Once a draft becomes an Outbox item its provider-side Drafts copy
+            // must disappear.  Queue the cleanup in the same transaction so a
+            // crash cannot strand the old copy indefinitely.
+            queue_saved_remote_draft_deletion (draft.id);
+            Sqlite.Statement statement;
+            if (database.prepare_v2 ("INSERT INTO outbox(id,draft_id,attempts,next_attempt_at,last_error,delivery_state,lease_owner,lease_until) VALUES(?,?,0,?,'',0,'',0) " +
+                                     "ON CONFLICT(draft_id) DO UPDATE SET attempts=0,next_attempt_at=excluded.next_attempt_at,last_error='',delivery_state=0,lease_owner='',lease_until=0," +
+                                     "undo_until=0,undo_previous_state=-1,undo_previous_attempts=0,undo_previous_next_attempt_at=0,undo_previous_last_error=''",
+                                     -1, out statement) != Sqlite.OK)
                 throw new MailError.STORAGE ("Could not prepare the outbox item");
             statement.bind_text (1, draft.id); statement.bind_text (2, draft.id); statement.bind_int64 (3, int64.max (0, not_before));
             if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not queue the message for sending");
@@ -579,9 +1417,112 @@ public class CacheDatabase : Object, AccountStore {
         }
     }
 
+    public void queue_for_undo_send (Draft draft, int64 undo_until,
+                                     bool allow_uncertain_resend = false) throws MailError {
+        int64 now = new DateTime.now_utc ().to_unix ();
+        if (undo_until <= now)
+            throw new MailError.INVALID_MESSAGE ("The Undo Send deadline must be in the future");
+        execute ("BEGIN IMMEDIATE");
+        try {
+            ensure_draft_mutable (draft.id, allow_uncertain_resend);
+            int previous_state = -1; int previous_attempts = 0;
+            int64 previous_next_attempt_at = 0; string previous_last_error = "";
+            Sqlite.Statement statement;
+            if (database.prepare_v2 ("SELECT delivery_state,attempts,next_attempt_at,last_error FROM outbox WHERE draft_id=?", -1,
+                                     out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare the previous Outbox state");
+            statement.bind_text (1, draft.id);
+            int row = statement.step ();
+            if (row == Sqlite.ROW) {
+                previous_state = statement.column_int (0);
+                previous_attempts = statement.column_int (1);
+                previous_next_attempt_at = statement.column_int64 (2);
+                previous_last_error = statement.column_text (3);
+            } else if (row != Sqlite.DONE) {
+                throw new MailError.STORAGE ("Could not inspect the previous Outbox state");
+            }
+
+            save_draft_rows (draft);
+            if (database.prepare_v2 ("UPDATE drafts SET remote_owned=1 WHERE id=? AND remote_uid<>''", -1,
+                                     out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare remote draft ownership");
+            statement.bind_text (1, draft.id);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not preserve remote draft ownership");
+
+            // Provider Draft cleanup is intentionally delayed until the SMTP
+            // preparation lease is acquired. Undo therefore leaves an existing
+            // provider draft untouched even if a background Drafts pass runs.
+            const string sql = "INSERT INTO outbox(id,draft_id,attempts,next_attempt_at,last_error,delivery_state,lease_owner,lease_until," +
+                "undo_until,undo_previous_state,undo_previous_attempts,undo_previous_next_attempt_at,undo_previous_last_error) " +
+                "VALUES(?,?,0,?,'',0,'',0,?,?,?,?,?) ON CONFLICT(draft_id) DO UPDATE SET " +
+                "attempts=0,next_attempt_at=excluded.next_attempt_at,last_error='',delivery_state=0,lease_owner='',lease_until=0," +
+                "undo_until=excluded.undo_until,undo_previous_state=excluded.undo_previous_state," +
+                "undo_previous_attempts=excluded.undo_previous_attempts," +
+                "undo_previous_next_attempt_at=excluded.undo_previous_next_attempt_at," +
+                "undo_previous_last_error=excluded.undo_previous_last_error";
+            if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare Undo Send storage");
+            statement.bind_text (1, draft.id); statement.bind_text (2, draft.id);
+            statement.bind_int64 (3, undo_until); statement.bind_int64 (4, undo_until);
+            statement.bind_int (5, previous_state); statement.bind_int (6, previous_attempts);
+            statement.bind_int64 (7, previous_next_attempt_at);
+            statement.bind_text (8, previous_last_error);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not preserve the Undo Send item");
+            execute ("COMMIT"); draft.mark_saved ();
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    public bool cancel_undo_send (string draft_id) throws MailError {
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            const string lookup = "SELECT undo_previous_state,undo_previous_attempts," +
+                "undo_previous_next_attempt_at,undo_previous_last_error FROM outbox " +
+                "WHERE draft_id=? AND delivery_state=? AND undo_until>strftime('%s','now')";
+            if (database.prepare_v2 (lookup, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare Undo Send cancellation");
+            statement.bind_text (1, draft_id);
+            statement.bind_int (2, (int) OutboxDeliveryState.QUEUED);
+            int row = statement.step ();
+            if (row == Sqlite.DONE) { execute ("COMMIT"); return false; }
+            if (row != Sqlite.ROW)
+                throw new MailError.STORAGE ("Could not inspect Undo Send cancellation");
+            int previous_state = statement.column_int (0);
+            if (previous_state < 0) {
+                if (database.prepare_v2 ("DELETE FROM outbox WHERE draft_id=?", -1,
+                                         out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare Undo Send removal");
+                statement.bind_text (1, draft_id);
+            } else {
+                int previous_attempts = statement.column_int (1);
+                int64 previous_next_attempt_at = statement.column_int64 (2);
+                string previous_last_error = statement.column_text (3);
+                const string restore = "UPDATE outbox SET delivery_state=?,attempts=?,next_attempt_at=?,last_error=?," +
+                    "lease_owner='',lease_until=0,undo_until=0,undo_previous_state=-1," +
+                    "undo_previous_attempts=0,undo_previous_next_attempt_at=0,undo_previous_last_error='' WHERE draft_id=?";
+                if (database.prepare_v2 (restore, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare the previous Outbox state restoration");
+                statement.bind_int (1, previous_state); statement.bind_int (2, previous_attempts);
+                statement.bind_int64 (3, previous_next_attempt_at);
+                statement.bind_text (4, previous_last_error); statement.bind_text (5, draft_id);
+            }
+            if (statement.step () != Sqlite.DONE || database.changes () != 1)
+                throw new MailError.STORAGE ("Could not cancel Undo Send");
+            execute ("COMMIT"); return true;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
     public void record_send_failure (string draft_id, string detail) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("UPDATE outbox SET attempts=attempts+1,next_attempt_at=strftime('%s','now')+MIN(3600,60*(1 << MIN(attempts,6))),last_error=?,delivery_state=0 WHERE draft_id=?", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("UPDATE outbox SET attempts=attempts+1,next_attempt_at=strftime('%s','now')+MIN(3600,60*(1 << MIN(attempts,6))),last_error=?,delivery_state=0,lease_owner='',lease_until=0,undo_until=0,undo_previous_state=-1,undo_previous_attempts=0,undo_previous_next_attempt_at=0,undo_previous_last_error='' WHERE draft_id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare send failure storage");
         statement.bind_text (1, detail); statement.bind_text (2, draft_id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not preserve the send failure");
@@ -589,7 +1530,7 @@ public class CacheDatabase : Object, AccountStore {
 
     public void record_send_uncertain (string draft_id, string detail) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("UPDATE outbox SET attempts=attempts+1,last_error=?,delivery_state=1 WHERE draft_id=?", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("UPDATE outbox SET attempts=attempts+1,last_error=?,delivery_state=1,lease_owner='',lease_until=0,undo_until=0,undo_previous_state=-1,undo_previous_attempts=0,undo_previous_next_attempt_at=0,undo_previous_last_error='' WHERE draft_id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare uncertain delivery storage");
         statement.bind_text (1, detail); statement.bind_text (2, draft_id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not preserve uncertain delivery status");
@@ -597,7 +1538,7 @@ public class CacheDatabase : Object, AccountStore {
 
     public void record_send_rejection (string draft_id, string detail) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("UPDATE outbox SET attempts=attempts+1,next_attempt_at=0,last_error=?,delivery_state=? WHERE draft_id=?", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("UPDATE outbox SET attempts=attempts+1,next_attempt_at=0,last_error=?,delivery_state=?,lease_owner='',lease_until=0,undo_until=0,undo_previous_state=-1,undo_previous_attempts=0,undo_previous_next_attempt_at=0,undo_previous_last_error='' WHERE draft_id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare SMTP rejection storage");
         statement.bind_text (1, detail);
         statement.bind_int (2, (int) OutboxDeliveryState.REJECTED);
@@ -618,8 +1559,68 @@ public class CacheDatabase : Object, AccountStore {
         } catch (MailError error) { try { execute ("ROLLBACK"); } catch (MailError ignored) { } throw error; }
     }
 
-    public void mark_send_started (string draft_id) throws MailError {
-        set_outbox_delivery_state (draft_id, OutboxDeliveryState.SENDING);
+    public bool claim_queued_send (string draft_id, string lease_owner, int64 lease_until,
+                                   bool due_only = true) throws MailError {
+        recover_expired_outbox_claims ();
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            string sql = "UPDATE outbox SET delivery_state=?,lease_owner=?,lease_until=?," +
+                "undo_until=0,undo_previous_state=-1,undo_previous_attempts=0," +
+                "undo_previous_next_attempt_at=0,undo_previous_last_error='' " +
+                "WHERE draft_id=? AND delivery_state=? " +
+                // The Undo Send deadline is an unconditional fence.  A manual
+                // retry may ignore ordinary backoff, but never this boundary.
+                "AND (undo_until=0 OR undo_until<=strftime('%s','now'))" +
+                (due_only ? " AND next_attempt_at<=strftime('%s','now')" : "");
+            if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare the Outbox delivery claim");
+            statement.bind_int (1, (int) OutboxDeliveryState.PREPARING);
+            statement.bind_text (2, lease_owner); statement.bind_int64 (3, lease_until);
+            statement.bind_text (4, draft_id);
+            statement.bind_int (5, (int) OutboxDeliveryState.QUEUED);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not claim the Outbox message");
+            bool claimed = database.changes () == 1;
+            if (claimed)
+                queue_saved_remote_draft_deletion (draft_id);
+            execute ("COMMIT"); return claimed;
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
+    }
+
+    public void record_preparation_failure (string draft_id, string lease_owner,
+                                            string detail) throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "UPDATE outbox SET attempts=attempts+1," +
+            "next_attempt_at=strftime('%s','now')+MIN(3600,60*(1 << MIN(attempts,6)))," +
+            "last_error=?,delivery_state=?,lease_owner='',lease_until=0 " +
+            "WHERE draft_id=? AND delivery_state=? AND lease_owner=?";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare the Outbox claim release");
+        statement.bind_text (1, detail); statement.bind_int (2, (int) OutboxDeliveryState.QUEUED);
+        statement.bind_text (3, draft_id); statement.bind_int (4, (int) OutboxDeliveryState.PREPARING);
+        statement.bind_text (5, lease_owner);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not release the Outbox delivery claim");
+    }
+
+    public void mark_send_started (string draft_id, string lease_owner = "") throws MailError {
+        if (lease_owner == "") {
+            set_outbox_delivery_state (draft_id, OutboxDeliveryState.SENDING);
+            return;
+        }
+        Sqlite.Statement statement;
+        const string sql = "UPDATE outbox SET delivery_state=?,lease_owner='',lease_until=0 " +
+            "WHERE draft_id=? AND delivery_state=? AND lease_owner=?";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare SMTP delivery state");
+        statement.bind_int (1, (int) OutboxDeliveryState.SENDING); statement.bind_text (2, draft_id);
+        statement.bind_int (3, (int) OutboxDeliveryState.PREPARING); statement.bind_text (4, lease_owner);
+        if (statement.step () != Sqlite.DONE || database.changes () != 1)
+            throw new MailError.STORAGE ("The Outbox delivery claim expired before SMTP started");
     }
 
     public void mark_send_accepted (string draft_id) throws MailError {
@@ -628,16 +1629,43 @@ public class CacheDatabase : Object, AccountStore {
 
     private void set_outbox_delivery_state (string draft_id, OutboxDeliveryState state) throws MailError {
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("UPDATE outbox SET delivery_state=? WHERE draft_id=?", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("UPDATE outbox SET delivery_state=?,lease_owner='',lease_until=0 WHERE draft_id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare Outbox delivery state");
         statement.bind_int (1, (int) state); statement.bind_text (2, draft_id);
         if (statement.step () != Sqlite.DONE || database.changes () != 1)
             throw new MailError.STORAGE ("Could not preserve Outbox delivery state");
     }
 
+    public void recover_expired_outbox_claims () throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "UPDATE outbox SET delivery_state=?,lease_owner='',lease_until=0," +
+            "next_attempt_at=MIN(next_attempt_at,strftime('%s','now')) " +
+            "WHERE delivery_state=? AND lease_until<=strftime('%s','now')";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare expired Outbox recovery");
+        statement.bind_int (1, (int) OutboxDeliveryState.QUEUED);
+        statement.bind_int (2, (int) OutboxDeliveryState.PREPARING);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not recover expired Outbox work");
+    }
+
     public void delete_draft (string id) throws MailError {
+        string cleanup_account_id = "";
         execute ("BEGIN IMMEDIATE");
         try {
+            ensure_draft_mutable (id, true, true);
+            // Explicit user discard is an ownership decision even for a draft
+            // originally created by another client. Passive import/reconcile
+            // remains non-owning, but discard must not let the draft reappear
+            // on the next provider sync.
+            Sqlite.Statement ownership;
+            if (database.prepare_v2 ("UPDATE drafts SET remote_owned=1 WHERE id=? AND remote_uid<>''", -1,
+                                     out ownership) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare provider draft discard");
+            ownership.bind_text (1, id);
+            if (ownership.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not preserve provider draft discard");
+            cleanup_account_id = queue_saved_remote_draft_deletion (id);
             delete_bound ("DELETE FROM outbox WHERE draft_id=?", id);
             delete_bound ("DELETE FROM drafts WHERE id=?", id);
             execute ("COMMIT");
@@ -645,6 +1673,85 @@ public class CacheDatabase : Object, AccountStore {
             try { execute ("ROLLBACK"); } catch (MailError ignored) { }
             throw error;
         }
+        notify_remote_draft_work (cleanup_account_id);
+    }
+
+    private void ensure_draft_mutable (string draft_id, bool allow_uncertain_resend,
+                                       bool deleting = false) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT delivery_state,last_error,undo_until FROM outbox WHERE draft_id=?", -1,
+                                 out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect the Outbox delivery state");
+        statement.bind_text (1, draft_id);
+        int row = statement.step ();
+        if (row == Sqlite.DONE) return;
+        if (row != Sqlite.ROW) throw new MailError.STORAGE ("Could not inspect the Outbox delivery state");
+        var state = (OutboxDeliveryState) statement.column_int (0);
+        string detail = statement.column_text (1);
+        if (state == OutboxDeliveryState.QUEUED &&
+            statement.column_int64 (2) > new DateTime.now_utc ().to_unix ())
+            throw new MailError.SEND_FAILED (
+                "Use Undo Send before editing or deleting this queued message");
+        if (state == OutboxDeliveryState.PREPARING)
+            throw new MailError.SEND_FAILED ("This message is already being prepared by a background sender");
+        if (state == OutboxDeliveryState.ACCEPTED)
+            throw new MailError.SEND_FAILED ("This message was already accepted by the mail server");
+        if (state == OutboxDeliveryState.SENDING) {
+            // An empty detail means SMTP is active right now.  A non-empty
+            // detail is the durable uncertain state shown with an explicit
+            // resend confirmation in the composer.
+            if (detail == "" || (!deleting && !allow_uncertain_resend))
+                throw new MailError.DELIVERY_UNCERTAIN (
+                    detail == "" ? "This message is currently being sent" :
+                    "Confirm the uncertain delivery before sending another copy");
+        }
+    }
+
+    private string queue_saved_remote_draft_deletion (string draft_id) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT account_id,remote_mailbox,remote_uid,remote_revision,remote_owned,remote_internet_message_id FROM drafts WHERE id=?", -1,
+                                 out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare remote draft cleanup");
+        statement.bind_text (1, draft_id);
+        int row = statement.step ();
+        if (row == Sqlite.DONE) return "";
+        if (row != Sqlite.ROW) throw new MailError.STORAGE ("Could not inspect remote draft cleanup");
+        string mailbox_name = statement.column_text (1);
+        string remote_uid = statement.column_text (2);
+        int64 remote_revision = statement.column_int64 (3);
+        bool remote_owned = statement.column_int (4) != 0;
+        if (!remote_owned || mailbox_name == "" || remote_uid == "" || remote_revision <= 0) return "";
+        string account_id = statement.column_text (0);
+        queue_remote_draft_deletion (account_id, mailbox_name, remote_uid,
+            statement.column_text (5) == "" ? Draft.remote_message_id_for (draft_id, remote_revision) :
+            statement.column_text (5));
+        return account_id;
+    }
+
+    private void notify_remote_draft_work (string account_id) {
+        if (account_id == "") return;
+        try {
+            // Demo/temporary identities have no provider and must never
+            // trigger a desktop background-access prompt.
+            if (find_account (account_id) != null)
+                remote_draft_work_queued (account_id);
+        } catch (MailError error) {
+            warning ("Could not inspect background Drafts activation: %s", error.message);
+        }
+    }
+
+    private void queue_remote_draft_deletion (string account_id, string mailbox_name,
+                                              string remote_uid, string expected_message_id) throws MailError {
+        if (mailbox_name == "" || remote_uid == "" || expected_message_id == "") return;
+        Sqlite.Statement statement;
+        const string sql = "INSERT OR IGNORE INTO pending_remote_draft_deletions(" +
+            "account_id,mailbox_name,remote_uid,expected_message_id,created_at) VALUES(?,?,?,?,strftime('%s','now'))";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare remote draft cleanup");
+        statement.bind_text (1, account_id); statement.bind_text (2, mailbox_name);
+        statement.bind_text (3, remote_uid); statement.bind_text (4, expected_message_id);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not preserve remote draft cleanup");
     }
 
     public int draft_count () throws MailError {
@@ -681,24 +1788,30 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public Gee.ArrayList<Message> list_outbox_messages () throws MailError {
+        recover_expired_outbox_claims ();
         Sqlite.Statement statement;
-        const string sql = "SELECT d.id,d.account_id,d.recipients_to,d.subject,d.body_text,o.attempts,o.delivery_state,EXISTS(SELECT 1 FROM draft_attachments a WHERE a.draft_id=d.id) FROM outbox o JOIN drafts d ON d.id=o.draft_id ORDER BY o.rowid DESC";
+        const string sql = "SELECT d.id,d.account_id,d.recipients_to,d.subject,d.body_text,o.attempts,o.delivery_state,o.undo_until,EXISTS(SELECT 1 FROM draft_attachments a WHERE a.draft_id=d.id) FROM outbox o JOIN drafts d ON d.id=o.draft_id ORDER BY o.rowid DESC";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare Outbox summary loading");
         var result = new Gee.ArrayList<Message> (); int row;
         while ((row = statement.step ()) == Sqlite.ROW) {
             int state = statement.column_int (6); string preview;
-            if (state == (int) OutboxDeliveryState.SENDING)
+            if (state == (int) OutboxDeliveryState.QUEUED &&
+                statement.column_int64 (7) > new DateTime.now_utc ().to_unix ())
+                preview = "Undo Send available — open this message to cancel delivery";
+            else if (state == (int) OutboxDeliveryState.SENDING)
                 preview = "Delivery status uncertain — this message will not resend automatically";
             else if (state == (int) OutboxDeliveryState.ACCEPTED)
                 preview = "Sent — waiting for local Outbox cleanup";
             else if (state == (int) OutboxDeliveryState.REJECTED)
                 preview = "Rejected by the mail server — review and correct before trying again";
+            else if (state == (int) OutboxDeliveryState.PREPARING)
+                preview = "Preparing to send in the background";
             else
                 preview = statement.column_int (5) > 0 ? "Send failed — Mailficient will retry automatically" : "Waiting to send";
             result.add (new Message ("local-outbox:" + statement.column_text (0), "local-outbox", "Outbox", "",
                 statement.column_text (2), statement.column_text (3).strip () == "" ? "(No Subject)" : statement.column_text (3),
-                preview, statement.column_text (4), "Queued", false, false, statement.column_int (7) != 0, 1, false,
+                preview, statement.column_text (4), "Queued", false, false, statement.column_int (8) != 0, 1, false,
                 statement.column_text (1)));
         }
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Outbox summaries");
@@ -706,34 +1819,41 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public int64? next_outbox_attempt (string account_id) throws MailError {
+        recover_expired_outbox_claims ();
         Sqlite.Statement statement;
-        const string sql = "SELECT MIN(o.next_attempt_at) FROM outbox o JOIN drafts d ON d.id=o.draft_id WHERE d.account_id=? AND o.delivery_state=0";
+        const string sql = "SELECT MIN(CASE WHEN o.delivery_state=? THEN o.next_attempt_at ELSE o.lease_until END) " +
+            "FROM outbox o JOIN drafts d ON d.id=o.draft_id WHERE d.account_id=? AND o.delivery_state IN (?,?)";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare Outbox scheduling");
-        statement.bind_text (1, account_id);
+        statement.bind_int (1, (int) OutboxDeliveryState.QUEUED); statement.bind_text (2, account_id);
+        statement.bind_int (3, (int) OutboxDeliveryState.QUEUED);
+        statement.bind_int (4, (int) OutboxDeliveryState.PREPARING);
         if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not inspect Outbox scheduling");
         if (statement.column_type (0) == Sqlite.NULL) return null;
         return statement.column_int64 (0);
     }
 
     public Gee.ArrayList<OutboxItem> list_outbox_items () throws MailError {
+        recover_expired_outbox_claims ();
         Sqlite.Statement statement;
-        if (database.prepare_v2 ("SELECT draft_id,attempts,next_attempt_at,last_error,delivery_state FROM outbox ORDER BY rowid DESC", -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 ("SELECT draft_id,attempts,next_attempt_at,last_error,delivery_state,undo_until FROM outbox ORDER BY rowid DESC", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare Outbox loading");
         var result = new Gee.ArrayList<OutboxItem> (); int row;
         while ((row = statement.step ()) == Sqlite.ROW) {
             var draft = load_draft (statement.column_text (0));
             if (draft != null) result.add (new OutboxItem (draft, statement.column_int (1),
                 statement.column_int64 (2), statement.column_text (3),
-                (OutboxDeliveryState) statement.column_int (4)));
+                (OutboxDeliveryState) statement.column_int (4),
+                statement.column_int64 (5)));
         }
         if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Outbox messages");
         return result;
     }
 
     public OutboxItem? find_outbox_item (string draft_id) throws MailError {
+        recover_expired_outbox_claims ();
         Sqlite.Statement statement;
-        const string sql = "SELECT attempts,next_attempt_at,last_error,delivery_state FROM outbox WHERE draft_id=?";
+        const string sql = "SELECT attempts,next_attempt_at,last_error,delivery_state,undo_until FROM outbox WHERE draft_id=?";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare Outbox item loading");
         statement.bind_text (1, draft_id);
@@ -744,9 +1864,11 @@ public class CacheDatabase : Object, AccountStore {
         int64 next_attempt_at = statement.column_int64 (1);
         string last_error = statement.column_text (2);
         var delivery_state = (OutboxDeliveryState) statement.column_int (3);
+        int64 undo_until = statement.column_int64 (4);
         var draft = load_draft (draft_id);
         if (draft == null) return null;
-        return new OutboxItem (draft, attempts, next_attempt_at, last_error, delivery_state);
+        return new OutboxItem (draft, attempts, next_attempt_at, last_error,
+            delivery_state, undo_until);
     }
 
     public int outbox_attempts (string draft_id) throws MailError {
@@ -761,8 +1883,10 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public Gee.ArrayList<Draft> list_pending_sends (string account_id, bool due_only = true) throws MailError {
+        recover_expired_outbox_claims ();
         Sqlite.Statement statement;
-        string sql = "SELECT d.id FROM outbox o JOIN drafts d ON d.id=o.draft_id WHERE d.account_id=? AND o.delivery_state=0" +
+        string sql = "SELECT d.id FROM outbox o JOIN drafts d ON d.id=o.draft_id WHERE d.account_id=? AND o.delivery_state=" +
+            ((int) OutboxDeliveryState.QUEUED).to_string () +
             (due_only ? " AND o.next_attempt_at<=strftime('%s','now')" : "") + " ORDER BY o.rowid";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare queued-message loading");
@@ -838,6 +1962,9 @@ public class CacheDatabase : Object, AccountStore {
             delete_bound ("DELETE FROM pending_transfers WHERE account_id=?", id);
             delete_bound ("DELETE FROM pending_deletions WHERE account_id=?", id);
             delete_bound ("DELETE FROM pending_folder_purges WHERE account_id=?", id);
+            // Removing an account is local-only.  Do not contact the provider
+            // later to delete Drafts that the user may still need there.
+            delete_bound ("DELETE FROM pending_remote_draft_deletions WHERE account_id=?", id);
             delete_bound ("DELETE FROM cached_messages WHERE account_id=?", id);
             delete_bound ("DELETE FROM cached_mailboxes WHERE account_id=?", id);
             delete_bound ("DELETE FROM outbox WHERE draft_id IN (SELECT id FROM drafts WHERE account_id=?)", id);
@@ -922,13 +2049,20 @@ public class CacheDatabase : Object, AccountStore {
         message_statement.bind_text (22, message.cc_recipients);
         message_statement.bind_text (23, message.security_status);
         message_statement.bind_text (24, message.flag_color);
+        message_statement.bind_text (25, message.bcc_recipients);
+        message_statement.bind_int64 (26, message.message_size);
+        message_statement.bind_text (27, message.reply_to);
+        message_statement.bind_text (28, message.authentication_results);
+        message_statement.bind_text (29, message.list_unsubscribe);
+        message_statement.bind_text (30, message.list_unsubscribe_post);
+        message_statement.bind_text (31, MessageSecurityService.bounded_raw_headers (message.raw_headers));
         if (message_statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not cache the message");
         if (bulk_sync_mode) { message_statement.reset (); message_statement.clear_bindings (); }
         Sqlite.Statement statement;
         if (database.prepare_v2 ("DELETE FROM message_fts WHERE id=?", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not update the search index");
         statement.bind_text (1, message.id); if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not update the search index");
         if (database.prepare_v2 ("INSERT INTO message_fts(id,sender,recipients,subject,body) VALUES(?,?,?,?,?)", -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare the search index");
-        statement.bind_text (1, message.id); statement.bind_text (2, message.sender_name + " " + message.sender_address); statement.bind_text (3, message.recipients + " " + message.cc_recipients); statement.bind_text (4, message.subject); statement.bind_text (5, message.body + " " + message.body_html);
+        statement.bind_text (1, message.id); statement.bind_text (2, message.sender_name + " " + message.sender_address); statement.bind_text (3, message.recipients + " " + message.cc_recipients + " " + message.bcc_recipients); statement.bind_text (4, message.subject); statement.bind_text (5, message.body + " " + message.body_html);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not index the message");
         if (database.prepare_v2 ("DELETE FROM message_header_index WHERE message_id=?", -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not update conversation indexing");
@@ -958,7 +2092,7 @@ public class CacheDatabase : Object, AccountStore {
 
     private Sqlite.Statement prepare_message_statement () throws MailError {
         Sqlite.Statement statement;
-        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,content_extracted=1";
+        const string sql = "INSERT INTO cached_messages(id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size,reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,content_extracted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET mailbox_id=excluded.mailbox_id,sender_name=excluded.sender_name,sender_address=excluded.sender_address,recipients=excluded.recipients,subject=excluded.subject,preview=excluded.preview,body=excluded.body,timestamp=excluded.timestamp,unread=excluded.unread,flagged=excluded.flagged,has_attachment=excluded.has_attachment,conversation_count=excluded.conversation_count,has_remote_content=excluded.has_remote_content,body_html=excluded.body_html,account_id=excluded.account_id,remote_uid=excluded.remote_uid,internet_message_id=excluded.internet_message_id,in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,date_unix=excluded.date_unix,cc_recipients=excluded.cc_recipients,security_status=excluded.security_status,bcc_recipients=excluded.bcc_recipients,message_size=excluded.message_size,reply_to=excluded.reply_to,authentication_results=excluded.authentication_results,list_unsubscribe=excluded.list_unsubscribe,list_unsubscribe_post=excluded.list_unsubscribe_post,raw_headers=excluded.raw_headers,content_extracted=1";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare message caching");
         return statement;
     }
@@ -1182,7 +2316,7 @@ public class CacheDatabase : Object, AccountStore {
         Sqlite.Statement statement;
         // Lists can contain tens of thousands of rows. Bodies, HTML, and
         // attachment objects are loaded only after selecting a message.
-        const string columns = "m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color";
+        const string columns = "m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size";
         bool bind_mailbox = false;
         string predicate = cached_mailbox_predicate (mailbox_id, out bind_mailbox);
         if (unread_only) predicate += " AND m.unread=1";
@@ -1314,6 +2448,41 @@ public class CacheDatabase : Object, AccountStore {
         return senders;
     }
 
+    public bool is_safe_sender (string address) throws MailError {
+        Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT 1 FROM safe_senders WHERE address=? COLLATE NOCASE LIMIT 1", -1,
+                                 out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect Safe Senders");
+        statement.bind_text (1, address.strip ()); int row = statement.step ();
+        if (row != Sqlite.ROW && row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not inspect Safe Senders");
+        return row == Sqlite.ROW;
+    }
+
+    public void set_safe_sender (string address, bool safe) throws MailError {
+        string normalized = MessageSecurityService.normalize_sender (address);
+        if (!RecipientParser.is_valid_address (normalized))
+            throw new MailError.STORAGE ("The sender address is invalid");
+        Sqlite.Statement statement; string sql = safe ?
+            "INSERT OR IGNORE INTO safe_senders(address,created_at) VALUES(?,strftime('%s','now'))" :
+            "DELETE FROM safe_senders WHERE address=? COLLATE NOCASE";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare the Safe Sender change");
+        statement.bind_text (1, normalized);
+        if (statement.step () != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not update Safe Senders");
+    }
+
+    public Gee.List<string> list_safe_senders () throws MailError {
+        var senders = new Gee.ArrayList<string> (); Sqlite.Statement statement;
+        if (database.prepare_v2 ("SELECT address FROM safe_senders ORDER BY address COLLATE NOCASE", -1,
+                                 out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare Safe Sender loading");
+        int row; while ((row = statement.step ()) == Sqlite.ROW) senders.add (statement.column_text (0));
+        if (row != Sqlite.DONE) throw new MailError.STORAGE ("Could not load Safe Senders");
+        return senders;
+    }
+
     public uint smart_unread_count (string mailbox_id) throws MailError {
         Sqlite.Statement statement; string predicate;
         switch (mailbox_id) {
@@ -1331,7 +2500,7 @@ public class CacheDatabase : Object, AccountStore {
 
     public Message? find_cached_message (string id) throws MailError {
         Sqlite.Statement statement;
-        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color FROM cached_messages WHERE id=?";
+        const string sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size,reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers FROM cached_messages WHERE id=?";
         if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare cached message lookup");
         statement.bind_text (1, id); int row = statement.step ();
         if (row == Sqlite.DONE) return null;
@@ -1382,7 +2551,7 @@ public class CacheDatabase : Object, AccountStore {
                     if (placeholders.len > 0) placeholders.append (",");
                     placeholders.append ("?");
                 }
-                string sql = "SELECT DISTINCT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color FROM cached_messages m JOIN message_header_index h ON h.message_id=m.id WHERE m.account_id=? AND h.header_id IN (" + placeholders.str + ")";
+                string sql = "SELECT DISTINCT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size FROM cached_messages m JOIN message_header_index h ON h.message_id=m.id WHERE m.account_id=? AND h.header_id IN (" + placeholders.str + ")";
                 if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
                     throw new MailError.STORAGE ("Could not prepare conversation loading");
                 int bind = 1; statement.bind_text (bind++, selected.account_id);
@@ -1404,7 +2573,7 @@ public class CacheDatabase : Object, AccountStore {
             // Caches created before the conversation index are still valid.
             // Use the old bounded fallback once; subsequent sync writes repair
             // the index for those messages.
-            const string fallback_sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,flag_color FROM cached_messages WHERE account_id=? ORDER BY rowid";
+            const string fallback_sql = "SELECT id,mailbox_id,sender_name,sender_address,recipients,subject,preview,timestamp,unread,flagged,has_attachment,conversation_count,has_remote_content,account_id,remote_uid,internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,flag_color,bcc_recipients,message_size FROM cached_messages WHERE account_id=? ORDER BY rowid";
             if (database.prepare_v2 (fallback_sql, -1, out statement) != Sqlite.OK)
                 throw new MailError.STORAGE ("Could not prepare conversation fallback");
             statement.bind_text (1, selected.account_id); int row;
@@ -1434,7 +2603,7 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     private static Message message_summary_from_row (Sqlite.Statement statement) {
-        return new Message (statement.column_text (0), statement.column_text (1),
+        var message = new Message (statement.column_text (0), statement.column_text (1),
             statement.column_text (2), statement.column_text (3), statement.column_text (4),
             statement.column_text (5), statement.column_text (6), "", statement.column_text (7),
             statement.column_int (8) != 0, statement.column_int (9) != 0,
@@ -1443,6 +2612,9 @@ public class CacheDatabase : Object, AccountStore {
             statement.column_text (14), statement.column_text (15), statement.column_text (16),
             statement.column_text (17), statement.column_int64 (18), statement.column_text (19),
             statement.column_text (20));
+        message.bcc_recipients = statement.column_text (21);
+        message.message_size = statement.column_int64 (22);
+        return message;
     }
 
     private static Message message_from_row (Sqlite.Statement statement) {
@@ -1450,7 +2622,11 @@ public class CacheDatabase : Object, AccountStore {
             statement.column_text (5), statement.column_text (6), statement.column_text (7), statement.column_text (8), statement.column_int (9) != 0,
             statement.column_int (10) != 0, statement.column_int (11) != 0, (uint) statement.column_int (12), statement.column_int (13) != 0,
             statement.column_text (15), statement.column_text (16), statement.column_text (17), statement.column_text (18), statement.column_text (19), statement.column_int64 (20), statement.column_text (21), statement.column_text (23));
-        message.body_html = statement.column_text (14); message.security_status = statement.column_text (22); return message;
+        message.body_html = statement.column_text (14); message.security_status = statement.column_text (22);
+        message.bcc_recipients = statement.column_text (24); message.message_size = statement.column_int64 (25);
+        message.reply_to = statement.column_text (26); message.authentication_results = statement.column_text (27);
+        message.list_unsubscribe = statement.column_text (28); message.list_unsubscribe_post = statement.column_text (29);
+        message.raw_headers = statement.column_text (30); return message;
     }
 
     private void load_message_attachments (Message message) throws MailError {
@@ -1734,10 +2910,12 @@ public class CacheDatabase : Object, AccountStore {
                 const string copy_message = "INSERT INTO cached_messages(" +
                     "id,mailbox_id,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged," +
                     "has_attachment,conversation_count,has_remote_content,body_html,account_id,remote_uid,internet_message_id," +
-                    "in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted) " +
+                    "in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size," +
+                    "reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,content_extracted) " +
                     "SELECT ?,?,sender_name,sender_address,recipients,subject,preview,body,timestamp,unread,flagged,has_attachment," +
                     "conversation_count,has_remote_content,body_html,account_id,remote_uid," +
-                    "internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,content_extracted " +
+                    "internet_message_id,in_reply_to,references_header,date_unix,cc_recipients,security_status,flag_color,bcc_recipients,message_size," +
+                    "reply_to,authentication_results,list_unsubscribe,list_unsubscribe_post,raw_headers,content_extracted " +
                     "FROM cached_messages WHERE id=?";
                 if (database.prepare_v2 (copy_message, -1, out statement) != Sqlite.OK)
                     throw new MailError.STORAGE ("Could not prepare the local message copy");
@@ -2053,7 +3231,7 @@ public class CacheDatabase : Object, AccountStore {
                                               int limit = MESSAGE_LIST_LIMIT,
                                               int offset = 0,
                                               MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
-        var sql = new StringBuilder ("SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
+        var sql = new StringBuilder ("SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
         var values = new Gee.ArrayList<string> ();
         append_search_predicates (sql, query, values);
         int bounded_limit = int.max (1, int.min (MESSAGE_LIST_LIMIT + 1, limit));
@@ -2083,16 +3261,96 @@ public class CacheDatabase : Object, AccountStore {
 
     private static void append_search_predicates (StringBuilder sql, SearchQuery query,
                                                    Gee.ArrayList<string> values) {
-        if (query.text != "") { sql.append (" AND message_fts MATCH ?"); values.add (quote_fts (query.text)); }
-        if (query.sender != null) { sql.append (" AND lower(m.sender_name || ' ' || m.sender_address) LIKE ?"); values.add ("%" + query.sender.down () + "%"); }
-        if (query.recipient != null) { sql.append (" AND lower(m.recipients || ' ' || m.cc_recipients) LIKE ?"); values.add ("%" + query.recipient.down () + "%"); }
-        if (query.mailbox != null) { sql.append (" AND (lower(m.mailbox_id)=? OR lower(b.name)=? OR lower(b.remote_name)=?)"); values.add (query.mailbox.down ()); values.add (query.mailbox.down ()); values.add (query.mailbox.down ()); }
-        if (query.label != null) { sql.append (" AND EXISTS(SELECT 1 FROM message_labels ml JOIN mail_labels l ON l.id=ml.label_id WHERE ml.message_id=m.id AND lower(l.name)=?)"); values.add (query.label.down ()); }
+        if (query.clauses.size > 0) {
+            sql.append (" AND (");
+            for (int clause_index = 0; clause_index < query.clauses.size; clause_index++) {
+                if (clause_index > 0) sql.append (" OR ");
+                sql.append ("("); var clause = query.clauses[clause_index];
+                for (int term_index = 0; term_index < clause.terms.size; term_index++) {
+                    if (term_index > 0) sql.append (" AND ");
+                    append_search_term (sql, clause.terms[term_index], values);
+                }
+                sql.append (")");
+            }
+            sql.append (")");
+        } else {
+            if (query.text != "") { sql.append (" AND message_fts MATCH ?"); values.add (quote_fts (query.text)); }
+            if (query.sender != null) { sql.append (" AND lower(m.sender_name || ' ' || m.sender_address) LIKE ? ESCAPE '\\'"); values.add (like_value (query.sender)); }
+            if (query.recipient != null) { sql.append (" AND lower(m.recipients || ' ' || m.cc_recipients || ' ' || m.bcc_recipients) LIKE ? ESCAPE '\\'"); values.add (like_value (query.recipient)); }
+            if (query.cc != null) { sql.append (" AND lower(m.cc_recipients) LIKE ? ESCAPE '\\'"); values.add (like_value (query.cc)); }
+            if (query.bcc != null) { sql.append (" AND lower(m.bcc_recipients) LIKE ? ESCAPE '\\'"); values.add (like_value (query.bcc)); }
+            if (query.subject != null) { sql.append (" AND lower(m.subject) LIKE ? ESCAPE '\\'"); values.add (like_value (query.subject)); }
+            if (query.mailbox != null) { sql.append (" AND (lower(m.mailbox_id)=? OR lower(b.name)=? OR lower(b.remote_name)=?)"); values.add (query.mailbox.down ()); values.add (query.mailbox.down ()); values.add (query.mailbox.down ()); }
+            if (query.label != null) { sql.append (" AND EXISTS(SELECT 1 FROM message_labels ml JOIN mail_labels l ON l.id=ml.label_id WHERE ml.message_id=m.id AND lower(l.name)=?)"); values.add (query.label.down ()); }
+            if (query.after_unix != null) { sql.append (" AND m.date_unix>=CAST(? AS INTEGER)"); values.add (((int64) query.after_unix).to_string ()); }
+            if (query.before_unix != null) { sql.append (" AND m.date_unix<CAST(? AS INTEGER)"); values.add (((int64) query.before_unix).to_string ()); }
+        }
+        // These properties are also public overrides used by unread-only
+        // views and account-scoped Run Now, so apply them after parsed clauses.
+        // Parsed account terms already live in the authoritative clause tree
+        // (where they can be negated or combined with OR). The scalar-only
+        // form remains the account override used by rule Run Now.
+        if (query.account != null && query.clauses.size == 0) {
+            sql.append (" AND m.account_id=?"); values.add (query.account);
+        }
         if (query.unread != null) sql.append (query.unread ? " AND m.unread=1" : " AND m.unread=0");
         if (query.flagged != null) sql.append (query.flagged ? " AND m.flagged=1" : " AND m.flagged=0");
         if (query.has_attachment != null) sql.append (query.has_attachment ? " AND m.has_attachment=1" : " AND m.has_attachment=0");
-        if (query.after_unix != null) { sql.append (" AND m.date_unix>=CAST(? AS INTEGER)"); values.add (((int64) query.after_unix).to_string ()); }
-        if (query.before_unix != null) { sql.append (" AND m.date_unix<CAST(? AS INTEGER)"); values.add (((int64) query.before_unix).to_string ()); }
+    }
+
+    private static void append_search_term (StringBuilder sql, SearchTerm term,
+                                            Gee.ArrayList<string> values) {
+        if (term.negated) sql.append ("NOT (");
+        switch (term.field) {
+        case SearchField.ANY:
+            // FTS5 MATCH cannot safely sit below every SQL OR/NOT shape. A
+            // correlated ID subquery preserves advanced boolean semantics.
+            sql.append ("m.id IN (SELECT id FROM message_fts WHERE message_fts MATCH ?)");
+            values.add (quote_fts_term (term.value, term.exact)); break;
+        case SearchField.SENDER:
+            sql.append ("lower(m.sender_name || ' ' || m.sender_address) LIKE ? ESCAPE '\\'"); values.add (like_value (term.value)); break;
+        case SearchField.RECIPIENT:
+            sql.append ("lower(m.recipients || ' ' || m.cc_recipients || ' ' || m.bcc_recipients) LIKE ? ESCAPE '\\'"); values.add (like_value (term.value)); break;
+        case SearchField.CC:
+            sql.append ("lower(m.cc_recipients) LIKE ? ESCAPE '\\'"); values.add (like_value (term.value)); break;
+        case SearchField.BCC:
+            sql.append ("lower(m.bcc_recipients) LIKE ? ESCAPE '\\'"); values.add (like_value (term.value)); break;
+        case SearchField.SUBJECT:
+            sql.append ("lower(m.subject) LIKE ? ESCAPE '\\'"); values.add (like_value (term.value)); break;
+        case SearchField.MAILBOX:
+            sql.append ("(lower(m.mailbox_id)=? OR lower(b.name)=? OR lower(b.remote_name)=?)");
+            values.add (term.value.down ()); values.add (term.value.down ()); values.add (term.value.down ()); break;
+        case SearchField.ACCOUNT:
+            sql.append ("(lower(m.account_id)=? OR EXISTS(SELECT 1 FROM accounts a WHERE a.id=m.account_id AND (lower(a.email) LIKE ? ESCAPE '\\' OR lower(a.display_name) LIKE ? ESCAPE '\\')))" );
+            values.add (term.value.down ()); values.add (like_value (term.value)); values.add (like_value (term.value)); break;
+        case SearchField.LABEL:
+            sql.append ("EXISTS(SELECT 1 FROM message_labels ml JOIN mail_labels l ON l.id=ml.label_id WHERE ml.message_id=m.id AND lower(l.name)=?)"); values.add (term.value.down ()); break;
+        case SearchField.UNREAD: sql.append (term.value == "1" ? "m.unread=1" : "m.unread=0"); break;
+        case SearchField.FLAGGED: sql.append (term.value == "1" ? "m.flagged=1" : "m.flagged=0"); break;
+        case SearchField.HAS_ATTACHMENT: sql.append (term.value == "1" ? "m.has_attachment=1" : "m.has_attachment=0"); break;
+        case SearchField.ATTACHMENT_NAME:
+            sql.append ("EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.message_id=m.id AND lower(ma.name) LIKE ? ESCAPE '\\')"); values.add (like_value (term.value)); break;
+        case SearchField.ATTACHMENT_TYPE:
+            sql.append ("EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.message_id=m.id AND lower(ma.content_type) LIKE ? ESCAPE '\\')"); values.add (like_value (term.value)); break;
+        case SearchField.AFTER:
+            sql.append ("m.date_unix>=CAST(? AS INTEGER)"); values.add (term.value); break;
+        case SearchField.BEFORE:
+            sql.append ("m.date_unix<CAST(? AS INTEGER)"); values.add (term.value); break;
+        case SearchField.DATE_RANGE: {
+            string[] bounds = term.value.split (":", 2);
+            if (bounds.length == 2) {
+                sql.append ("(m.date_unix>=CAST(? AS INTEGER) AND m.date_unix<CAST(? AS INTEGER))");
+                values.add (bounds[0]); values.add (bounds[1]);
+            } else sql.append ("1=1");
+            break;
+        }
+        case SearchField.MESSAGE_SIZE:
+            if (term.comparison == SearchComparison.GREATER_THAN) sql.append ("m.message_size>CAST(? AS INTEGER)");
+            else if (term.comparison == SearchComparison.LESS_THAN) sql.append ("m.message_size<CAST(? AS INTEGER)");
+            else sql.append ("m.message_size=CAST(? AS INTEGER)");
+            values.add (term.value); break;
+        }
+        if (term.negated) sql.append (")");
     }
 
     private static string quote_fts (string input) {
@@ -2108,6 +3366,15 @@ public class CacheDatabase : Object, AccountStore {
             terms.append_c ('*');
         }
         return terms.str;
+    }
+
+    private static string quote_fts_term (string input, bool exact) {
+        if (!exact) return quote_fts (input);
+        return "\"" + input.replace ("\"", "\"\"") + "\"";
+    }
+
+    private static string like_value (string input) {
+        return "%" + input.down ().replace ("\\", "\\\\").replace ("%", "\\%").replace ("_", "\\_") + "%";
     }
 }
 }

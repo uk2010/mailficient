@@ -17,3 +17,5 @@ release-app*/
 *.sha256
 *.flatpak
 *.snap
+__pycache__/
+*.py[cod]

@@ -1,43 +1,199 @@
 namespace Mailficient {
-public enum MailRuleField { SENDER, RECIPIENT, SUBJECT, BODY, HAS_ATTACHMENT, IS_UNREAD, IS_FLAGGED }
-public enum MailRuleAction { MARK_READ, FLAG, ARCHIVE, TRASH, LABEL, MARK_UNREAD, UNFLAG, MOVE }
+public enum MailRuleField {
+    SENDER,
+    RECIPIENT,
+    SUBJECT,
+    BODY,
+    HAS_ATTACHMENT,
+    IS_UNREAD,
+    IS_FLAGGED,
+    CC,
+    BCC,
+    ATTACHMENT_NAME,
+    MESSAGE_SIZE,
+    MAILBOX
+}
 
-public class MailRule : Object {
-    public int64 id { get; construct; }
-    public string name { get; construct; }
-    public string account_id { get; construct; }
+public enum MailRuleOperator {
+    CONTAINS,
+    DOES_NOT_CONTAIN,
+    EQUALS,
+    STARTS_WITH,
+    ENDS_WITH,
+    GREATER_THAN,
+    LESS_THAN
+}
+
+public enum MailRuleMatchMode { ALL, ANY }
+
+public enum MailRuleAction {
+    MARK_READ,
+    FLAG,
+    ARCHIVE,
+    TRASH,
+    LABEL,
+    MARK_UNREAD,
+    UNFLAG,
+    MOVE,
+    COPY
+}
+
+public class MailRuleCondition : Object {
     public MailRuleField field { get; construct; }
+    public MailRuleOperator operator { get; construct; }
     public string pattern { get; construct; }
-    public MailRuleAction action { get; construct; }
-    public string value { get; construct; }
-    public bool enabled { get; construct; }
 
-    public MailRule (int64 id, string name, string account_id, MailRuleField field,
-                     string pattern, MailRuleAction action, string value = "", bool enabled = true) {
-        Object (id: id, name: name, account_id: account_id, field: field,
-            pattern: pattern, action: action, value: value, enabled: enabled);
+    public MailRuleCondition (MailRuleField field, string pattern,
+                              MailRuleOperator operator = MailRuleOperator.CONTAINS) {
+        Object (field: field, pattern: pattern.strip (), operator: operator);
     }
+
     public bool matches (Message message) {
-        if (!enabled || (account_id != "" && account_id != message.account_id)) return false;
         if (field == MailRuleField.HAS_ATTACHMENT)
-            return message.has_attachment == matches_bool (pattern, "attachment");
+            return compare_bool (message.has_attachment, pattern, operator, "attachment");
         if (field == MailRuleField.IS_UNREAD)
-            return message.unread == matches_bool (pattern, "unread");
+            return compare_bool (message.unread, pattern, operator, "unread");
         if (field == MailRuleField.IS_FLAGGED)
-            return message.flagged == matches_bool (pattern, "flagged");
+            return compare_bool (message.flagged, pattern, operator, "flagged");
+        if (field == MailRuleField.MESSAGE_SIZE) {
+            int64? parsed = parse_size (pattern);
+            if (parsed == null) return false;
+            int64 expected = (int64) parsed;
+            switch (operator) {
+            case MailRuleOperator.GREATER_THAN: return message.message_size > expected;
+            case MailRuleOperator.LESS_THAN: return message.message_size < expected;
+            default: return message.message_size == expected;
+            }
+        }
+
         string haystack;
         switch (field) {
-        case MailRuleField.RECIPIENT: haystack = message.recipients + " " + message.cc_recipients; break;
+        case MailRuleField.RECIPIENT: haystack = message.recipients + " " + message.cc_recipients + " " + message.bcc_recipients; break;
+        case MailRuleField.CC: haystack = message.cc_recipients; break;
+        case MailRuleField.BCC: haystack = message.bcc_recipients; break;
         case MailRuleField.SUBJECT: haystack = message.subject; break;
         case MailRuleField.BODY: haystack = message.body + " " + message.preview; break;
+        case MailRuleField.MAILBOX: haystack = message.mailbox_id; break;
+        case MailRuleField.ATTACHMENT_NAME:
+            var names = new StringBuilder ();
+            foreach (var attachment in message.attachments) names.append (attachment.name + " ");
+            haystack = names.str;
+            break;
         default: haystack = message.sender_name + " " + message.sender_address; break;
         }
-        return haystack.down ().contains (pattern.down ());
+        return compare_text (haystack, pattern, operator);
+    }
+
+    private static bool compare_bool (bool actual, string value,
+                                      MailRuleOperator operator, string positive) {
+        bool expected = matches_bool (value, positive);
+        bool equal = actual == expected;
+        return operator == MailRuleOperator.DOES_NOT_CONTAIN ? !equal : equal;
+    }
+
+    private static bool compare_text (string haystack, string needle,
+                                      MailRuleOperator operator) {
+        string actual = haystack.down ().strip (); string expected = needle.down ().strip ();
+        switch (operator) {
+        case MailRuleOperator.DOES_NOT_CONTAIN: return !actual.contains (expected);
+        case MailRuleOperator.EQUALS: return actual == expected;
+        case MailRuleOperator.STARTS_WITH: return actual.has_prefix (expected);
+        case MailRuleOperator.ENDS_WITH: return actual.has_suffix (expected);
+        default: return actual.contains (expected);
+        }
     }
 
     private static bool matches_bool (string value, string positive) {
         var normalized = value.strip ().down ();
         return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == positive;
+    }
+
+    private static int64? parse_size (string value) {
+        string lower = value.strip ().down (); double multiplier = 1;
+        if (lower.has_suffix ("kb")) {
+            multiplier = 1024; lower = lower.substring (0, lower.length - 2);
+        } else if (lower.has_suffix ("mb")) {
+            multiplier = 1024 * 1024; lower = lower.substring (0, lower.length - 2);
+        } else if (lower.has_suffix ("gb")) {
+            multiplier = 1024.0 * 1024.0 * 1024.0;
+            lower = lower.substring (0, lower.length - 2);
+        } else if (lower.has_suffix ("b")) {
+            lower = lower.substring (0, lower.length - 1);
+        }
+        double amount = 0;
+        if (!double.try_parse (lower.strip (), out amount) || amount < 0) return null;
+        double bytes = amount * multiplier;
+        if (bytes > int64.MAX) return null;
+        return (int64) bytes;
+    }
+}
+
+public class MailRuleOperation : Object {
+    public MailRuleAction action { get; construct; }
+    public string value { get; construct; }
+
+    public MailRuleOperation (MailRuleAction action, string value = "") {
+        Object (action: action, value: value.strip ());
+    }
+}
+
+public class MailRule : Object {
+    public int64 id { get; construct; }
+    public string name { get; construct; }
+    public string account_id { get; construct; }
+    // Legacy fields remain available to old callers and migration code. New
+    // rules use the ordered condition/action collections below.
+    public MailRuleField field { get; construct; }
+    public string pattern { get; construct; }
+    public MailRuleAction action { get; construct; }
+    public string value { get; construct; }
+    public bool enabled { get; set; }
+    public int position { get; set; }
+    public MailRuleMatchMode match_mode { get; set; default = MailRuleMatchMode.ALL; }
+    public bool stop_processing { get; set; }
+    public Gee.ArrayList<MailRuleCondition> conditions { get; private set; default = new Gee.ArrayList<MailRuleCondition> (); }
+    public Gee.ArrayList<MailRuleCondition> exceptions { get; private set; default = new Gee.ArrayList<MailRuleCondition> (); }
+    public Gee.ArrayList<MailRuleOperation> operations { get; private set; default = new Gee.ArrayList<MailRuleOperation> (); }
+
+    public MailRule (int64 id, string name, string account_id, MailRuleField field,
+                     string pattern, MailRuleAction action, string value = "", bool enabled = true,
+                     int position = 0, MailRuleMatchMode match_mode = MailRuleMatchMode.ALL,
+                     bool stop_processing = false) {
+        Object (id: id, name: name, account_id: account_id, field: field,
+            pattern: pattern, action: action, value: value, enabled: enabled,
+            position: position, match_mode: match_mode, stop_processing: stop_processing);
+        conditions.add (new MailRuleCondition (field, pattern));
+        operations.add (new MailRuleOperation (action, value));
+    }
+
+    public void replace_legacy_parts () {
+        conditions.clear (); exceptions.clear (); operations.clear ();
+    }
+
+    public bool matches (Message message) {
+        if (!enabled || (account_id != "" && account_id != message.account_id) || conditions.size == 0)
+            return false;
+        bool condition_match = match_mode == MailRuleMatchMode.ALL;
+        foreach (var condition in conditions) {
+            bool matched = condition.matches (message);
+            if (match_mode == MailRuleMatchMode.ALL && !matched) { condition_match = false; break; }
+            if (match_mode == MailRuleMatchMode.ANY && matched) { condition_match = true; break; }
+        }
+        if (!condition_match) return false;
+        foreach (var exception in exceptions) if (exception.matches (message)) return false;
+        return true;
+    }
+}
+
+public class QuickStep : Object {
+    public int64 id { get; construct; }
+    public string name { get; construct; }
+    public string account_id { get; construct; }
+    public int position { get; set; }
+    public Gee.ArrayList<MailRuleOperation> operations { get; private set; default = new Gee.ArrayList<MailRuleOperation> (); }
+
+    public QuickStep (int64 id, string name, string account_id = "", int position = 0) {
+        Object (id: id, name: name, account_id: account_id, position: position);
     }
 }
 }

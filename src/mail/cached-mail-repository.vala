@@ -9,6 +9,8 @@ public class CachedMailRepository : Object, MailRepository {
     // entry here so it can live in Favorites without pretending to contain
     // messages in Mailficient's cache.
     public const string GNOME_CALENDAR_ID = "gnome-calendar";
+    public const string TASK_TODAY_ID = "local-tasks-today";
+    public const string TASK_PLANNED_ID = "local-tasks-planned";
     private CacheDatabase cache;
     private DemoMailRepository demo;
     private bool demo_mode;
@@ -59,14 +61,14 @@ public class CachedMailRepository : Object, MailRepository {
             }
             catch (Error error) { warning ("Could not count queued messages: %s", error.message); }
             append_smart_mailboxes (result);
-            result.insert (0, new Mailbox (GNOME_CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+            prepend_productivity_views (result);
             DebugTrace.duration ("repository", "list_mailboxes demo complete count=%d".printf (result.size), started);
             return result;
         }
         try {
             var result = new Gee.ArrayList<Mailbox> ();
             if (cache.list_accounts ().size == 0) {
-                result.add (new Mailbox (GNOME_CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+                prepend_productivity_views (result);
                 DebugTrace.duration ("repository", "list_mailboxes no-accounts complete", started);
                 return result;
             }
@@ -87,7 +89,7 @@ public class CachedMailRepository : Object, MailRepository {
                 (uint) cache.count_cached_messages ("unified-snoozed", true)));
             result.add_all (cache.list_cached_mailboxes ());
             append_smart_mailboxes (result);
-            result.insert (0, new Mailbox (GNOME_CALENDAR_ID, "Calendar", "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+            prepend_productivity_views (result);
             DebugTrace.duration ("repository", "list_mailboxes complete count=%d".printf (result.size), started);
             return result;
         } catch (Error error) {
@@ -168,6 +170,22 @@ public class CachedMailRepository : Object, MailRepository {
                     "view-filter-symbolic", MailboxRole.CUSTOM, (uint) cache.count_search_messages (unread)));
             }
         } catch (Error error) { warning ("Could not load Smart Mailboxes: %s", error.message); }
+    }
+
+    private void prepend_productivity_views (Gee.ArrayList<Mailbox> result) {
+        uint today_count = 0; uint planned_count = 0;
+        try {
+            today_count = (uint) cache.mail_task_count (true);
+            planned_count = (uint) cache.mail_task_count ();
+        } catch (Error error) {
+            warning ("Could not count tasks: %s", error.message);
+        }
+        result.insert (0, new Mailbox (GNOME_CALENDAR_ID, "Calendar",
+            "x-office-calendar-symbolic", MailboxRole.CUSTOM));
+        result.insert (0, new Mailbox (TASK_PLANNED_ID, "Planned",
+            "checkbox-symbolic", MailboxRole.CUSTOM, planned_count));
+        result.insert (0, new Mailbox (TASK_TODAY_ID, "Today",
+            "task-due-symbolic", MailboxRole.CUSTOM, today_count));
     }
 
     public Gee.List<Message> conversation_for (Message message) {
@@ -292,6 +310,8 @@ public class CachedMailRepository : Object, MailRepository {
             preview = "Sent — waiting for local Outbox cleanup";
         else if (item.delivery_state == OutboxDeliveryState.REJECTED)
             preview = "Rejected by the mail server — review and correct before trying again";
+        else if (item.delivery_state == OutboxDeliveryState.PREPARING)
+            preview = "Sending in background — editing paused";
         else
             preview = item.attempts > 0 ? "Send failed — Mailficient will retry automatically" : "Waiting to send";
         return new Message (OUTBOX_PREFIX + draft.id, LOCAL_OUTBOX_ID, "Outbox", "", draft.to,

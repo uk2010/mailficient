@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mailficient Background Delivery
+Comment=Send scheduled and queued mail when Mailficient is closed
+Exec=mailficient --background
+Icon=com.local.Mailficient
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=10

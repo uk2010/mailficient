@@ -16,6 +16,7 @@ License: GPL-3+
 Files: usr/lib/mailficient/libcamel*
        usr/lib/mailficient/libebackend*
        usr/lib/mailficient/libebook*
+       usr/lib/mailficient/libecal*
        usr/lib/mailficient/libedata*
        usr/lib/mailficient/libedataserver*
        usr/lib/mailficient/evolution-data-server/*

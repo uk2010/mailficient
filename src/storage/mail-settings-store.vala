@@ -32,6 +32,16 @@ public class MailSettingsStore : Object {
         set { set_bool ("full-html-formatting", value); }
     }
 
+    public bool spellcheck_enabled {
+        get { return get_bool ("spellcheck-enabled", true); }
+        set { set_bool ("spellcheck-enabled", value); }
+    }
+
+    public int undo_send_seconds {
+        get { return clamp_int ((int) get_double ("undo-send-seconds", 10), 5, 30); }
+        set { set_double ("undo-send-seconds", clamp_int (value, 5, 30)); }
+    }
+
     public string appearance {
         owned get {
             string value = get_string ("appearance", "system");

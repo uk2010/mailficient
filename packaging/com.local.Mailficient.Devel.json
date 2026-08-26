@@ -14,9 +14,11 @@
     "--share=network",
     "--talk-name=org.freedesktop.secrets",
     "--talk-name=org.freedesktop.Notifications",
+    "--own-name=com.local.Mailficient.BackgroundWorker",
     "--talk-name=org.gnome.OnlineAccounts",
     "--talk-name=org.gnome.evolution.dataserver.Sources5",
-    "--talk-name=org.gnome.evolution.dataserver.AddressBook10"
+    "--talk-name=org.gnome.evolution.dataserver.AddressBook10",
+    "--talk-name=org.gnome.evolution.dataserver.Calendar8"
   ],
   "modules": [
     {
@@ -52,7 +54,7 @@
       "name": "mailficient",
       "buildsystem": "meson",
       "run-tests": true,
-      "config-opts": ["-Dcamel=enabled", "-Daddressbook=enabled"],
+      "config-opts": ["-Dcamel=enabled", "-Daddressbook=enabled", "-Dcalendar=enabled"],
       "sources": [{ "type": "dir", "path": ".." }]
     }
   ]

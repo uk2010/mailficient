@@ -14,19 +14,19 @@ The manifest builds:
 No generated Flatpak build directory or private account data is required from
 the repository.
 
-## Install a release bundle
+## Install a locally built bundle
 
-Download `Mailficient-0.2.7-x86_64.flatpak` and its checksum from the GitHub
-release. Verify and install them from the download directory:
+After creating a bundle with the steps below, verify and install it from its
+output directory:
 
 ```sh
-sha256sum -c Mailficient-0.2.7-x86_64.flatpak.sha256
-flatpak install --user ./Mailficient-0.2.7-x86_64.flatpak
+sha256sum -c Mailficient-0.2.8-x86_64.flatpak.sha256
+flatpak install --user ./Mailficient-0.2.8-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
-Release bundles target x86-64 and ARM64. The matching runtime is downloaded
-from Flathub when it is not already installed.
+Bundles can be built natively for x86-64 or ARM64. The matching runtime is
+downloaded from Flathub when it is not already installed.
 
 ## Build from source
 
@@ -48,8 +48,13 @@ flatpak-builder --user --install --force-clean \
 flatpak run --user com.local.Mailficient
 ```
 
-`run-tests` is enabled in the manifest, so both the core and Camel boundary
-suites must pass before Flatpak Builder completes.
+`run-tests` is enabled in the manifest, so the core, calendar, EDS-calendar,
+and Camel boundary suites must pass before Flatpak Builder completes. The
+manifest enables `-Dcalendar=enabled` and grants the application access to the
+EDS `org.gnome.evolution.dataserver.Calendar8` service for invitation responses
+and meeting-draft creation. It does not grant Mailficient a separate calendar
+database or permission to send an invitation without the user's calendar
+action.
 
 ## Create a single-file bundle
 
@@ -63,12 +68,12 @@ flatpak-builder --force-clean \
 flatpak build-bundle \
   --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
   flatpak-repo \
-  Mailficient-0.2.7-x86_64.flatpak \
+  Mailficient-0.2.8-x86_64.flatpak \
   com.local.Mailficient \
   master
 
-sha256sum Mailficient-0.2.7-x86_64.flatpak \
-  > Mailficient-0.2.7-x86_64.flatpak.sha256
+sha256sum Mailficient-0.2.8-x86_64.flatpak \
+  > Mailficient-0.2.8-x86_64.flatpak.sha256
 ```
 
 Build output, repositories, bundles, and local mail data are excluded from

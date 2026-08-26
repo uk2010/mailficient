@@ -51,6 +51,10 @@ public class AttachmentService : Object {
     }
 
     public void remove_private_copy (Attachment attachment) throws Error {
+        // Provider drafts retain a visible, blocking placeholder when an
+        // attachment could not be copied safely. Removing that placeholder has
+        // no local file to delete.
+        if (!attachment.is_downloaded ()) return;
         if (!is_private_path (attachment.path))
             throw new MailError.ATTACHMENT (
                 "The attachment is outside Mailficient's private draft storage");
@@ -67,6 +71,9 @@ public class AttachmentService : Object {
     public void validate_draft_attachments (Draft draft) throws MailError {
         int64 total = 0;
         foreach (var attachment in draft.attachments) {
+            if (!attachment.is_downloaded ())
+                throw new MailError.ATTACHMENT (
+                    "A provider draft attachment is not available locally. Remove it or reattach it before sending");
             if (!is_private_path (attachment.path))
                 throw new MailError.ATTACHMENT (
                     "A draft attachment is outside Mailficient's private storage");

@@ -49,11 +49,11 @@ require_file "$1"
 set -- "$sdk_lib"/libicudata.so.*
 require_file "$1"
 
-# The executable and the privately bundled EDS stack must come from the same
-# build environment. Mixing host EDS with the bundled provider can load two
-# incompatible Camel ABIs and crash as soon as Get Mail initializes IMAP.
+# The executable and the privately bundled EDS/calendar stack must come from
+# the same build environment. Mixing host EDS with the bundled provider can
+# load incompatible Camel or ECal ABIs when mail or calendar support starts.
 for soname in $(objdump -p "$mailficient_binary" |
-    awk '/NEEDED/ && $2 ~ /^lib(camel|ebook|ebook-contacts|edataserver|edata-book)-/ { print $2 }'); do
+    awk '/NEEDED/ && ($2 ~ /^lib(camel|ebook|ebook-contacts|edataserver|edata-book|ecal)-/ || $2 ~ /^libical(-glib)?\.so/) { print $2 }'); do
     require_file "$runtime_lib/$soname"
 done
 
@@ -65,7 +65,8 @@ install -d \
     "$stage/usr/share/dbus-1/services" \
     "$stage/usr/share/doc/mailficient" \
     "$stage/usr/share/icons/hicolor" \
-    "$stage/usr/share/metainfo"
+    "$stage/usr/share/metainfo" \
+    "$stage/etc/xdg/autostart"
 
 install -m 0755 "$mailficient_binary" "$private_lib/mailficient.real"
 install -m 0755 "$probe_binary" \
@@ -89,6 +90,10 @@ sed 's|^Exec=.*$|Exec=/usr/bin/mailficient|' \
     "$root_dir/data/com.local.Mailficient.desktop" \
     > "$stage/usr/share/applications/com.local.Mailficient.desktop"
 chmod 0644 "$stage/usr/share/applications/com.local.Mailficient.desktop"
+sed 's|^Exec=.*$|Exec=/usr/bin/mailficient --background|' \
+    "$root_dir/data/com.local.Mailficient.Background.desktop" \
+    > "$stage/etc/xdg/autostart/com.local.Mailficient.Background.desktop"
+chmod 0644 "$stage/etc/xdg/autostart/com.local.Mailficient.Background.desktop"
 sed 's|Exec=/app/bin/mailficient|Exec=/usr/bin/mailficient|' \
     "$root_dir/data/com.local.Mailficient.service" \
     > "$stage/usr/share/dbus-1/services/com.local.Mailficient.service"
@@ -127,13 +132,15 @@ install -m 0755 "$root_dir/packaging/debian/postrm" "$stage/DEBIAN/postrm"
 test "$(stat -c %a "$stage/usr/bin/mailficient")" = 755
 test "$(stat -c %a "$stage/usr/lib/mailficient/mailficient.real")" = 755
 test "$(stat -c %a "$stage/usr/share/applications/com.local.Mailficient.desktop")" = 644
+test "$(stat -c %a "$stage/etc/xdg/autostart/com.local.Mailficient.Background.desktop")" = 644
 test "$(stat -c %a "$stage/usr/share/dbus-1/services/com.local.Mailficient.service")" = 644
 if find "$stage" -xdev ! -type l -perm /0022 -print -quit | grep -q .; then
     printf '%s\n' "Package contains group- or world-writable files" >&2
     exit 1
 fi
 
-installed_size=$(du -sk "$stage/usr" | awk '{print $1}')
+installed_size=$(du -sk "$stage/usr" "$stage/etc" |
+    awk '{ total += $1 } END { print total }')
 sed \
     -e "s/@VERSION@/$package_version/" \
     -e "s/@ARCHITECTURE@/$architecture/" \

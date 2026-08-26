@@ -81,7 +81,8 @@ public class ReceivedAttachmentService : Object {
         var temporary = File.new_for_path (temporary_path);
         try {
             if (attachment.is_downloaded ()) {
-                var source = File.new_for_path (attachment.path);
+                var source = attachment.path.has_prefix ("resource://") ?
+                    File.new_for_uri (attachment.path) : File.new_for_path (attachment.path);
                 var info = yield source.query_info_async (
                     FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE,
                     FileQueryInfoFlags.NOFOLLOW_SYMLINKS, Priority.DEFAULT, cancellable);

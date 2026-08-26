@@ -7,10 +7,15 @@
   <project_license>GPL-3.0-or-later</project_license>
   <url type="homepage">https://github.com/uk2010/mailficient</url>
   <developer id="com.local.mailficient"><name>Mailficient contributors</name></developer>
-  <description><p>Mailficient provides a refined three-pane interface, secure message reading, composing, search, and offline-friendly account synchronization. GNOME Calendar is available from Favorites and is required for the calendar integration.</p></description>
+  <description><p>Mailficient provides a refined adaptive interface, secure message reading, rich composing, tasks, calendar invitation handling, advanced search and automation, and offline-friendly account synchronization.</p></description>
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
+    <release version="0.2.8" date="2026-08-25">
+      <description>
+        <p>Adds durable Undo Send and compose safeguards, Today and Planned tasks, calendar RSVP and meeting workflows, message identity warnings and safe unsubscribe review, advanced rules and Quick Steps, and bounded server-side search.</p>
+      </description>
+    </release>
     <release version="0.2.7" date="2026-08-23">
       <description>
         <p>Opening a message directly now clears and persists its unread state consistently.</p>

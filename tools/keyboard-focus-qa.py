@@ -16,7 +16,9 @@ def descendants(node):
 
 
 expected = sys.argv[1].casefold() if len(sys.argv) > 1 else ""
+require_tab = len(sys.argv) > 2 and sys.argv[2] == "--contains-tab"
 deadline = time.monotonic() + 5
+last_focus = None
 while time.monotonic() < deadline:
     desktop = pyatspi.Registry.getDesktop(0)
     app = next(
@@ -36,10 +38,20 @@ while time.monotonic() < deadline:
         if focused is not None:
             name = (focused.name or "").strip()
             role = focused.getRoleName()
-            if expected in name.casefold():
+            last_focus = (role, name)
+            text_matches = True
+            if require_tab:
+                try:
+                    text_matches = "\t" in focused.queryText().getText(0, -1)
+                except NotImplementedError:
+                    text_matches = False
+            if expected in name.casefold() and text_matches:
                 print(f"Focused control: {role} {name!r}")
                 raise SystemExit(0)
     time.sleep(0.1)
 
-print(f"No focused Mailficient control matched {expected!r}", file=sys.stderr)
+print(
+    f"No focused Mailficient control matched {expected!r}; last focus was {last_focus!r}",
+    file=sys.stderr,
+)
 raise SystemExit(1)

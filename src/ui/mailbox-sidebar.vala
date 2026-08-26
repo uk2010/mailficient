@@ -77,6 +77,8 @@ public class MailboxSidebar : Gtk.Box {
             var count = new Gtk.Label (mailbox.unread_count.to_string ());
             count.add_css_class ("mailbox-count");
             string unit = mailbox.role == MailboxRole.DRAFTS ? "draft" :
+                (mailbox.id == CachedMailRepository.TASK_TODAY_ID ||
+                 mailbox.id == CachedMailRepository.TASK_PLANNED_ID) ? "open task" :
                 mailbox.id == CachedMailRepository.LOCAL_OUTBOX_ID ? "queued message" : "unread message";
             count.tooltip_text = "%u %s%s".printf (mailbox.unread_count, unit,
                 mailbox.unread_count == 1 ? "" : "s");
@@ -300,9 +302,15 @@ public class MailboxSidebar : Gtk.Box {
 
     private void append_favorites (Gee.List<Mailbox> mailboxes, Gee.HashSet<string> favorites, bool demo) {
         var eligible = new Gee.HashMap<string, Mailbox> ();
-        foreach (var mailbox in mailboxes)
+        foreach (var mailbox in mailboxes) {
+            // Provider Drafts are synchronized into the editable local Drafts
+            // model. Never expose the raw cached MIME mailbox as a second,
+            // read-only favorite beside that authoritative view.
+            if (!demo && mailbox.account_id != "" && mailbox.role == MailboxRole.DRAFTS)
+                continue;
             if (demo || mailbox.account_id == "" || favorites.contains (mailbox.id))
                 eligible[mailbox.id] = mailbox;
+        }
 
         var appended = new Gee.HashSet<string> ();
         foreach (var id in favorite_order ()) {
@@ -356,9 +364,17 @@ public class MailboxSidebar : Gtk.Box {
                 announce_selection (mailbox);
             }
         });
-        foreach (var mailbox in mailboxes)
-            if (mailbox.account_id == account_id && mailbox.role != MailboxRole.VIP && mailbox.role != MailboxRole.FLAGGED)
-                append_mailbox (folders, mailbox);
+        foreach (var mailbox in mailboxes) {
+            if (mailbox.account_id != account_id || mailbox.role == MailboxRole.VIP ||
+                mailbox.role == MailboxRole.FLAGGED) continue;
+            if (mailbox.role == MailboxRole.DRAFTS) {
+                // Provider Drafts are mirrored into the unified editable
+                // Drafts favorite. Hiding the raw account folder avoids a
+                // misleading duplicate row with read-only cached MIME mail.
+                continue;
+            }
+            append_mailbox (folders, mailbox);
+        }
         expander.child = folders; row.set_child (expander); list.append (row);
     }
 

@@ -1,12 +1,13 @@
 name: mailficient
 base: core24
-version: '0.2.7'
+version: '0.2.8'
 title: Mailficient
 summary: A native desktop email client
 description: |
   Mailficient is a native GTK email client for IMAP and SMTP accounts. It
   provides bounded mailbox browsing, background synchronization, search,
-  conversations, attachments, rules, labels, templates, and an offline cache.
+  conversations, attachments, tasks, calendar invitations, rules, labels,
+  phishing protection, templates, and an offline cache.
 icon: data/icons/hicolor/512x512/apps/com.local.Mailficient.png
 contact: https://github.com/uk2010/mailficient/issues
 issues: https://github.com/uk2010/mailficient/issues
@@ -37,6 +38,9 @@ apps:
   mailficient:
     command: usr/bin/mailficient
     desktop: usr/share/applications/com.local.Mailficient.desktop
+    # BackgroundAutostartService installs this file in SNAP_USER_DATA only
+    # after a real-account Draft or Outbox item needs background work.
+    autostart: com.local.Mailficient.Background.desktop
     common-id: com.local.Mailficient
     extensions: [gnome]
     environment:
@@ -46,6 +50,8 @@ apps:
       - network-status
       - online-accounts-service
       - password-manager-service
+      - calendar-service
+      - contacts-service
       - home
       - removable-media
 
@@ -60,11 +66,14 @@ parts:
       - -Dwebkit=enabled
       - -Dsecret=enabled
       - -Daddressbook=enabled
+      - -Dcalendar=enabled
     build-packages:
       - valac
       - libcamel1.2-dev
+      - libecal2.0-dev
       - libebook1.2-dev
       - libgee-0.8-dev
+      - libical-dev
       - libjson-glib-dev
       - libsecret-1-dev
       - libssl-dev
@@ -72,12 +81,16 @@ parts:
       - libwebkitgtk-6.0-dev
       - libxml2-dev
     stage-packages:
+      - enchant-2
       - evolution-data-server
       - gpg
       - gpg-agent
+      - hunspell-en-us
       - libcamel-1.2-64t64
+      - libecal-2.0-3
       - libebook-1.2-21t64
       - libgee-0.8-2
+      - libical3t64
       - libjson-glib-1.0-0
       - libsecret-1-0
       - libssl3t64
@@ -100,6 +113,7 @@ parts:
         "$CRAFT_PART_INSTALL/usr/bin/mailficient" \
         "$CRAFT_PART_INSTALL/usr/bin/mailficient-addressbook-probe"
       chmod 0644 \
+        "$CRAFT_PART_INSTALL/etc/xdg/autostart/com.local.Mailficient.Background.desktop" \
         "$CRAFT_PART_INSTALL/usr/share/applications/com.local.Mailficient.desktop" \
         "$CRAFT_PART_INSTALL/usr/share/metainfo/com.local.Mailficient.metainfo.xml"
       find "$CRAFT_PART_INSTALL/usr/share/icons/hicolor" -type d -exec chmod 0755 {} +

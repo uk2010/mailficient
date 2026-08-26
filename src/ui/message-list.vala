@@ -99,7 +99,9 @@ public class MessageList : Gtk.Box {
             if (item != null) item.child = null;
         });
         var result = new Gtk.ListView (null, factory);
-        result.add_css_class ("boxed-list"); result.show_separators = true;
+        result.add_css_class ("boxed-list");
+        result.add_css_class ("message-list-items");
+        result.show_separators = true;
         result.activate.connect ((position) => {
             var message = model == null ? null : model.get_item (position) as Message;
             if (message != null) message_activated (message);
@@ -211,7 +213,13 @@ public class MessageList : Gtk.Box {
             var message = model.get_item (position) as Message;
             if (message != null && message.id == id) {
                 selection.select_item (position, true);
-                list.scroll_to (position, Gtk.ListScrollFlags.FOCUS, null);
+                // During initial/refresh rebinding the virtual model and
+                // selection already exist while Gtk.ListView is intentionally
+                // detached until the next idle turn. Selecting is still valid;
+                // asking the unbound view to scroll would trigger a fatal GTK
+                // assertion in QA builds.
+                if (list.model != null && position < list.model.get_n_items ())
+                    list.scroll_to (position, Gtk.ListScrollFlags.FOCUS, null);
                 return true;
             }
         }

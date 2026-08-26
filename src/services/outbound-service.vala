@@ -48,9 +48,11 @@ private class OperationDeadline : Object {
 public class OutboundService : Object {
     public const uint DEFAULT_CONNECTION_TIMEOUT_SECONDS = 30;
     public const uint DEFAULT_DELIVERY_TIMEOUT_SECONDS = 120;
+    public const uint PREPARATION_LEASE_GRACE_SECONDS = 60;
     public signal void delivered (string draft_id);
     public signal void delivery_failed (string draft_id, UserFacingError error);
     public signal void sent_filing_failed (string draft_id, string detail);
+    public signal void background_delivery_needed (string account_id);
     private CacheDatabase cache;
     private MailEngine? engine;
     private AttachmentService attachment_service;
@@ -69,19 +71,101 @@ public class OutboundService : Object {
     }
 
     public async SendDisposition deliver (Draft draft, Cancellable? cancellable = null) throws Error {
+        return yield deliver_with_authorization (draft, false, cancellable);
+    }
+
+    public async SendDisposition deliver_confirmed_resend (
+        Draft draft, Cancellable? cancellable = null) throws Error {
+        return yield deliver_with_authorization (draft, true, cancellable);
+    }
+
+    // The Undo Send window is a durable Outbox deadline, not an in-memory UI
+    // timer. Foreground and background workers both use next_attempt_at and
+    // therefore cannot acquire the SMTP preparation lease before it expires.
+    public int64 defer_for_undo (Draft draft, int seconds,
+                                 bool allow_uncertain_resend = false) throws Error {
+        draft.validate_for_send ();
+        attachment_service.validate_draft_attachments (draft);
+        int bounded_seconds = int.max (5, int.min (30, seconds));
+        int64 undo_until = new DateTime.now_utc ().to_unix () + bounded_seconds;
+        cache.queue_for_undo_send (draft, undo_until, allow_uncertain_resend);
+        request_background_delivery (draft.account_id);
+        if (scheduler_started) arm_account (draft.account_id);
+        return undo_until;
+    }
+
+    public bool cancel_undo_send (string draft_id, string account_id) throws Error {
+        bool cancelled = cache.cancel_undo_send (draft_id);
+        if (cancelled) {
+            outbox_changed (account_id);
+            // A fresh send returns to Drafts and may still need its provider-side
+            // draft synchronized. Wake the same durable worker that owns that
+            // work instead of waiting for its next periodic pass.
+            request_background_delivery (account_id);
+        }
+        return cancelled;
+    }
+
+    private async SendDisposition deliver_with_authorization (
+        Draft draft, bool allow_uncertain_resend, Cancellable? cancellable) throws Error {
         draft.validate_for_send ();
         // Durability precedes all network activity. A crash or connection failure
         // after this point leaves an explicit retryable outbox record.
-        cache.queue_for_sending (draft);
+        cache.queue_for_sending (draft, 0, allow_uncertain_resend);
+        request_background_delivery (draft.account_id);
+        return yield attempt_queued (draft, true, cancellable);
+    }
+
+    internal async SendDisposition attempt_queued (Draft draft, bool due_only,
+                                                    Cancellable? cancellable) throws Error {
+        // Demo and queue-only builds still perform the same attachment preflight,
+        // but do not take a lease that no SMTP worker can complete.
+        if (engine == null || draft.account_id == "demo-account" ||
+            cache.find_account (draft.account_id) == null) {
+            try { attachment_service.validate_draft_attachments (draft); }
+            catch (Error error) {
+                cache.record_send_failure (draft.id, error.message);
+                if (error is MailError.ATTACHMENT) throw error;
+                throw new MailError.ATTACHMENT (error.message);
+            }
+            return SendDisposition.QUEUED;
+        }
+
+        string lease_owner = Uuid.string_random ();
+        int64 lease_until = new DateTime.now_utc ().to_unix () +
+            (int64) connection_timeout_seconds + (int64) PREPARATION_LEASE_GRACE_SECONDS;
+        if (!cache.claim_queued_send (draft.id, lease_owner, lease_until, due_only))
+            return SendDisposition.QUEUED;
+
+        // list_pending_sends() and a foreground composer can race: the worker's
+        // in-memory Draft may predate the autosave that committed immediately
+        // before this claim. The PREPARING transition now excludes all writers,
+        // so reload under the claim and use only that durable snapshot for MIME,
+        // SMTP, and final cleanup.
+        Draft? durable_draft;
+        try { durable_draft = cache.load_draft (draft.id); }
+        catch (Error error) {
+            cache.record_preparation_failure (draft.id, lease_owner, error.message);
+            throw error;
+        }
+        if (durable_draft == null) {
+            var missing = new MailError.STORAGE ("The queued message disappeared before it could be prepared");
+            cache.record_preparation_failure (draft.id, lease_owner, missing.message);
+            throw missing;
+        }
+        draft = durable_draft;
+
         try { attachment_service.validate_draft_attachments (draft); }
         catch (Error error) {
-            cache.record_send_failure (draft.id, error.message);
+            cache.record_preparation_failure (draft.id, lease_owner, error.message);
             if (error is MailError.ATTACHMENT) throw error;
             throw new MailError.ATTACHMENT (error.message);
         }
-        if (engine == null || draft.account_id == "demo-account") return SendDisposition.QUEUED;
         var account = cache.find_account (draft.account_id);
-        if (account == null) return SendDisposition.QUEUED;
+        if (account == null) {
+            cache.record_preparation_failure (draft.id, lease_owner, "The sending account is no longer available");
+            return SendDisposition.QUEUED;
+        }
         var connection_deadline = new OperationDeadline (connection_timeout_seconds, cancellable);
         try {
             try { yield engine.connect_account (account, connection_deadline.cancellable); }
@@ -91,14 +175,17 @@ public class OutboundService : Object {
             Error effective_error = connection_deadline.timed_out ?
                 new MailError.TIMEOUT ("The mail server did not finish connecting within %u seconds".printf (
                     connection_timeout_seconds)) : error;
-            cache.record_send_failure (draft.id, effective_error.message);
+            cache.record_preparation_failure (draft.id, lease_owner, effective_error.message);
             if (effective_error is MailError.AUTHENTICATION || effective_error is MailError.TLS ||
                 effective_error is MailError.OFFLINE || effective_error is MailError.TIMEOUT ||
                 effective_error is MailError.RATE_LIMITED || effective_error is MailError.CANCELLED)
                 throw effective_error;
             throw new MailError.SEND_FAILED (effective_error.message);
         }
-        cache.mark_send_started (draft.id);
+        // This conditional transition is the last local operation before SMTP.
+        // If another process recovered an expired lease, we stop here and that
+        // process remains the sole sender.
+        cache.mark_send_started (draft.id, lease_owner);
         SendResult result = new SendResult ();
         var delivery_deadline = new OperationDeadline (delivery_timeout_seconds, cancellable);
         try {
@@ -142,7 +229,20 @@ public class OutboundService : Object {
             throw new MailError.INVALID_MESSAGE ("Choose a future delivery time");
         attachment_service.validate_draft_attachments (draft);
         cache.queue_for_sending (draft, not_before);
+        request_background_delivery (draft.account_id);
         if (scheduler_started) arm_account (draft.account_id);
+    }
+
+    private void request_background_delivery (string account_id) {
+        try {
+            // Queue-only/demo identities remain fully testable, but they have
+            // no provider work and must never spawn a resident process or ask
+            // the Flatpak portal for background access.
+            if (cache.find_account (account_id) != null)
+                background_delivery_needed (account_id);
+        } catch (MailError error) {
+            warning ("Could not inspect background Outbox activation: %s", error.message);
+        }
     }
 
     public async void retry_pending (string account_id, bool due_only = true,
@@ -155,7 +255,7 @@ public class OutboundService : Object {
             foreach (var draft in cache.list_pending_sends (account_id, due_only)) {
                 if (cancellable != null) cancellable.set_error_if_cancelled ();
                 try {
-                    yield deliver (draft, cancellable);
+                    yield attempt_queued (draft, due_only, cancellable);
                 } catch (Error error) {
                     delivery_failed (draft.id, UserFacingError.from_error (error));
                 }

@@ -19,11 +19,27 @@ public class Draft : Object {
     public bool encrypt_message { get; set; default = false; }
     public string security_identity { get; set; default = ""; }
     public int64 modified_at { get; set; default = new DateTime.now_utc ().to_unix (); }
+    // Revision is monotonic even when several autosaves happen within the same
+    // second.  Remote Drafts use it as an idempotency key; modified_at remains
+    // the human-facing sort timestamp.
+    public int64 revision { get; set; default = 1; }
+    public string remote_mailbox { get; set; default = ""; }
+    public string remote_uid { get; set; default = ""; }
+    public int64 remote_revision { get; set; default = 0; }
+    public string remote_internet_message_id { get; set; default = ""; }
+    public string remote_content_fingerprint { get; set; default = ""; }
+    // Third-party drafts discovered on the provider stay non-owned until the
+    // user edits or sends them. Only owned copies participate in remote delete.
+    public bool remote_owned { get; set; default = false; }
     public bool dirty { get; private set; default = true; }
     public Gee.ArrayList<Attachment> attachments { get; private set; default = new Gee.ArrayList<Attachment> (); }
 
     public Draft (string account_id, string? id = null) { Object (account_id: account_id, id: id ?? Uuid.string_random ()); }
-    public void touch () { modified_at = new DateTime.now_utc ().to_unix (); dirty = true; }
+    public void touch () {
+        modified_at = new DateTime.now_utc ().to_unix ();
+        revision = int64.max (1, revision + 1);
+        dirty = true;
+    }
     public void mark_saved () { dirty = false; }
     public void add_attachment (Attachment attachment) { attachments.add (attachment); touch (); }
     public void remove_attachment (Attachment attachment) { attachments.remove (attachment); touch (); }
@@ -49,5 +65,14 @@ public class Draft : Object {
     }
 
     public bool can_send () { try { validate_for_send (); return true; } catch (Error error) { return false; } }
+
+    public string remote_message_id () {
+        return remote_message_id_for (id, revision);
+    }
+
+    public static string remote_message_id_for (string draft_id, int64 revision) {
+        return "mailficient-draft-%s-%s@mailficient.local".printf (
+            draft_id, int64.max (1, revision).to_string ());
+    }
 }
 }

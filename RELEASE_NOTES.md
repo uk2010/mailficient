@@ -1,7 +1,34 @@
+# Mailficient 0.2.8
+
+Mailficient 0.2.8 completes the current desktop-productivity roadmap with new
+planning, calendar, safety, automation, search, and background-delivery tools.
+
+Highlights:
+
+- Adds local spell checking, forgotten-attachment warnings, and a durable,
+  configurable Undo Send interval
+- Adds Today and Planned task views with due dates, reminders, recurrence, and
+  message-linked follow-up actions
+- Handles calendar invitations with identity-aware RSVP controls and creates
+  reviewable meetings through Evolution Data Server and GNOME Calendar
+- Shows message-identity and phishing warnings, bounded raw headers, Safe
+  Senders, reviewable unsubscribe actions, and phishing reporting
+- Adds ordered multi-condition rules, reusable Quick Steps, richer local search,
+  and explicit bounded server-side search
+- Refines adaptive layouts, keyboard navigation, screen-reader labels, release
+  metadata, and native background-delivery packaging
+- Clears and persists unread state consistently when a message is opened
+  directly
+
 # Mailficient 0.2.7
 
 The 0.2.7 build fixes read-state handling when a message is opened directly,
 so the unread indicator is cleared and the read state is persisted consistently.
+
+# Mailficient 0.2.6
+
+Mailficient 0.2.6 keeps unread indicators, mailbox counts, and read-action
+labels synchronized.
 
 # Mailficient 0.2.5
 

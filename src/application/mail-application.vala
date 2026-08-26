@@ -7,13 +7,16 @@ public class MailApplication : Adw.Application {
     private MailEngine? mail_engine;
     private AttachmentService? attachment_service;
     private ReceivedAttachmentService? received_attachment_service;
+    private CalendarIntegrationService? calendar_service;
     private DraftLifecycleService? draft_lifecycle;
     private OutboundService? outbound_service;
+    private BackgroundAutostartService background_autostart = new BackgroundAutostartService ();
     private AccountSyncService? sync_service;
     private FolderService? folder_service;
     private MailSettingsStore settings;
     private CacheMaintenanceService? cache_maintenance;
     private NotificationService notifications;
+    private TaskReminderService? task_reminders;
     private OnlineAccountService online_accounts;
     private CredentialCleanupService? credential_cleanup;
     private RemoteContentPolicy? remote_content_policy;
@@ -61,6 +64,13 @@ public class MailApplication : Adw.Application {
             if (window != null) window.open_message (parameter.get_string ());
         });
         add_action (open_message);
+        var open_task = new SimpleAction ("open-task", VariantType.INT64);
+        open_task.activate.connect ((parameter) => {
+            if (parameter == null) return;
+            activate ();
+            if (window != null) window.open_task (parameter.get_int64 ());
+        });
+        add_action (open_task);
         var preferences_action = new SimpleAction ("preferences", null);
         preferences_action.activate.connect (() => { activate (); if (window != null) window.show_preferences (); });
         add_action (preferences_action);
@@ -84,6 +94,14 @@ public class MailApplication : Adw.Application {
                     throw new MailError.STORAGE ("Demo diagnostic: SQLite reported that mail.db is not a database");
                 string directory = LocalDataMigration.prepare (Environment.get_user_data_dir ());
                 cache = new CacheDatabase (Path.build_filename (directory, "mail.db"));
+                cache.remote_draft_work_queued.connect ((account_id) => {
+                    try {
+                        if (cache.find_account (account_id) != null)
+                            background_autostart.ensure_available.begin ();
+                    } catch (MailError error) {
+                        warning ("Could not inspect background Drafts activation: %s", error.message);
+                    }
+                });
                 settings = new MailSettingsStore (cache);
                 apply_appearance ();
                 credential_cleanup = new CredentialCleanupService (cache, credentials);
@@ -118,7 +136,10 @@ public class MailApplication : Adw.Application {
                         var queued = new Draft ("demo-account"); queued.to = "Noah Williams <noah@example.org>";
                         queued.subject = "Re: Dinner next week?"; queued.body_text = "Thursday at seven works perfectly. See you then!";
                         cache.queue_for_sending (queued);
-                        if (Environment.get_variable ("MAILFICIENT_QA_OUTBOX_ACCEPTED") == "1") {
+                        if (Environment.get_variable ("MAILFICIENT_QA_OUTBOX_PREPARING") == "1") {
+                            cache.claim_queued_send (queued.id, "visual-qa",
+                                new DateTime.now_utc ().to_unix () + 300, false);
+                        } else if (Environment.get_variable ("MAILFICIENT_QA_OUTBOX_ACCEPTED") == "1") {
                             cache.mark_send_started (queued.id);
                             cache.mark_send_accepted (queued.id);
                         } else if (Environment.get_variable ("MAILFICIENT_QA_OUTBOX_REJECTED") == "1") {
@@ -146,26 +167,60 @@ public class MailApplication : Adw.Application {
                     credential_cleanup, camel_engine);
 #endif
                 outbound_service = new OutboundService (cache, mail_engine, attachment_service);
+                outbound_service.background_delivery_needed.connect ((account_id) => {
+                    try {
+                        if (cache.find_account (account_id) != null)
+                            background_autostart.ensure_available.begin ();
+                    } catch (MailError error) {
+                        warning ("Could not inspect background Outbox activation: %s", error.message);
+                    }
+                });
                 outbound_service.start_scheduler ();
+                bool pending_background_work = false;
+                foreach (var account in cache.list_accounts ()) {
+                    if (cache.next_outbox_attempt (account.id) != null ||
+                        cache.has_pending_remote_draft_work (account.id)) {
+                        pending_background_work = true;
+                        break;
+                    }
+                }
+                if (pending_background_work)
+                    background_autostart.ensure_available.begin ();
 #if HAVE_CAMEL
                 sync_service = new AccountSyncService (cache, mail_engine, outbound_service,
-                    new JunkFilterService (cache));
-                sync_service.new_message.connect ((message) => notifications.notify_new_message (message));
+                    new JunkFilterService (cache), attachment_service);
+                // AccountSyncService already bounds and aggregates arrivals
+                // across multi-session history checks. Listening only to the
+                // summary prevents duplicate per-message notifications.
+                sync_service.new_mail_summary.connect ((summary) =>
+                    notifications.notify_new_mail (summary));
 #endif
                 folder_service = new FolderService (cache, mail_engine, sync_service);
                 received_attachment_service = new ReceivedAttachmentService (cache,
                     attachment_service, mail_engine);
+                CalendarBackend calendar_backend;
+#if HAVE_CALENDAR
+                calendar_backend = new EdsCalendarBackend ();
+#else
+                calendar_backend = new DesktopCalendarBackend ();
+#endif
+                calendar_service = new CalendarIntegrationService (cache,
+                    received_attachment_service, calendar_backend);
                 draft_lifecycle = new DraftLifecycleService (cache, attachment_service);
             } catch (Error error) {
                 warning ("Local mail cache unavailable: %s", error.message);
                 show_startup_error (error); return;
             }
-            var search_service = new MailSearchService (cache);
+            var search_service = new MailSearchService (cache,
+                mail_engine as RemoteMailSearchProvider, mail_engine);
             window = new MailWindow (this, repository, search_service, cache, attachment_service,
-                received_attachment_service, draft_lifecycle,
+                received_attachment_service, calendar_service, draft_lifecycle,
                 outbound_service, settings, remote_content_policy, account_provisioner,
                 credentials, credential_cleanup, mail_engine, sync_service, folder_service,
                 online_accounts);
+            task_reminders = new TaskReminderService (cache);
+            task_reminders.reminder_due.connect ((task) => notifications.notify_task_reminder (task));
+            task_reminders.start ();
             created_window = true;
             credential_cleanup.retry_pending.begin ();
             Idle.add (() => {
@@ -245,6 +300,8 @@ public class MailApplication : Adw.Application {
         received_attachment_service = null; draft_lifecycle = null; outbound_service = null;
         sync_service = null; folder_service = null; cache_maintenance = null;
         credential_cleanup = null; remote_content_policy = null; account_provisioner = null;
+        if (task_reminders != null) task_reminders.stop ();
+        task_reminders = null;
         onboarding_presented = false;
     }
 
@@ -303,6 +360,7 @@ public class MailApplication : Adw.Application {
             NetworkMonitor.get_default ().disconnect (network_changed_handler);
         startup_sync_gate = null;
         if (outbound_service != null) outbound_service.stop_scheduler ();
+        if (task_reminders != null) task_reminders.stop ();
         if (sync_service != null) sync_service.cancel ();
         base.shutdown ();
     }

@@ -6,6 +6,7 @@ public class Message : Object {
     public string sender_address { get; construct; }
     public string recipients { get; construct; }
     public string cc_recipients { get; set; default = ""; }
+    public string bcc_recipients { get; set; default = ""; }
     public string subject { get; construct; }
     public string preview { get; construct; }
     public string body { get; construct; }
@@ -25,7 +26,16 @@ public class Message : Object {
     public string in_reply_to { get; construct; }
     public string references { get; construct; }
     public int64 date_unix { get; set; }
+    public int64 message_size { get; set; }
     public string security_status { get; set; default = ""; }
+    // Security and list-management metadata is intentionally separate from
+    // the rendered body. Raw headers are bounded by the mail engine before
+    // they reach this model and are displayed as plain, selectable text.
+    public string reply_to { get; set; default = ""; }
+    public string authentication_results { get; set; default = ""; }
+    public string list_unsubscribe { get; set; default = ""; }
+    public string list_unsubscribe_post { get; set; default = ""; }
+    public string raw_headers { get; set; default = ""; }
     public Gee.ArrayList<Attachment> attachments { get; private set; default = new Gee.ArrayList<Attachment> (); }
     public Gee.ArrayList<MailLabel> labels { get; private set; default = new Gee.ArrayList<MailLabel> (); }
 

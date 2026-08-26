@@ -5,11 +5,20 @@ public class ReadingPane : Gtk.Box {
     public signal void attachment_failed (Error error);
     public signal void remote_content_failed (Error error);
     public signal void remote_sender_trusted (string address);
+    public signal void safe_sender_changed (string address, bool safe);
+    public signal void phishing_report_requested (Message message);
+    public signal void unsubscribe_requested (Message message, UnsubscribeTarget target);
+    public signal void calendar_action_completed (string message);
+    public signal void calendar_action_failed (Error error);
     public signal void add_account_requested ();
     private Gtk.Box content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
     private Gtk.ScrolledWindow scroller = new Gtk.ScrolledWindow ();
     private ReceivedAttachmentService attachment_service;
     private RemoteContentPolicy remote_content_policy;
+    private CalendarIntegrationService calendar_service;
+    private CacheDatabase cache;
+    private MessageSecurityService message_security = new MessageSecurityService ();
+    private Cancellable? calendar_cancellable;
     private Message? current;
     private bool qa_preview_opened;
     private bool always_load_remote_content;
@@ -23,10 +32,15 @@ public class ReadingPane : Gtk.Box {
     private Gee.ArrayList<ulong> html_link_handlers = new Gee.ArrayList<ulong> ();
     private int constrained_width;
 
-    public ReadingPane (ReceivedAttachmentService attachment_service, RemoteContentPolicy remote_content_policy) {
+    public ReadingPane (ReceivedAttachmentService attachment_service,
+                        RemoteContentPolicy remote_content_policy,
+                        CalendarIntegrationService calendar_service,
+                        CacheDatabase cache) {
         Object (orientation: Gtk.Orientation.VERTICAL);
         this.attachment_service = attachment_service;
         this.remote_content_policy = remote_content_policy;
+        this.calendar_service = calendar_service;
+        this.cache = cache;
         set_size_request (0, -1);
         hexpand = true;
         add_css_class ("reading-pane");
@@ -74,6 +88,7 @@ public class ReadingPane : Gtk.Box {
         this.full_html_formatting = full_html_formatting;
         replace_scroll_adjustment ();
         clear ();
+        calendar_cancellable = new Cancellable ();
         var header = new Gtk.Box (Gtk.Orientation.VERTICAL, 7); header.hexpand = true; header.halign = Gtk.Align.FILL; header.add_css_class ("message-header");
         var subject_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8); subject_line.hexpand = true; subject_line.halign = Gtk.Align.FILL;
         var subject = new Gtk.Label (message.subject); subject.xalign = 0; subject.wrap = true; subject.hexpand = true; subject.add_css_class ("message-subject"); subject_line.append (subject);
@@ -87,6 +102,13 @@ public class ReadingPane : Gtk.Box {
             weak_vip.tooltip_text = weak_vip.active ? "Remove sender from VIPs" : "Add sender to VIPs";
             Accessibility.label (weak_vip, weak_vip.tooltip_text); vip_toggled (message, weak_vip.active);
         });
+        var create_meeting = new Gtk.Button.from_icon_name ("appointment-new-symbolic");
+        create_meeting.add_css_class ("flat");
+        create_meeting.tooltip_text = "Create Meeting from Email";
+        Accessibility.label (create_meeting, "Create meeting from this email");
+        create_meeting.clicked.connect (() =>
+            create_meeting_from_email.begin (message, create_meeting));
+        subject_line.append (create_meeting);
         subject_line.append (vip); header.append (subject_line);
         if (message.labels.size > 0) {
             var labels = new Gtk.FlowBox (); labels.selection_mode = Gtk.SelectionMode.NONE;
@@ -151,7 +173,14 @@ public class ReadingPane : Gtk.Box {
         time.ellipsize = Pango.EllipsizeMode.END; time.max_width_chars = 18; sender_line.append (time);
         header_button.child = sender_line; header_button.tooltip_text = expanded ? "Message details" : "Expand message";
         Accessibility.label (header_button, "%s message from %s".printf (expanded ? "Message details" : "Expand", message.sender_name));
-        card.append (header_button);
+        var header_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 2);
+        header_actions.hexpand = true; header_actions.append (header_button);
+        var details_button = new Gtk.Button.from_icon_name ("security-high-symbolic");
+        details_button.add_css_class ("flat"); details_button.valign = Gtk.Align.CENTER;
+        details_button.tooltip_text = "Message security and raw headers";
+        Accessibility.label (details_button, "View message security and raw headers");
+        details_button.clicked.connect (() => show_security_details.begin (message));
+        header_actions.append (details_button); card.append (header_actions);
         var revealer = new Gtk.Revealer (); revealer.hexpand = true; revealer.halign = Gtk.Align.FILL; revealer.reveal_child = expanded; revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
         var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); message_content.hexpand = true; message_content.halign = Gtk.Align.FILL; revealer.child = message_content;
         bool content_loaded = false;
@@ -178,11 +207,14 @@ public class ReadingPane : Gtk.Box {
     }
 
     private void populate_message_content (Message message, Gtk.Box message_content) {
+        append_identity_security (message, message_content);
         if (message.security_status != "") {
             var security = new Adw.Banner (message.security_status);
             security.revealed = true; security.add_css_class ("security-notice");
             message_content.append (security);
         }
+        append_unsubscribe (message, message_content);
+        append_calendar_invitations (message, message_content);
         HtmlMessageView? html_view = null;
         if (message.body_html != "") {
             uint view_generation = message_generation;
@@ -309,7 +341,7 @@ public class ReadingPane : Gtk.Box {
         current = null; clear ();
         var status = new Adw.StatusPage (); status.icon_name = "dialog-warning-symbolic";
         status.title = error.title; status.description = "%s\n%s".printf (error.description, error.suggestion);
-        status.vexpand = true;
+        status.vexpand = true; status.add_css_class ("error-state");
         if (error.technical_detail != "") {
             var details = new Gtk.Expander ("Technical Details");
             details.halign = Gtk.Align.CENTER;
@@ -319,6 +351,8 @@ public class ReadingPane : Gtk.Box {
         content.append (status);
     }
     private void clear () {
+        if (calendar_cancellable != null) calendar_cancellable.cancel ();
+        calendar_cancellable = null;
         current_html_view = null;
         for (int index = 0; index < html_views.size; index++) {
             var view = html_views[index];
@@ -352,15 +386,251 @@ public class ReadingPane : Gtk.Box {
                 Markup.escape_text (message.timestamp));
     }
 
+    private bool sender_is_safe (Message message) {
+        try { return cache.is_safe_sender (message.sender_address); }
+        catch (Error error) { warning ("Could not inspect Safe Senders: %s", error.message); return false; }
+    }
+
+    private void append_identity_security (Message message, Gtk.Box target) {
+        var assessment = message_security.assess (message, sender_is_safe (message));
+        if ((int) assessment.level < (int) MessageThreatLevel.CAUTION) return;
+        var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
+        card.hexpand = true; card.halign = Gtk.Align.FILL;
+        card.set_margin_start (30); card.set_margin_end (30);
+        card.set_margin_top (12); card.set_margin_bottom (4);
+        card.add_css_class ("card"); card.add_css_class (assessment.level == MessageThreatLevel.DANGER ?
+            "message-security-danger" : "message-security-warning");
+        var heading = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        heading.append (new Gtk.Image.from_icon_name (assessment.level == MessageThreatLevel.DANGER ?
+            "security-low-symbolic" : "dialog-warning-symbolic"));
+        var title = new Gtk.Label (assessment.title); title.xalign = 0; title.wrap = true;
+        title.hexpand = true; title.add_css_class ("heading"); heading.append (title); card.append (heading);
+        int displayed = 0;
+        foreach (var finding in assessment.findings) {
+            if (displayed++ >= 3) break;
+            var detail = new Gtk.Label (finding); detail.xalign = 0; detail.wrap = true;
+            detail.selectable = true; card.append (detail);
+        }
+        var actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6); actions.halign = Gtk.Align.START;
+        var details = new Gtk.Button.with_mnemonic ("_Security Details");
+        Accessibility.label (details, "View message security details and raw headers");
+        details.clicked.connect (() => show_security_details.begin (message)); actions.append (details);
+        var report = new Gtk.Button.with_mnemonic ("Report _Phishing"); report.add_css_class ("destructive-action");
+        Accessibility.label (report, "Report this message as phishing");
+        report.clicked.connect (() => phishing_report_requested (message)); actions.append (report);
+        card.append (actions); target.append (card);
+    }
+
+    private void append_unsubscribe (Message message, Gtk.Box target) {
+        var targets = message_security.unsubscribe_targets (message); if (targets.size == 0) return;
+        var card = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        card.hexpand = true; card.halign = Gtk.Align.FILL;
+        card.set_margin_start (30); card.set_margin_end (30);
+        card.set_margin_top (10); card.set_margin_bottom (4);
+        card.add_css_class ("card"); card.add_css_class ("unsubscribe-card");
+        card.append (new Gtk.Image.from_icon_name ("mail-unread-symbolic"));
+        var text = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); text.hexpand = true;
+        var title = new Gtk.Label ("Mailing list message"); title.xalign = 0; title.add_css_class ("heading");
+        var note = new Gtk.Label ("The sender provided a standard unsubscribe option.");
+        note.xalign = 0; note.wrap = true; note.add_css_class ("dim-label"); text.append (title); text.append (note);
+        card.append (text);
+        var button = new Gtk.Button.with_mnemonic ("_Unsubscribe…");
+        Accessibility.label (button, "Choose how to unsubscribe from this mailing list");
+        button.clicked.connect (() => choose_unsubscribe.begin (message, targets)); card.append (button);
+        target.append (card);
+    }
+
+    private async void show_security_details (Message message) {
+        var parent = get_root () as Gtk.Window; if (parent == null) return;
+        bool safe = sender_is_safe (message); var assessment = message_security.assess (message, safe);
+        var content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 10);
+        var summary = new Gtk.Label (assessment.title); summary.xalign = 0; summary.wrap = true;
+        summary.add_css_class ("heading"); content_box.append (summary);
+        foreach (var finding in assessment.findings) {
+            var label = new Gtk.Label ("• " + finding); label.xalign = 0; label.wrap = true;
+            label.selectable = true; content_box.append (label);
+        }
+        var caveat = new Gtk.Label (assessment.authentication_reported ?
+            "Authentication results are reported by the receiving mail system. A pass is useful context, not an instruction to trust links or attachments." :
+            "No SPF, DKIM, or DMARC result was retained for this message. Inspect the headers and sender before acting on sensitive requests.");
+        caveat.xalign = 0; caveat.wrap = true; caveat.add_css_class ("dim-label"); content_box.append (caveat);
+        var heading = new Gtk.Label ("Raw message headers (bounded to 64 KiB)");
+        heading.xalign = 0; heading.add_css_class ("heading"); content_box.append (heading);
+        var headers = new Gtk.TextView (); headers.editable = false; headers.cursor_visible = false;
+        headers.monospace = true; headers.wrap_mode = Gtk.WrapMode.NONE;
+        headers.buffer.text = MessageSecurityService.headers_for_display (message);
+        Accessibility.label (headers, "Raw message headers");
+        var scroller = new Gtk.ScrolledWindow (); scroller.child = headers;
+        scroller.set_policy (Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC);
+        scroller.set_size_request (680, 300); scroller.add_css_class ("card"); content_box.append (scroller);
+        var dialog = new Adw.AlertDialog ("Message Security", "Review identity signals and original header fields.");
+        dialog.extra_child = content_box; dialog.add_response ("close", "Close");
+        dialog.add_response ("copy", "Copy Headers");
+        if (RecipientParser.is_valid_address (message.sender_address))
+            dialog.add_response ("safe", safe ? "Remove Safe Sender" : "Add Safe Sender");
+        dialog.add_response ("phishing", "Report Phishing");
+        dialog.set_response_appearance ("phishing", Adw.ResponseAppearance.DESTRUCTIVE);
+        dialog.default_response = "close"; dialog.close_response = "close";
+        string response = yield dialog.choose (parent, null);
+        if (response == "copy") get_clipboard ().set_text (headers.buffer.text);
+        else if (response == "safe") {
+            try {
+                cache.set_safe_sender (message.sender_address, !safe);
+                safe_sender_changed (message.sender_address, !safe);
+                if (current != null && current.id == message.id) show_message (message);
+            } catch (Error error) { remote_content_failed (error); }
+        } else if (response == "phishing") phishing_report_requested (message);
+    }
+
+    private async void choose_unsubscribe (Message message, Gee.List<UnsubscribeTarget> targets) {
+        if (targets.size == 1) { unsubscribe_requested (message, targets[0]); return; }
+        var parent = get_root () as Gtk.Window; if (parent == null) return;
+        var dialog = new Adw.AlertDialog ("Unsubscribe", "Choose the method advertised by this mailing list.");
+        dialog.add_response ("cancel", "Cancel"); dialog.close_response = "cancel";
+        for (int index = 0; index < targets.size; index++)
+            dialog.add_response ("target-%d".printf (index), targets[index].label);
+        string response = yield dialog.choose (parent, null);
+        if (!response.has_prefix ("target-")) return;
+        int selected = -1;
+        if (int.try_parse (response.substring (7), out selected) && selected >= 0 && selected < targets.size)
+            unsubscribe_requested (message, targets[selected]);
+    }
+
+    private void append_calendar_invitations (Message message, Gtk.Box target) {
+        int displayed = 0;
+        foreach (var attachment in message.attachments) {
+            if (!attachment.is_calendar_invitation ()) continue;
+            if (displayed++ >= CalendarIntegrationService.MAX_DISPLAYED_INVITATIONS) break;
+            var host = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            host.hexpand = true; host.halign = Gtk.Align.FILL;
+            var loading = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+            loading.set_margin_start (30); loading.set_margin_end (30);
+            loading.set_margin_top (16); loading.set_margin_bottom (8);
+            loading.add_css_class ("card"); loading.add_css_class ("calendar-invitation-card");
+            var spinner = new Gtk.Spinner (); spinner.spinning = true;
+            loading.append (spinner);
+            var label = new Gtk.Label ("Reading calendar invitation…");
+            label.xalign = 0; label.hexpand = true; loading.append (label);
+            host.append (loading); target.append (host);
+            uint generation = message_generation;
+            var cancellable = calendar_cancellable;
+            load_calendar_card.begin (message, attachment, host, generation, cancellable);
+        }
+    }
+
+    private async void load_calendar_card (Message message, Attachment attachment,
+                                           Gtk.Box host, uint generation,
+                                           Cancellable? cancellable) {
+        try {
+            var invitation = yield calendar_service.load_invitation (
+                message, attachment, cancellable);
+            if (generation != message_generation || host.get_parent () == null) return;
+            while (host.get_first_child () != null)
+                host.remove ((Gtk.Widget) host.get_first_child ());
+            var card = new CalendarInvitationCard (message, invitation,
+                calendar_service.account_attendee (message, invitation),
+                calendar_service.can_respond_directly);
+            card.response_requested.connect ((participation) =>
+                confirm_calendar_response.begin (message, invitation, participation, card));
+            card.open_requested.connect (() =>
+                open_parsed_invitation.begin (invitation));
+            host.append (card);
+            reset_scroll_to_top ();
+        } catch (Error error) {
+            if (error is IOError.CANCELLED || generation != message_generation ||
+                host.get_parent () == null) return;
+            while (host.get_first_child () != null)
+                host.remove ((Gtk.Widget) host.get_first_child ());
+            var notice = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+            notice.set_margin_start (30); notice.set_margin_end (30);
+            notice.set_margin_top (16); notice.set_margin_bottom (8);
+            notice.add_css_class ("card"); notice.add_css_class ("calendar-invitation-card");
+            notice.append (new Gtk.Image.from_icon_name ("dialog-warning-symbolic"));
+            var label = new Gtk.Label (
+                "Invitation details are unavailable. You can still open the original .ics attachment.");
+            label.xalign = 0; label.wrap = true; label.hexpand = true;
+            notice.append (label); host.append (notice);
+        }
+    }
+
+    private async void confirm_calendar_response (
+        Message message, CalendarInvitation invitation,
+        CalendarParticipation participation, CalendarInvitationCard card) {
+        var parent = get_root () as Gtk.Window;
+        if (parent == null || card.get_parent () == null) return;
+        string action = participation == CalendarParticipation.ACCEPTED ? "Accept" :
+            (participation == CalendarParticipation.TENTATIVE ? "Mark Tentative" : "Decline");
+        var send = new Gtk.CheckButton.with_label ("Send a response to the organizer");
+        send.active = calendar_service.response_requested (message, invitation);
+        send.tooltip_text =
+            "When off, your calendar is updated without sending a reply";
+        var dialog = new Adw.AlertDialog (action + " this invitation?",
+            "Mailficient will update your default calendar. Sending a reply is optional.");
+        dialog.extra_child = send;
+        dialog.add_response ("cancel", "Cancel");
+        dialog.add_response ("respond", action);
+        dialog.set_response_appearance ("respond",
+            participation == CalendarParticipation.DECLINED ?
+                Adw.ResponseAppearance.DESTRUCTIVE : Adw.ResponseAppearance.SUGGESTED);
+        dialog.default_response = "respond"; dialog.close_response = "cancel";
+        try {
+            if ((yield dialog.choose (parent, calendar_cancellable)) != "respond") return;
+            card.set_busy (true);
+            yield calendar_service.respond (message, invitation, participation,
+                send.active, calendar_cancellable);
+            if (card.get_parent () == null) return;
+            card.set_busy (false); card.set_response (participation);
+            calendar_action_completed (send.active ?
+                "%s — response sent to the organizer".printf (participation.label ()) :
+                "%s in your calendar — no response sent".printf (participation.label ()));
+        } catch (Error error) {
+            if (card.get_parent () != null) card.set_busy (false);
+            if (!(error is IOError.CANCELLED)) calendar_action_failed (error);
+        }
+    }
+
+    private async void open_parsed_invitation (CalendarInvitation invitation) {
+        try { yield calendar_service.open_invitation (invitation, calendar_cancellable); }
+        catch (Error error) {
+            if (!(error is IOError.CANCELLED)) calendar_action_failed (error);
+        }
+    }
+
+    private async void create_meeting_from_email (Message message, Gtk.Button button) {
+        var parent = get_root () as Gtk.Window;
+        if (parent == null) return;
+        button.sensitive = false;
+        var spinner = new Gtk.Spinner (); spinner.spinning = true; button.child = spinner;
+        try {
+            var meeting = yield MeetingFromEmailDialog.choose (
+                parent, calendar_service, message, calendar_cancellable);
+            if (meeting == null) return;
+            var disposition = yield calendar_service.create_meeting (
+                meeting, calendar_cancellable);
+            calendar_action_completed (disposition == CalendarCreateDisposition.CREATED ?
+                "Meeting added to your default calendar" :
+                "Meeting opened in your calendar for review");
+        } catch (Error error) {
+            if (!(error is IOError.CANCELLED)) calendar_action_failed (error);
+        } finally {
+            if (button.get_parent () != null) {
+                button.child = null; button.icon_name = "appointment-new-symbolic";
+                button.sensitive = true;
+            }
+        }
+    }
+
     private void append_attachments (Message message, Gtk.Box target) {
         if (!message.has_attachment && message.attachments.size == 0) return;
 
         var section = new Gtk.Box (Gtk.Orientation.VERTICAL, 6);
         section.set_margin_start (30); section.set_margin_end (30);
         section.set_margin_top (18); section.set_margin_bottom (20);
-        var title = new Gtk.Label (message.attachments.size == 0 ? "Attachments" :
-            (message.attachments.size == 1 ? "1 Attachment" :
-            "%d Attachments".printf (message.attachments.size)));
+        string attachment_title;
+        if (message.attachments.size == 0) attachment_title = "Attachments";
+        else if (message.attachments.size == 1) attachment_title = "1 Attachment";
+        else attachment_title = "%d Attachments".printf (message.attachments.size);
+        var title = new Gtk.Label (attachment_title);
         title.xalign = 0; title.add_css_class ("heading"); section.append (title);
 
         if (message.attachments.size == 0) {
@@ -386,11 +656,11 @@ public class ReadingPane : Gtk.Box {
                     row.append (preview);
                 }
                 if (attachment.is_calendar_invitation ()) {
-                    var calendar = new Gtk.Button.with_label ("Add to Calendar");
+                    var calendar = new Gtk.Button.with_label ("Open .ics");
                     calendar.add_css_class ("flat");
                     calendar.tooltip_text = "Open this invitation in your desktop calendar";
                     Accessibility.label (calendar,
-                        "Add calendar invitation %s to calendar".printf (attachment.name));
+                        "Open calendar invitation %s".printf (attachment.name));
                     weak Gtk.Button weak_calendar = calendar;
                     calendar.clicked.connect (() => {
                         if (weak_calendar != null)
@@ -452,7 +722,7 @@ public class ReadingPane : Gtk.Box {
             attachment_failed (error);
         } finally {
             button.child = null;
-            button.label = "Add to Calendar";
+            button.label = "Open .ics";
             button.sensitive = true;
         }
     }

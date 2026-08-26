@@ -29,11 +29,15 @@ public class ComposeWindow : Adw.Window {
     private uint autosave_source;
     private bool force_close;
     private Gtk.Button send_button;
+    private Gtk.Button send_later_button;
     private Gtk.Button cancel_button;
     private Gtk.Button? delete_queued_button;
+    private Gtk.Button undo_send_button;
     private Gtk.Button attach_button;
+    private Gtk.Button spellcheck_button;
     private Gtk.Button security_button;
     private Gtk.Box bottom_actions;
+    private Gtk.Box outbox_status_container = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
     private Gtk.Widget from_selector;
     private Cancellable attachment_operations = new Cancellable ();
     private bool sending;
@@ -42,7 +46,9 @@ public class ComposeWindow : Adw.Window {
     private bool signature_initialized;
     private ulong signature_settings_handler;
     private OutboxItem? queued_item;
+    private uint undo_countdown_source;
     private bool accepted_pending_cleanup;
+    private bool outbox_read_only;
     private bool uncertain_resend_confirmed;
     private Gee.ArrayList<RecipientCompletionController> recipient_completions = new Gee.ArrayList<RecipientCompletionController> ();
     private ContactSuggestionProvider? address_book;
@@ -51,6 +57,12 @@ public class ComposeWindow : Adw.Window {
     private string loaded_body_text = "";
     private string loaded_body_html = "";
     private bool loaded_draft_snapshot;
+    private LocalSpellChecker spell_checker = new LocalSpellChecker ();
+    private Gee.ArrayList<SpellingIssue> spelling_issues = new Gee.ArrayList<SpellingIssue> ();
+    private Gtk.TextTag spelling_tag = new Gtk.TextTag ("mailficient-spelling-error");
+    private Cancellable spelling_cancellable = new Cancellable ();
+    private uint spellcheck_source;
+    private uint spellcheck_generation;
 
     public ComposeWindow (Gtk.Window parent, CacheDatabase cache, AttachmentService attachment_service,
                           ReceivedAttachmentService received_attachment_service,
@@ -64,7 +76,16 @@ public class ComposeWindow : Adw.Window {
                 modal: false,
                 default_width: child_window_dimension (720, parent.get_width (), 480),
                 default_height: child_window_dimension (620, parent.get_height (), 420));
+        // Adw.Window intentionally has a transparent content surface. The
+        // standard background class gives standalone compose windows an
+        // opaque, theme-aware canvas (including X11 sessions without a
+        // compositor).
+        add_css_class ("background");
         add_css_class ("compose-window");
+        var style_manager = Adw.StyleManager.get_default ();
+        update_compose_palette (style_manager.dark);
+        style_manager.notify["dark"].connect (() =>
+            update_compose_palette (Adw.StyleManager.get_default ().dark));
         set_deletable (false);
         this.cache = cache;
         this.attachment_service = attachment_service;
@@ -81,7 +102,8 @@ public class ComposeWindow : Adw.Window {
         var toolbar = new Adw.ToolbarView ();
         var header = new Adw.HeaderBar ();
         cancel_button = new Gtk.Button.with_label ("Cancel"); cancel_button.clicked.connect (() => confirm_close.begin ()); header.pack_start (cancel_button);
-        if (queued_item != null && queued_item.delivery_state != OutboxDeliveryState.ACCEPTED) {
+        if (queued_item != null && queued_item.delivery_state != OutboxDeliveryState.ACCEPTED &&
+            queued_item.delivery_state != OutboxDeliveryState.PREPARING) {
             delete_queued_button = new Gtk.Button.with_label ("Delete");
             delete_queued_button.add_css_class ("destructive-action");
             delete_queued_button.tooltip_text = "Delete this message from Outbox";
@@ -89,13 +111,21 @@ public class ComposeWindow : Adw.Window {
             delete_queued_button.clicked.connect (() => delete_queued_message.begin ());
             header.pack_start (delete_queued_button);
         }
+        undo_send_button = new Gtk.Button.with_label ("Undo");
+        undo_send_button.add_css_class ("suggested-action");
+        undo_send_button.tooltip_text = "Cancel this send and keep editing";
+        Accessibility.label (undo_send_button, "Undo Send and keep editing");
+        undo_send_button.clicked.connect (undo_send); undo_send_button.visible = false;
+        header.pack_start (undo_send_button);
         send_button = new Gtk.Button.with_label ("Send"); send_button.add_css_class ("compose-send-button"); send_button.clicked.connect (() => send_message.begin ()); header.pack_end (send_button);
-        var send_later = new Gtk.Button.from_icon_name ("alarm-symbolic"); send_later.tooltip_text = "Send later";
-        Accessibility.label (send_later, "Schedule message to send later"); send_later.clicked.connect (() => schedule_send.begin ()); header.pack_end (send_later);
+        send_later_button = new Gtk.Button.from_icon_name ("alarm-symbolic"); send_later_button.tooltip_text = "Send later";
+        Accessibility.label (send_later_button, "Schedule message to send later");
+        send_later_button.clicked.connect (() => schedule_send.begin ()); header.pack_end (send_later_button);
         toolbar.add_top_bar (header);
         var root = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
         root.add_css_class ("compose-root");
-        if (queued_item != null) root.append (new OutboxStatusView (queued_item));
+        root.append (outbox_status_container);
+        refresh_outbox_status ();
         from_selector = build_from_selector ();
         var compose_header = new ComposeHeader (from_selector, to_entry, cc_entry, bcc_entry, subject_entry);
         compose_header.contacts_requested.connect (show_contacts);
@@ -109,6 +139,25 @@ public class ComposeWindow : Adw.Window {
             recipient_completions.add (new RecipientCompletionController (recipient_entry, completion_service, draft.account_id));
         body.wrap_mode = Gtk.WrapMode.WORD_CHAR; body.add_css_class ("compose-body"); Accessibility.label (body, "Message body");
         RichTextBuffer.prepare (body.buffer);
+        spelling_tag.underline = Pango.Underline.ERROR;
+        body.buffer.tag_table.add (spelling_tag);
+        // Keep the compose form keyboard-navigable. Gtk.TextView normally
+        // consumes Tab as text, which traps focus in the message body; Ctrl+Tab
+        // remains available when a literal tab is intentionally needed.
+        var body_key_controller = new Gtk.EventControllerKey ();
+        body_key_controller.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        body_key_controller.key_pressed.connect ((keyval, keycode, state) => {
+            if (keyval != Gdk.Key.Tab && keyval != Gdk.Key.ISO_Left_Tab) return false;
+            if ((state & Gdk.ModifierType.CONTROL_MASK) != 0 && body.editable) {
+                body.buffer.insert_at_cursor ("\t", 1);
+                return true;
+            }
+            bool backwards = keyval == Gdk.Key.ISO_Left_Tab ||
+                (state & Gdk.ModifierType.SHIFT_MASK) != 0;
+            return child_focus (backwards ? Gtk.DirectionType.TAB_BACKWARD :
+                Gtk.DirectionType.TAB_FORWARD);
+        });
+        body.add_controller (body_key_controller);
         var scroller = new Gtk.ScrolledWindow (); scroller.add_css_class ("compose-editor-scroller");
         scroller.set_child (body); scroller.vexpand = true; root.append (scroller);
         forward_status.set_margin_start (14); forward_status.set_margin_end (14);
@@ -123,6 +172,11 @@ public class ComposeWindow : Adw.Window {
         attach_button = new Gtk.Button.from_icon_name ("mail-attachment-symbolic"); attach_button.tooltip_text = "Attach files"; Accessibility.label (attach_button, "Attach files"); attach_button.clicked.connect (() => choose_attachments.begin ()); bottom_actions.append (attach_button);
         var image_button = new Gtk.Button.from_icon_name ("insert-image-symbolic"); image_button.tooltip_text = "Insert image";
         Accessibility.label (image_button, "Insert inline image"); image_button.clicked.connect (() => choose_inline_image.begin ()); bottom_actions.append (image_button);
+        spellcheck_button = new Gtk.Button.from_icon_name ("tools-check-spelling-symbolic");
+        spellcheck_button.tooltip_text = "Check spelling";
+        Accessibility.label (spellcheck_button, "Check spelling");
+        spellcheck_button.clicked.connect (() => show_spelling_dialog.begin ());
+        bottom_actions.append (spellcheck_button);
         bottom_actions.append (format_button ("format-text-bold-symbolic", "Bold", RichTextBuffer.BOLD));
         bottom_actions.append (format_button ("format-text-italic-symbolic", "Italic", RichTextBuffer.ITALIC));
         bottom_actions.append (format_button ("format-text-underline-symbolic", "Underline", RichTextBuffer.UNDERLINE));
@@ -156,11 +210,34 @@ public class ComposeWindow : Adw.Window {
             if (key == "signature." + draft.account_id ||
                 key == "signature-enabled." + draft.account_id)
                 apply_signature_setting ();
+            if (key == "spellcheck-enabled") schedule_spellcheck ();
         });
         to_entry.changed.connect (schedule_autosave); cc_entry.changed.connect (schedule_autosave); bcc_entry.changed.connect (schedule_autosave);
-        subject_entry.changed.connect (schedule_autosave); body.buffer.changed.connect (schedule_autosave);
+        subject_entry.changed.connect (schedule_autosave);
+        body.buffer.changed.connect (() => { schedule_autosave (); schedule_spellcheck (); });
+        // GtkShortcutAction on Ctrl+Return can re-enter GTK's active focus
+        // traversal on some GTK 4/X11 combinations. Handle the completed key
+        // gesture instead, then begin the transition after key dispatch has
+        // returned to the main loop.
+        var send_keys = new Gtk.EventControllerKey ();
+        bool send_key_pending = false;
+        send_keys.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        send_keys.key_pressed.connect ((keyval, keycode, state) => {
+            if ((state & Gdk.ModifierType.CONTROL_MASK) == 0 ||
+                (keyval != Gdk.Key.Return && keyval != Gdk.Key.KP_Enter))
+                return false;
+            send_key_pending = true;
+            return true;
+        });
+        send_keys.key_released.connect ((keyval, keycode, state) => {
+            if (send_key_pending &&
+                (keyval == Gdk.Key.Return || keyval == Gdk.Key.KP_Enter)) {
+                send_key_pending = false;
+                Idle.add (() => { send_message.begin (); return Source.REMOVE; });
+            }
+        });
+        ((Gtk.Widget) this).add_controller (send_keys);
         var controller = new Gtk.ShortcutController ();
-        controller.add_shortcut (new Gtk.Shortcut (Gtk.ShortcutTrigger.parse_string ("<Control>Return"), new Gtk.CallbackAction (() => { send_message.begin (); return true; })));
         controller.add_shortcut (new Gtk.Shortcut (Gtk.ShortcutTrigger.parse_string ("<Control>s"), new Gtk.CallbackAction (() => { save_draft_now (); return true; })));
         controller.add_shortcut (new Gtk.Shortcut (Gtk.ShortcutTrigger.parse_string ("<Control><Shift>a"), new Gtk.CallbackAction (() => { choose_attachments.begin (); return true; })));
         controller.add_shortcut (format_shortcut ("<Control>b", RichTextBuffer.BOLD));
@@ -204,6 +281,120 @@ public class ComposeWindow : Adw.Window {
         }
         configure_outbox_state ();
         update_security_button ();
+        schedule_spellcheck ();
+    }
+
+    private void update_compose_palette (bool dark) {
+        if (dark) add_css_class ("compose-dark");
+        else remove_css_class ("compose-dark");
+    }
+
+    private void schedule_spellcheck () {
+        if (spellcheck_source != 0) {
+            Source.remove (spellcheck_source); spellcheck_source = 0;
+        }
+        spelling_cancellable.cancel ();
+        spelling_cancellable = new Cancellable ();
+        spellcheck_generation++;
+        if (!settings.spellcheck_enabled) {
+            spelling_issues.clear (); clear_spelling_marks ();
+            spellcheck_button.tooltip_text = "Spell checking is off";
+            Accessibility.label (spellcheck_button, "Spell checking is off");
+            return;
+        }
+        uint generation = spellcheck_generation;
+        spellcheck_source = Timeout.add (450, () => {
+            spellcheck_source = 0;
+            refresh_spelling.begin (generation, spelling_cancellable);
+            return Source.REMOVE;
+        });
+    }
+
+    private async void refresh_spelling (uint generation, Cancellable cancellable) {
+        try {
+            var issues = yield spell_checker.check (body.buffer.text, cancellable);
+            if (cancellable.is_cancelled () || generation != spellcheck_generation) return;
+            spelling_issues = issues; clear_spelling_marks ();
+            foreach (var issue in spelling_issues) {
+                Gtk.TextIter start; Gtk.TextIter end;
+                body.buffer.get_iter_at_offset (out start, issue.start_offset);
+                body.buffer.get_iter_at_offset (out end, issue.end_offset);
+                body.buffer.apply_tag (spelling_tag, start, end);
+            }
+            string status = spelling_issues.size == 0 ? "No spelling issues found" :
+                (spelling_issues.size == 1 ? "1 possible spelling issue" :
+                    "%d possible spelling issues".printf (spelling_issues.size));
+            spellcheck_button.tooltip_text = status;
+            Accessibility.label (spellcheck_button, status + ". Check spelling");
+        } catch (Error error) {
+            if (!(error is IOError.CANCELLED))
+                warning ("Local spell checking failed: %s", error.message);
+        }
+    }
+
+    private void clear_spelling_marks () {
+        Gtk.TextIter start; Gtk.TextIter end;
+        body.buffer.get_bounds (out start, out end);
+        body.buffer.remove_tag (spelling_tag, start, end);
+    }
+
+    private void cancel_spellcheck () {
+        if (spellcheck_source != 0) {
+            Source.remove (spellcheck_source); spellcheck_source = 0;
+        }
+        spellcheck_generation++; spelling_cancellable.cancel ();
+    }
+
+    private async void show_spelling_dialog () {
+        if (!settings.spellcheck_enabled) {
+            overlay.add_toast (new Adw.Toast ("Turn on spell checking in Settings → Composing"));
+            return;
+        }
+        cancel_spellcheck (); spelling_cancellable = new Cancellable ();
+        uint generation = spellcheck_generation;
+        yield refresh_spelling (generation, spelling_cancellable);
+        if (spelling_issues.size == 0) {
+            overlay.add_toast (new Adw.Toast ("No spelling issues found")); return;
+        }
+
+        int cursor = body.buffer.cursor_position;
+        SpellingIssue issue = spelling_issues[0];
+        foreach (var candidate in spelling_issues) {
+            if (candidate.start_offset <= cursor && candidate.end_offset >= cursor) {
+                issue = candidate; break;
+            }
+            if (candidate.start_offset >= cursor) { issue = candidate; break; }
+        }
+        var dialog = new Adw.AlertDialog ("Check Spelling",
+            "“%s” may be misspelled. Corrections come from a local dictionary.".printf (issue.word));
+        Adw.ComboRow? suggestions_row = null;
+        if (issue.suggestions.size > 0) {
+            var suggestions = new Gtk.StringList (null);
+            foreach (var suggestion in issue.suggestions) suggestions.append (suggestion);
+            suggestions_row = new Adw.ComboRow (); suggestions_row.title = "Replace with";
+            suggestions_row.model = suggestions; dialog.extra_child = suggestions_row;
+        }
+        dialog.add_response ("cancel", "Close");
+        dialog.add_response ("ignore", "Ignore for This Message");
+        if (suggestions_row != null) {
+            dialog.add_response ("change", "Change");
+            dialog.set_response_appearance ("change", Adw.ResponseAppearance.SUGGESTED);
+            dialog.default_response = "change";
+        } else dialog.default_response = "ignore";
+        dialog.close_response = "cancel";
+        string response = yield dialog.choose (this, null);
+        if (response == "ignore") {
+            spell_checker.ignore (issue.word); schedule_spellcheck (); body.grab_focus ();
+            return;
+        }
+        if (response != "change" || suggestions_row == null ||
+            suggestions_row.selected >= issue.suggestions.size) return;
+        Gtk.TextIter start; Gtk.TextIter end;
+        body.buffer.get_iter_at_offset (out start, issue.start_offset);
+        body.buffer.get_iter_at_offset (out end, issue.end_offset);
+        body.buffer.delete (ref start, ref end);
+        body.buffer.insert (ref start, issue.suggestions[(int) suggestions_row.selected], -1);
+        body.grab_focus ();
     }
 
     private void show_contacts (Gtk.Entry target) {
@@ -223,7 +414,7 @@ public class ComposeWindow : Adw.Window {
     protected override bool close_request () {
         if (sending) { overlay.add_toast (new Adw.Toast ("Wait for the current send attempt to finish.")); return true; }
         if (force_close) {
-            attachment_operations.cancel ();
+            attachment_operations.cancel (); cancel_undo_countdown (); cancel_spellcheck ();
             disconnect_signature_settings ();
             return false;
         }
@@ -515,6 +706,18 @@ public class ComposeWindow : Adw.Window {
 
     private bool has_content () { return to_entry.text != "" || cc_entry.text != "" || bcc_entry.text != "" || subject_entry.text != "" || body.buffer.text != "" || draft.attachments.size > 0; }
 
+    private async bool confirm_attachment_intent () {
+        if (!ComposeSafetyService.mentions_missing_attachment (
+                draft.subject, draft.body_text, draft.attachments.size > 0)) return true;
+        var dialog = new Adw.AlertDialog ("Did you forget an attachment?",
+            "The message mentions an attachment, but no file is attached.");
+        dialog.add_response ("edit", "Keep Editing");
+        dialog.add_response ("send", "Send Without Attachment");
+        dialog.close_response = "edit"; dialog.default_response = "edit";
+        dialog.set_response_appearance ("send", Adw.ResponseAppearance.SUGGESTED);
+        return (yield dialog.choose (this, null)) == "send";
+    }
+
     private async void choose_attachments () {
         var dialog = new Gtk.FileDialog (); dialog.title = "Attach Files";
         try {
@@ -559,10 +762,21 @@ public class ComposeWindow : Adw.Window {
             attachment_rows.remove ((Gtk.Widget) attachment_rows.get_first_child ());
         foreach (var attachment in draft.attachments) {
             var row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8); row.add_css_class ("attachment-chip");
-            row.append (new Gtk.Image.from_icon_name ("mail-attachment-symbolic"));
-            var label = new Gtk.Label ("%s  ·  %s".printf (attachment.name, attachment.formatted_size ()));
+            bool requires_download = !attachment.is_downloaded ();
+            if (requires_download) row.add_css_class ("requires-download");
+            row.append (new Gtk.Image.from_icon_name (requires_download ?
+                "dialog-warning-symbolic" : "mail-attachment-symbolic"));
+            var label = new Gtk.Label (requires_download ?
+                "%s  ·  Not available locally — remove or reattach before sending".printf (attachment.name) :
+                "%s  ·  %s".printf (attachment.name, attachment.formatted_size ()));
             label.xalign = 0; label.hexpand = true; label.ellipsize = Pango.EllipsizeMode.MIDDLE; row.append (label);
-            if (AttachmentSafety.preview_kind (attachment.content_type, attachment.name) != AttachmentPreviewKind.NONE) {
+            if (requires_download) {
+                row.tooltip_text = "Remove this attachment or attach a local copy before sending";
+                Accessibility.label (row, "%s. Not available locally. Remove or reattach before sending.".printf (
+                    attachment.name));
+            }
+            if (!requires_download &&
+                AttachmentSafety.preview_kind (attachment.content_type, attachment.name) != AttachmentPreviewKind.NONE) {
                 var preview = new Gtk.Button.from_icon_name ("view-reveal-symbolic"); preview.tooltip_text = "Preview attachment";
                 Accessibility.label (preview, "Preview attachment %s".printf (attachment.name)); preview.add_css_class ("flat");
                 preview.clicked.connect (() => new AttachmentPreviewWindow (this, attachment).present ()); row.append (preview);
@@ -638,6 +852,13 @@ public class ComposeWindow : Adw.Window {
 
     private async void send_message () {
         if (sending) return;
+        if (outbox_read_only) {
+            overlay.add_toast (new Adw.Toast (queued_item != null &&
+                queued_item.delivery_state == OutboxDeliveryState.PREPARING ?
+                "This message is already being sent." :
+                "This message cannot be sent again."));
+            return;
+        }
         if (accepted_pending_cleanup) {
             overlay.add_toast (new Adw.Toast ("This message was already accepted by the mail server."));
             return;
@@ -682,26 +903,25 @@ public class ComposeWindow : Adw.Window {
             confirmation.set_response_appearance ("send", Adw.ResponseAppearance.SUGGESTED);
             if ((yield confirmation.choose (this, null)) != "send") return;
         }
+        if (!(yield confirm_attachment_intent ())) return;
         // Freeze every producer of draft changes before OutboundService takes its
-        // durable snapshot. In particular, a late autosave must never recreate a
-        // draft after a successful send removed it from the database.
-        cancel_autosave (); attachment_operations.cancel ();
-        sending = true; set_editor_sensitive (false); send_button.sensitive = false; send_button.label = "Sending…";
+        // durable Undo Send snapshot. A late autosave must never overwrite the
+        // exact version waiting behind the Outbox deadline.
+        cancel_autosave (); cancel_spellcheck (); attachment_operations.cancel ();
+        sending = true; set_editor_sensitive (false); send_button.sensitive = false;
+        send_button.label = "Saving to Outbox…";
         try {
-            var disposition = yield outbound_service.deliver (draft);
-            if (disposition == SendDisposition.SENT) {
-                // close_request() deliberately refuses to close during an active
-                // send.  Clear that guard after SMTP acceptance, before asking
-                // GTK to close the successfully delivered compose window.  Do
-                // the close on the next main-loop turn so this async callback
-                // has returned before GTK disposes the compose object.
-                draft_changed (); force_close = true; sending = false;
-                attachment_operations.cancel ();
-                Idle.add (() => { close (); return Source.REMOVE; }); return;
-            } else {
-                overlay.add_toast (new Adw.Toast ("Saved safely to Outbox — connect an account to deliver it."));
-                draft.mark_saved (); draft_changed ();
-            }
+            int seconds = settings.undo_send_seconds;
+            outbound_service.defer_for_undo (draft, seconds, uncertain_resend_confirmed);
+            queued_item = cache.find_outbox_item (draft.id);
+            if (queued_item == null)
+                throw new MailError.STORAGE ("The Undo Send item could not be reopened from Outbox");
+            draft.mark_saved (); draft_changed (); sending = false;
+            attachment_operations = new Cancellable ();
+            configure_outbox_state (); begin_undo_countdown ();
+            overlay.add_toast (new Adw.Toast (
+                "Message saved to Outbox — Undo is available for %d seconds.".printf (seconds)));
+            return;
         } catch (Error error) {
             var friendly = UserFacingError.from_error (error);
             bool preserved = false;
@@ -717,12 +937,19 @@ public class ComposeWindow : Adw.Window {
             draft_changed ();
             uncertain_resend_confirmed = false;
         }
-        if (!force_close) attachment_operations = new Cancellable ();
+        attachment_operations = new Cancellable ();
         sending = false; set_editor_sensitive (true); send_button.sensitive = true; restore_send_button_label ();
+        configure_outbox_state ();
     }
 
     private async void schedule_send () {
+        if (queued_item != null && queued_item.delivery_state == OutboxDeliveryState.PREPARING) return;
+        if (importing_forward_attachments) {
+            overlay.add_toast (new Adw.Toast ("Wait for the forwarded attachments to finish copying."));
+            return;
+        }
         update_draft ();
+        if (!(yield confirm_attachment_intent ())) return;
         var initial = queued_item != null && queued_item.next_attempt_at > 0 ?
             new DateTime.from_unix_local (queued_item.next_attempt_at) :
             new DateTime.now_local ().add_hours (1);
@@ -754,7 +981,7 @@ public class ComposeWindow : Adw.Window {
         time_row.append (separator); time_row.append (minute); time_row.append (period);
         picker.append (time_row);
         var dialog = new Adw.AlertDialog ("Send Later",
-            "Choose the exact local date and time for delivery. Mailficient must be running, or the message will send when it next opens.");
+            "Choose the exact local date and time for delivery. Mailficient will use background delivery when allowed; otherwise it sends during the next mail check or launch.");
         dialog.extra_child = picker; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("schedule", "Schedule");
         dialog.default_response = "schedule"; dialog.close_response = "cancel";
         if ((yield dialog.choose (this, null)) != "schedule") return;
@@ -771,7 +998,8 @@ public class ComposeWindow : Adw.Window {
     }
 
     private async void delete_queued_message () {
-        if (queued_item == null || queued_item.delivery_state == OutboxDeliveryState.ACCEPTED) return;
+        if (queued_item == null || queued_item.delivery_state == OutboxDeliveryState.ACCEPTED ||
+            queued_item.delivery_state == OutboxDeliveryState.PREPARING) return;
         var dialog = new Adw.AlertDialog ("Delete this Outbox message?",
             "The message will not be sent. This also removes its private attachment copies.");
         dialog.add_response ("cancel", "Keep Message");
@@ -829,6 +1057,97 @@ public class ComposeWindow : Adw.Window {
         if (autosave_source != 0) { Source.remove (autosave_source); autosave_source = 0; }
     }
 
+    private void refresh_outbox_status () {
+        while (outbox_status_container.get_first_child () != null)
+            outbox_status_container.remove ((Gtk.Widget) outbox_status_container.get_first_child ());
+        if (queued_item != null)
+            outbox_status_container.append (new OutboxStatusView (queued_item));
+        outbox_status_container.visible = queued_item != null;
+    }
+
+    private void begin_undo_countdown () {
+        cancel_undo_countdown ();
+        if (queued_item == null || !queued_item.can_undo ()) return;
+        update_undo_countdown_copy ();
+        undo_countdown_source = Timeout.add_seconds (1, () => {
+            try { queued_item = cache.find_outbox_item (draft.id); }
+            catch (Error error) {
+                warning ("Could not refresh Undo Send status: %s", error.message);
+                undo_countdown_source = 0; return Source.REMOVE;
+            }
+            if (queued_item != null && queued_item.can_undo ()) {
+                update_undo_countdown_copy (); refresh_outbox_status ();
+                return Source.CONTINUE;
+            }
+            undo_countdown_source = 0; undo_send_button.visible = false;
+            // The durable deadline has elapsed. Closing prevents an editor from
+            // racing the worker as it moves QUEUED to its exclusive PREPARING
+            // lease; the Outbox remains visible in the main window.
+            draft_changed (); force_close = true; close ();
+            return Source.REMOVE;
+        });
+    }
+
+    private void update_undo_countdown_copy () {
+        if (queued_item == null) return;
+        int64 remaining = int64.max (1,
+            queued_item.undo_until - new DateTime.now_utc ().to_unix ());
+        send_button.label = remaining == 1 ? "Sending in 1 second…" :
+            "Sending in %lld seconds…".printf (remaining);
+        undo_send_button.tooltip_text = remaining == 1 ?
+            "1 second remains to cancel this send" :
+            "%lld seconds remain to cancel this send".printf (remaining);
+    }
+
+    private void cancel_undo_countdown () {
+        if (undo_countdown_source != 0) {
+            Source.remove (undo_countdown_source); undo_countdown_source = 0;
+        }
+    }
+
+    private void undo_send () {
+        if (queued_item == null || !queued_item.can_undo ()) return;
+        cancel_undo_countdown ();
+        try {
+            if (!outbound_service.cancel_undo_send (draft.id, draft.account_id)) {
+                queued_item = cache.find_outbox_item (draft.id);
+                overlay.add_toast (new Adw.Toast (
+                    "The Undo Send window ended before the message could be canceled."));
+                configure_outbox_state ();
+                force_close = true;
+                Idle.add (() => { close (); return Source.REMOVE; });
+                return;
+            }
+            queued_item = cache.find_outbox_item (draft.id);
+        } catch (Error error) {
+            overlay.add_toast (new Adw.Toast (
+                "Undo Send could not update Outbox. The message remains queued."));
+            try { queued_item = cache.find_outbox_item (draft.id); }
+            catch (Error status_error) {
+                warning ("Could not reload Outbox after Undo Send failure: %s", status_error.message);
+            }
+            if (queued_item == null || !queued_item.can_undo ()) {
+                force_close = true; Idle.add (() => { close (); return Source.REMOVE; });
+            } else begin_undo_countdown ();
+            return;
+        }
+        uncertain_resend_confirmed = false;
+        if (queued_item == null) {
+            title = "Edit Draft"; outbox_read_only = false; accepted_pending_cleanup = false;
+            set_editor_sensitive (true); cancel_button.label = "Cancel";
+            send_button.sensitive = true; send_later_button.sensitive = true;
+            undo_send_button.visible = false;
+            if (delete_queued_button != null) delete_queued_button.visible = false;
+            attachment_operations = new Cancellable (); restore_send_button_label ();
+            refresh_outbox_status (); schedule_spellcheck ();
+            overlay.add_toast (new Adw.Toast ("Send canceled — the message is back in Drafts."));
+        } else {
+            configure_outbox_state ();
+            overlay.add_toast (new Adw.Toast ("Send canceled — the previous Outbox state was restored."));
+        }
+        draft_changed ();
+    }
+
     private void set_editor_sensitive (bool sensitive) {
         cancel_button.sensitive = sensitive; from_selector.sensitive = sensitive;
         to_entry.sensitive = sensitive; cc_entry.sensitive = sensitive; bcc_entry.sensitive = sensitive;
@@ -839,18 +1158,43 @@ public class ComposeWindow : Adw.Window {
     }
 
     private void configure_outbox_state () {
-        if (queued_item == null) return;
-        if (queued_item.delivery_state == OutboxDeliveryState.SENDING) {
+        outbox_read_only = false; accepted_pending_cleanup = false;
+        undo_send_button.visible = false; cancel_button.label = "Cancel";
+        set_editor_sensitive (true); send_button.sensitive = true;
+        send_later_button.sensitive = true;
+        if (delete_queued_button != null) {
+            delete_queued_button.visible = queued_item != null;
+            delete_queued_button.sensitive = true;
+        }
+        refresh_outbox_status ();
+        if (queued_item == null) { restore_send_button_label (); return; }
+        if (queued_item.can_undo ()) {
+            outbox_read_only = true; set_editor_sensitive (false);
+            cancel_button.sensitive = true; cancel_button.label = "Close";
+            undo_send_button.sensitive = true; undo_send_button.visible = true;
+            send_button.sensitive = false; send_later_button.sensitive = false;
+            if (delete_queued_button != null) delete_queued_button.sensitive = false;
+            update_undo_countdown_copy (); begin_undo_countdown ();
+        } else if (queued_item.delivery_state == OutboxDeliveryState.SENDING) {
             send_button.label = "Send Again…";
+        } else if (queued_item.delivery_state == OutboxDeliveryState.PREPARING) {
+            outbox_read_only = true;
+            set_editor_sensitive (false); cancel_button.sensitive = true; cancel_button.label = "Close";
+            send_button.sensitive = false; send_button.label = "Sending…";
+            send_later_button.sensitive = false;
         } else if (queued_item.delivery_state == OutboxDeliveryState.ACCEPTED) {
             accepted_pending_cleanup = true;
+            outbox_read_only = true;
             set_editor_sensitive (false); cancel_button.sensitive = true; cancel_button.label = "Close";
             send_button.sensitive = false; send_button.label = "Already Sent";
+            send_later_button.sensitive = false;
         } else if (queued_item.attempts > 0) send_button.label = "Try Again";
     }
 
     private void restore_send_button_label () {
-        if (queued_item != null && queued_item.requires_resend_confirmation ())
+        if (queued_item != null && queued_item.can_undo ())
+            update_undo_countdown_copy ();
+        else if (queued_item != null && queued_item.requires_resend_confirmation ())
             send_button.label = "Send Again…";
         else if (queued_item != null && queued_item.attempts > 0)
             send_button.label = "Try Again";
@@ -859,7 +1203,7 @@ public class ComposeWindow : Adw.Window {
 
     private async void confirm_close () {
         if (sending) { overlay.add_toast (new Adw.Toast ("Wait for the current send attempt to finish.")); return; }
-        if (accepted_pending_cleanup) { force_close = true; close (); return; }
+        if (outbox_read_only) { force_close = true; close (); return; }
         var dialog = new Adw.AlertDialog ("Save this draft?", "You can reopen saved drafts from the Drafts mailbox.");
         dialog.add_response ("cancel", "Keep Editing"); dialog.add_response ("discard", "Discard"); dialog.add_response ("save", "Save Draft");
         dialog.close_response = "cancel"; dialog.default_response = "save";

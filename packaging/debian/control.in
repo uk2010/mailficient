@@ -6,9 +6,10 @@ Installed-Size: @INSTALLED_SIZE@
 Section: mail
 Priority: optional
 Depends: gnome-calendar, gpg, libc6, libadwaita-1-0 (>= 1.5), libgee-0.8-2, libglib2.0-0t64 (>= 2.76), libgtk-4-1 (>= 4.12), libjson-glib-1.0-0, libnspr4, libnss3, libsecret-1-0, libsqlite3-0, libssl3t64, libwebkitgtk-6.0-4, libxml2-16
-Recommends: gnome-keyring, gsettings-desktop-schemas
+Recommends: enchant-2, gnome-keyring, gsettings-desktop-schemas, hunspell-en-us
 Homepage: https://github.com/uk2010/mailficient
 Description: Native GTK email client
  Mailficient is a native GTK4 and Libadwaita desktop email client with
  standard IMAP and SMTP support, secure credential storage, offline mail,
- search, drafts, attachments, and safe HTML message display.
+ advanced search and rules, tasks, calendar invitations, compose safeguards,
+ and phishing-aware message display.

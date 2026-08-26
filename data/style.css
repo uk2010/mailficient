@@ -13,6 +13,58 @@
 .pane-resize-handle:hover { background: alpha(var(--accent-bg-color), .20); }
 .pane-resize-handle separator { background: alpha(currentColor, .10); min-width: 1px; }
 .attachment-row { padding: 6px 8px; border-radius: 8px; background: alpha(currentColor, .035); }
+
+.calendar-invitation-card {
+  padding: 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-bg-color) 5%, var(--card-bg-color));
+  border: 1px solid alpha(var(--accent-bg-color), .20);
+  box-shadow: 0 3px 14px alpha(black, .055), inset 0 1px alpha(white, .14);
+}
+
+.calendar-invitation-card .heading { font-size: 1.14em; font-weight: 700; }
+.calendar-invitation-card button { min-height: 34px; border-radius: 9px; }
+.calendar-invitation-notice {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: alpha(currentColor, .045);
+}
+.calendar-invitation-notice.warning {
+  background: color-mix(in srgb, var(--warning-bg-color) 17%, transparent);
+  color: color-mix(in srgb, var(--warning-color) 78%, currentColor);
+}
+.calendar-invitation-notice.error {
+  background: color-mix(in srgb, var(--error-bg-color) 15%, transparent);
+  color: color-mix(in srgb, var(--error-color) 78%, currentColor);
+}
+
+/* Safety notices are deliberately calm but unmistakable: amber asks for a
+ * second look, while red is reserved for an authentication failure reported
+ * by the receiving mail server. */
+.message-security-warning,
+.message-security-danger,
+.unsubscribe-card {
+  margin: 0 30px 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+.card.message-security-warning {
+  background: rgba(245, 121, 0, .10);
+  border: 1px solid rgba(245, 121, 0, .34);
+  box-shadow: inset 3px 0 rgba(245, 121, 0, .72);
+}
+.card.message-security-danger {
+  background: rgba(224, 27, 36, .10);
+  border: 1px solid rgba(224, 27, 36, .34);
+  box-shadow: inset 3px 0 rgba(224, 27, 36, .78);
+}
+.unsubscribe-card {
+  background: color-mix(in srgb, var(--accent-bg-color) 5%, var(--card-bg-color));
+  border: 1px solid alpha(currentColor, .10);
+}
+.message-security-warning button,
+.message-security-danger button,
+.unsubscribe-card button { min-height: 32px; border-radius: 9px; }
 .mailbox-count { border-radius: 10px; padding: 0 7px; background: alpha(currentColor, .10); font-size: .82em; font-weight: 600; }
 .message-list { background: var(--view-bg-color); }
 .message-list-header { padding: 12px 12px 10px 16px; background: var(--window-bg-color); }
@@ -237,6 +289,23 @@ menubutton.app-menu-button > button:hover { background: alpha(currentColor, .12)
   background: var(--window-bg-color);
   box-shadow: 0 1px 4px alpha(black, .22);
 }
+
+/* Tasks keep the same quiet, content-first surfaces as the message list while
+ * making due state and completion immediately scannable in either theme. */
+.task-view { background: var(--window-bg-color); }
+.task-view-header { border-bottom: 1px solid alpha(currentColor, .10); }
+.task-list { margin-top: 4px; background: var(--card-bg-color); }
+.task-row { transition: background 140ms ease; }
+.task-row:hover { background: alpha(currentColor, .045); }
+.task-row .task-title { font-weight: 600; font-size: 1.02em; }
+.task-row.completed .task-title {
+  color: alpha(currentColor, .55);
+  text-decoration-line: line-through;
+}
+.task-row .task-metadata { color: alpha(currentColor, .62); }
+.task-row.overdue .task-metadata { color: var(--error-color); }
+.task-row.overdue { box-shadow: inset 3px 0 var(--error-color); }
+.task-row button.flat { min-width: 32px; min-height: 32px; border-radius: 999px; }
 .message-row { padding: 10px 12px 10px 9px; border-left: 3px solid transparent; border-bottom: 1px solid alpha(currentColor, .08); }
 .message-row:selected { border-left-color: var(--accent-bg-color); }
 .message-row.unread .sender, .message-row.unread .subject { font-weight: 700; }
@@ -882,6 +951,15 @@ menubutton.app-menu-button > button {
   border-radius: 7px;
 }
 
+.attachment-chip.requires-download {
+  background: rgba(245, 194, 66, .12);
+  border-color: rgba(156, 101, 0, .32);
+}
+
+.attachment-chip.requires-download > image {
+  color: #9c6500;
+}
+
 .compose-window .outbox-status {
   margin: 12px 14px 2px;
   padding: 11px 13px;
@@ -1128,4 +1206,244 @@ menubutton.toolbar-menu-button > button:hover {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+/* State, contrast, and keyboard polish -------------------------------------
+ * Keep this final layer semantic: it improves existing native controls and
+ * state surfaces without introducing decorative application chrome. */
+
+.message-list-items > row:selected,
+.message-list-items > row:selected:hover,
+.message-row:selected,
+.message-row:selected:hover {
+  color: var(--window-fg-color);
+  background: alpha(var(--accent-bg-color), .16);
+}
+
+.message-list-items > row:selected .preview,
+.message-list-items > row:selected .timestamp,
+.message-list-items > row:selected .dim-label,
+.message-row:selected .preview,
+.message-row:selected .timestamp,
+.message-row:selected .dim-label {
+  color: alpha(var(--window-fg-color), .64);
+}
+
+.mail-header-bar button:focus-visible,
+.mail-header-bar menubutton > button:focus-visible,
+.message-list-header button:focus-visible,
+.mail-sidebar row:focus-visible,
+.compose-window button:focus-visible {
+  outline: 2px solid rgba(53, 132, 228, .85);
+  outline-offset: -2px;
+}
+
+statuspage.empty-state {
+  padding: 28px 20px;
+  color: inherit;
+}
+
+statuspage.empty-state image {
+  color: alpha(currentColor, .38);
+}
+
+statuspage.empty-state .title-1,
+statuspage.empty-state .title-2,
+statuspage.empty-state .title-3 {
+  color: alpha(currentColor, .76);
+}
+
+statuspage.empty-state .body,
+statuspage.empty-state .dim-label {
+  color: alpha(currentColor, .54);
+}
+
+statuspage.error-state {
+  padding: 32px;
+}
+
+statuspage.error-state image {
+  color: var(--warning-color);
+}
+
+.sync-status-dialog {
+  min-height: 48px;
+  padding: 10px 11px 11px;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--window-bg-color) 94%, var(--accent-bg-color));
+  box-shadow: 0 2px 8px alpha(black, .07), inset 0 1px alpha(white, .18);
+}
+
+.sync-status-icon {
+  min-width: 20px;
+  min-height: 20px;
+  margin-right: 3px;
+  color: var(--accent-color);
+  -gtk-icon-size: 16px;
+}
+
+.sync-status-dialog label {
+  font-size: .86em;
+  font-weight: 600;
+}
+
+.sync-status-dialog button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 3px;
+}
+
+.sync-status-dialog progressbar trough {
+  min-height: 5px;
+  border-radius: 999px;
+  background: alpha(currentColor, .10);
+}
+
+.sync-status-dialog progressbar progress {
+  min-height: 5px;
+  border-radius: 999px;
+}
+
+/* Explicitly paint every compose surface. AdwWindow uses transparent client
+ * side surfaces, which is normally composited by the desktop but otherwise
+ * exposes the black root window under X11/headless sessions. */
+window.compose-window,
+window.compose-window.background,
+window.compose-window > contents,
+.compose-window toolbarview,
+.compose-window .compose-root,
+.compose-window .compose-editor-scroller,
+.compose-window .compose-editor-scroller > viewport,
+.compose-window .compose-body,
+.compose-window .compose-body text {
+  color: #2e3436;
+  background-color: #ffffff;
+}
+
+.compose-window headerbar {
+  color: #2e3436;
+  background-color: #f8f8f8;
+}
+
+window.compose-window.compose-dark,
+window.compose-window.compose-dark.background,
+window.compose-window.compose-dark > contents,
+.compose-window.compose-dark toolbarview,
+.compose-window.compose-dark .compose-root,
+.compose-window.compose-dark .compose-editor-scroller,
+.compose-window.compose-dark .compose-editor-scroller > viewport,
+.compose-window.compose-dark .compose-body,
+.compose-window.compose-dark .compose-body text {
+  color: #f6f5f4;
+  background-color: #202024;
+}
+
+.compose-window.compose-dark headerbar {
+  color: #f6f5f4;
+  background-color: #2a2a2e;
+}
+
+.outbox-status {
+  color: var(--window-fg-color);
+  background: color-mix(in srgb, var(--window-bg-color) 97%, currentColor);
+  border: 1px solid alpha(currentColor, .11);
+  box-shadow: 0 2px 8px alpha(black, .045);
+}
+
+.outbox-status > box > image {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 5px;
+  border-radius: 8px;
+  background: alpha(currentColor, .055);
+  -gtk-icon-size: 18px;
+}
+
+.outbox-status .heading {
+  font-weight: 700;
+}
+
+.outbox-status > box > box > label:not(.heading) {
+  color: alpha(currentColor, .67);
+}
+
+.outbox-status.uncertain,
+.outbox-status.retrying {
+  background: rgba(245, 194, 66, .12);
+  border-color: rgba(156, 101, 0, .32);
+}
+
+.outbox-status.uncertain > box > image,
+.outbox-status.retrying > box > image {
+  color: #9c6500;
+  background: rgba(245, 194, 66, .18);
+}
+
+.outbox-status.undo-send,
+.outbox-status.scheduled,
+.outbox-status.preparing {
+  background: rgba(53, 132, 228, .09);
+  border-color: rgba(53, 132, 228, .28);
+}
+
+.outbox-status.undo-send > box > image,
+.outbox-status.scheduled > box > image,
+.outbox-status.preparing > box > image {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .14);
+}
+
+.outbox-status.accepted {
+  background: rgba(46, 194, 126, .10);
+  border-color: rgba(38, 162, 105, .30);
+}
+
+.outbox-status.accepted > box > image {
+  color: #18794e;
+  background: rgba(46, 194, 126, .16);
+}
+
+.outbox-status.rejected {
+  background: rgba(224, 27, 36, .08);
+  border-color: rgba(192, 28, 40, .30);
+}
+
+.outbox-status.rejected > box > image {
+  color: #c01c28;
+  background: rgba(224, 27, 36, .14);
+}
+
+.outbox-status.waiting > box > image {
+  color: alpha(currentColor, .72);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sync-status-dialog,
+  .outbox-status {
+    box-shadow: 0 3px 12px alpha(black, .16), inset 0 1px alpha(white, .035);
+  }
+}
+
+.compose-window.compose-dark .outbox-status.uncertain > box > image,
+.compose-window.compose-dark .outbox-status.retrying > box > image {
+  color: #f8e45c;
+}
+
+.compose-window.compose-dark .attachment-chip.requires-download > image {
+  color: #f8e45c;
+}
+
+.compose-window.compose-dark .outbox-status.undo-send > box > image,
+.compose-window.compose-dark .outbox-status.scheduled > box > image,
+.compose-window.compose-dark .outbox-status.preparing > box > image {
+  color: #62a0ea;
+}
+
+.compose-window.compose-dark .outbox-status.accepted > box > image {
+  color: #57e389;
+}
+
+.compose-window.compose-dark .outbox-status.rejected > box > image {
+  color: #ff7b63;
 }

@@ -3,6 +3,7 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     public signal void account_saved (AccountSettings account);
     public signal void accounts_changed ();
     public signal void smart_mailboxes_changed ();
+    public signal void automation_changed ();
     private CacheDatabase cache;
     private MailSettingsStore settings;
     private RemoteContentPolicy remote_content_policy;
@@ -21,13 +22,13 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     private Gee.ArrayList<Adw.ActionRow> junk_rule_rows = new Gee.ArrayList<Adw.ActionRow> ();
     private Adw.PreferencesGroup trusted_senders_group;
     private Gee.ArrayList<Adw.ActionRow> trusted_sender_rows = new Gee.ArrayList<Adw.ActionRow> ();
-    private Adw.EntryRow rule_name_row;
-    private Adw.EntryRow rule_pattern_row;
-    private Adw.EntryRow rule_value_row;
-    private Adw.ComboRow rule_field_row;
-    private Adw.ComboRow rule_action_row;
+    private Adw.PreferencesGroup safe_senders_group;
+    private Gee.ArrayList<Adw.ActionRow> safe_sender_rows = new Gee.ArrayList<Adw.ActionRow> ();
     private Adw.PreferencesGroup rules_group;
     private Gee.ArrayList<Adw.ActionRow> rule_rows = new Gee.ArrayList<Adw.ActionRow> ();
+    private Adw.PreferencesGroup quick_steps_group;
+    private Gee.ArrayList<Adw.ActionRow> quick_step_rows = new Gee.ArrayList<Adw.ActionRow> ();
+    private Adw.ActionRow automation_status_row;
     private Adw.EntryRow smart_name_row;
     private Adw.EntryRow smart_query_row;
     private Adw.PreferencesGroup smart_group;
@@ -134,6 +135,20 @@ public class PreferencesWindow : Adw.PreferencesDialog {
 
     private Adw.PreferencesPage build_composing_page () {
         var page = new Adw.PreferencesPage (); page.title = "Composing"; page.icon_name = "document-edit-symbolic";
+        var safety = new Adw.PreferencesGroup (); safety.title = "Writing and Sending";
+        var spellcheck = new Adw.SwitchRow (); spellcheck.title = "Check spelling while typing";
+        spellcheck.subtitle = "Uses an installed local dictionary; message text never leaves this device";
+        spellcheck.active = settings.spellcheck_enabled;
+        spellcheck.notify["active"].connect (() => settings.spellcheck_enabled = spellcheck.active);
+        safety.add (spellcheck);
+        var undo_send = new Adw.SpinRow.with_range (5, 30, 1);
+        undo_send.title = "Undo Send window";
+        undo_send.subtitle = "Seconds before a newly sent message can leave Outbox (5–30)";
+        undo_send.value = settings.undo_send_seconds; undo_send.numeric = true;
+        undo_send.notify["value"].connect (() =>
+            settings.undo_send_seconds = (int) undo_send.value);
+        safety.add (undo_send); page.add (safety);
+
         var group = new Adw.PreferencesGroup (); group.title = "Signature";
         group.description = "Choose a separate plain-text signature for each sending identity.";
         identity_row = new Adw.ComboRow (); identity_row.title = "Identity"; identity_row.model = identity_labels;
@@ -179,7 +194,10 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         page.add (group);
         trusted_senders_group = new Adw.PreferencesGroup (); trusted_senders_group.title = "Trusted Senders";
         trusted_senders_group.description = "Remote images load automatically only for senders listed here. You can trust a sender from the blocked-content notice in a message.";
-        page.add (trusted_senders_group); reload_trusted_senders (); return page;
+        page.add (trusted_senders_group); reload_trusted_senders ();
+        safe_senders_group = new Adw.PreferencesGroup (); safe_senders_group.title = "Safe Senders";
+        safe_senders_group.description = "Safe Senders reduce identity-mismatch notices, but never hide failed SPF, DKIM, or DMARC reports.";
+        page.add (safe_senders_group); reload_safe_senders (); return page;
     }
 
     private void reload_trusted_senders () {
@@ -208,6 +226,35 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         } catch (Error error) {
             var failed = new Adw.ActionRow (); failed.title = "Trusted senders unavailable";
             failed.subtitle = error.message; trusted_senders_group.add (failed); trusted_sender_rows.add (failed);
+        }
+    }
+
+    private void reload_safe_senders () {
+        foreach (var row in safe_sender_rows) safe_senders_group.remove (row);
+        safe_sender_rows.clear ();
+        try {
+            var senders = cache.list_safe_senders ();
+            if (senders.size == 0) {
+                var empty = new Adw.ActionRow (); empty.title = "No Safe Senders";
+                empty.subtitle = "Add a sender from the message security details";
+                empty.add_prefix (new Gtk.Image.from_icon_name ("security-medium-symbolic"));
+                safe_senders_group.add (empty); safe_sender_rows.add (empty); return;
+            }
+            foreach (var address in senders) {
+                var row = new Adw.ActionRow (); row.title = address;
+                row.subtitle = "Identity mismatch notices are reduced; authentication failures still appear";
+                var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
+                remove.valign = Gtk.Align.CENTER; remove.tooltip_text = "Remove from Safe Senders";
+                Accessibility.label (remove, "Remove " + address + " from Safe Senders");
+                remove.clicked.connect (() => {
+                    try { cache.set_safe_sender (address, false); reload_safe_senders (); }
+                    catch (Error error) { warning ("Could not remove Safe Sender: %s", error.message); }
+                });
+                row.add_suffix (remove); safe_senders_group.add (row); safe_sender_rows.add (row);
+            }
+        } catch (Error error) {
+            var failed = new Adw.ActionRow (); failed.title = "Safe Senders unavailable";
+            failed.subtitle = error.message; safe_senders_group.add (failed); safe_sender_rows.add (failed);
         }
     }
 
@@ -262,48 +309,158 @@ public class PreferencesWindow : Adw.PreferencesDialog {
 
     private Adw.PreferencesPage build_rules_page () {
         var page = new Adw.PreferencesPage (); page.title = "Rules"; page.icon_name = "system-run-symbolic";
-        var add = new Adw.PreferencesGroup (); add.title = "New Mail Rule";
-        add.description = "Rules run locally as new messages are synchronized.";
-        rule_name_row = new Adw.EntryRow (); rule_name_row.title = "Rule name"; add.add (rule_name_row);
-        var fields = new Gtk.StringList (null); fields.append ("Sender contains"); fields.append ("Recipient contains"); fields.append ("Subject contains");
-        fields.append ("Message body contains"); fields.append ("Has attachment"); fields.append ("Is unread"); fields.append ("Is flagged");
-        rule_field_row = new Adw.ComboRow (); rule_field_row.title = "Match"; rule_field_row.model = fields; add.add (rule_field_row);
-        rule_pattern_row = new Adw.EntryRow (); rule_pattern_row.title = "Text to match"; add.add (rule_pattern_row);
-        var actions = new Gtk.StringList (null); actions.append ("Mark as read"); actions.append ("Flag");
-        actions.append ("Move to Archive"); actions.append ("Move to Trash"); actions.append ("Apply label");
-        actions.append ("Mark as unread"); actions.append ("Unflag"); actions.append ("Move to mailbox ID");
-        rule_action_row = new Adw.ComboRow (); rule_action_row.title = "Action"; rule_action_row.model = actions; add.add (rule_action_row);
-        rule_value_row = new Adw.EntryRow (); rule_value_row.title = "Label name or mailbox ID (when required)"; add.add (rule_value_row);
-        var create = new Gtk.Button.with_label ("Add Rule"); create.halign = Gtk.Align.END;
-        create.add_css_class ("suggested-action"); create.clicked.connect (add_mail_rule); add.add (create);
+        var add = new Adw.PreferencesGroup (); add.title = "Automation";
+        add.description = "Rules run in order as messages synchronize. Use multiple AND/OR conditions, exceptions, actions, account scope, and stop-processing.";
+        var create = new Gtk.Button.with_label ("Add Mail Rule…"); create.halign = Gtk.Align.END;
+        create.add_css_class ("suggested-action"); create.clicked.connect (() => add_advanced_rule.begin ()); add.add (create);
         page.add (add);
-        rules_group = new Adw.PreferencesGroup (); rules_group.title = "Active Rules"; page.add (rules_group);
-        reload_mail_rules (); return page;
+        automation_status_row = new Adw.ActionRow (); automation_status_row.visible = false;
+        automation_status_row.add_prefix (new Gtk.Image.from_icon_name ("emblem-ok-symbolic")); add.add (automation_status_row);
+        rules_group = new Adw.PreferencesGroup (); rules_group.title = "Mail Rules";
+        rules_group.description = "Toggle, edit, reorder, or run a rule against the bounded local cache.";
+        page.add (rules_group);
+        quick_steps_group = new Adw.PreferencesGroup (); quick_steps_group.title = "Quick Steps";
+        quick_steps_group.description = "Apply a reusable sequence of actions to selected messages from the More menu.";
+        var add_quick = new Gtk.Button.with_label ("Add Quick Step…"); add_quick.halign = Gtk.Align.END;
+        add_quick.clicked.connect (() => add_quick_step.begin ()); quick_steps_group.add (add_quick);
+        page.add (quick_steps_group);
+        reload_mail_rules (); reload_quick_steps (); return page;
     }
 
-    private void add_mail_rule () {
+    private async void add_advanced_rule () {
+        var parent = get_root () as Gtk.Window; if (parent == null) return;
         try {
-            cache.add_mail_rule (rule_name_row.text, "", (MailRuleField) rule_field_row.selected,
-                rule_pattern_row.text, (MailRuleAction) rule_action_row.selected, rule_value_row.text);
-            rule_name_row.text = ""; rule_pattern_row.text = ""; rule_value_row.text = ""; reload_mail_rules ();
-        } catch (Error error) { warning ("Could not add mail rule: %s", error.message); }
+            var rule = yield RuleEditorDialog.choose (parent, cache);
+            if (rule == null) return;
+            cache.save_mail_rule (rule); reload_mail_rules (); automation_changed ();
+        } catch (Error error) { show_automation_status (error.message, true); }
+    }
+
+    private async void edit_mail_rule (MailRule existing) {
+        var parent = get_root () as Gtk.Window; if (parent == null) return;
+        try {
+            var rule = yield RuleEditorDialog.choose (parent, cache, existing);
+            if (rule == null) return;
+            cache.save_mail_rule (rule); reload_mail_rules (); automation_changed ();
+        } catch (Error error) { show_automation_status (error.message, true); }
+    }
+
+    private async void add_quick_step () {
+        var parent = get_root () as Gtk.Window; if (parent == null) return;
+        try {
+            var step = yield QuickStepEditorDialog.choose (parent, cache);
+            if (step == null) return;
+            reload_quick_steps (); automation_changed ();
+        } catch (Error error) { show_automation_status (error.message, true); }
+    }
+
+    private void show_automation_status (string text, bool error = false) {
+        automation_status_row.title = text; automation_status_row.visible = true;
+        if (error) automation_status_row.add_css_class ("error");
+        else automation_status_row.remove_css_class ("error");
     }
 
     private void reload_mail_rules () {
         foreach (var row in rule_rows) rules_group.remove (row); rule_rows.clear ();
         try {
-            foreach (var rule in cache.list_mail_rules ()) {
+            var rules = cache.list_mail_rules ();
+            if (rules.size == 0) {
+                var empty = new Adw.ActionRow ();
+                empty.title = "No mail rules yet";
+                empty.subtitle = "Create a rule to automate incoming mail.";
+                empty.add_prefix (new Gtk.Image.from_icon_name ("system-run-symbolic"));
+                rules_group.add (empty); rule_rows.add (empty);
+                return;
+            }
+            int rule_index = 0;
+            foreach (var rule in rules) {
                 var row = new Adw.ActionRow (); row.title = rule.name;
-                string[] actions = { "Mark read", "Flag", "Archive", "Trash", "Label " + rule.value, "Mark unread", "Unflag", "Move to " + rule.value };
-                row.subtitle = "%s matches “%s” → %s".printf (rule.field.to_string ().replace ("MAIL_RULE_FIELD_", "").down (),
-                    rule.pattern, actions[(int) rule.action]);
+                string scope = automation_scope_label (rule.account_id);
+                row.subtitle = "%s • %d %s (%s) • %d %s%s".printf (scope, rule.conditions.size,
+                    rule.conditions.size == 1 ? "condition" : "conditions",
+                    rule.match_mode == MailRuleMatchMode.ALL ? "AND" : "OR", rule.operations.size,
+                    rule.operations.size == 1 ? "action" : "actions",
+                    rule.exceptions.size == 0 ? "" : " • %d exceptions".printf (rule.exceptions.size));
+                var enabled = new Gtk.Switch (); enabled.valign = Gtk.Align.CENTER; enabled.active = rule.enabled;
+                Accessibility.label (enabled, "Enable rule " + rule.name);
+                enabled.notify["active"].connect (() => {
+                    try { cache.set_mail_rule_enabled (rule.id, enabled.active); automation_changed (); }
+                    catch (Error error) { show_automation_status (error.message, true); }
+                });
+                row.add_suffix (enabled);
+                var controls = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 2); controls.add_css_class ("linked");
+                var up = icon_button ("go-up-symbolic", "Move rule up");
+                up.sensitive = rule_index > 0;
+                up.clicked.connect (() => { try { cache.move_mail_rule (rule.id, -1); reload_mail_rules (); automation_changed (); }
+                    catch (Error error) { show_automation_status (error.message, true); } }); controls.append (up);
+                var down = icon_button ("go-down-symbolic", "Move rule down");
+                down.sensitive = rule_index < rules.size - 1;
+                down.clicked.connect (() => { try { cache.move_mail_rule (rule.id, 1); reload_mail_rules (); automation_changed (); }
+                    catch (Error error) { show_automation_status (error.message, true); } }); controls.append (down);
+                var run = icon_button ("media-playback-start-symbolic", "Run rule now");
+                run.clicked.connect (() => {
+                    try { int applied = new MailRuleService (cache).run_now (rule);
+                        show_automation_status ("Rule “%s” applied to %d messages".printf (rule.name, applied)); automation_changed (); }
+                    catch (Error error) { show_automation_status (error.message, true); }
+                }); controls.append (run);
+                var edit = icon_button ("document-edit-symbolic", "Edit rule");
+                edit.clicked.connect (() => edit_mail_rule.begin (rule)); controls.append (edit);
                 var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic"); remove.valign = Gtk.Align.CENTER;
                 Accessibility.label (remove, "Delete rule " + rule.name);
-                remove.clicked.connect (() => { try { cache.remove_mail_rule (rule.id); reload_mail_rules (); }
-                    catch (Error error) { warning ("Could not remove mail rule: %s", error.message); } });
-                row.add_suffix (remove); rules_group.add (row); rule_rows.add (row);
+                remove.clicked.connect (() => {
+                    try {
+                        cache.remove_mail_rule (rule.id); reload_mail_rules (); automation_changed ();
+                        show_automation_status ("Rule “%s” deleted".printf (rule.name));
+                    } catch (Error error) { show_automation_status (error.message, true); }
+                });
+                controls.append (remove); row.add_suffix (controls); rules_group.add (row); rule_rows.add (row);
+                rule_index++;
             }
         } catch (Error error) { warning ("Could not load mail rules: %s", error.message); }
+    }
+
+    private void reload_quick_steps () {
+        foreach (var row in quick_step_rows) quick_steps_group.remove (row); quick_step_rows.clear ();
+        try {
+            var steps = cache.list_quick_steps ();
+            if (steps.size == 0) {
+                var empty = new Adw.ActionRow ();
+                empty.title = "No Quick Steps yet";
+                empty.subtitle = "Create one to apply several actions at once.";
+                empty.add_prefix (new Gtk.Image.from_icon_name ("media-playlist-consecutive-symbolic"));
+                quick_steps_group.add (empty); quick_step_rows.add (empty);
+                return;
+            }
+            foreach (var step in steps) {
+                var row = new Adw.ActionRow (); row.title = step.name;
+                row.subtitle = "%s • %d %s • available from More → Quick Steps".printf (
+                    automation_scope_label (step.account_id), step.operations.size,
+                    step.operations.size == 1 ? "action" : "actions");
+                var remove = icon_button ("user-trash-symbolic", "Delete Quick Step " + step.name);
+                remove.clicked.connect (() => { try { cache.remove_quick_step (step.id); reload_quick_steps (); automation_changed (); }
+                    catch (Error error) { show_automation_status (error.message, true); } });
+                row.add_suffix (remove); quick_steps_group.add (row); quick_step_rows.add (row);
+            }
+        } catch (Error error) { show_automation_status (error.message, true); }
+    }
+
+    private string automation_scope_label (string account_id) {
+        if (account_id == "") return "All accounts";
+        try {
+            var account = cache.find_account (account_id);
+            if (account == null) return "Unavailable account";
+            if (account.display_name.strip () == "" || account.display_name == account.email)
+                return account.email;
+            return "%s <%s>".printf (account.display_name, account.email);
+        } catch (Error error) {
+            warning ("Could not resolve automation account: %s", error.message);
+            return "Unavailable account";
+        }
+    }
+
+    private static Gtk.Button icon_button (string icon, string label) {
+        var button = new Gtk.Button.from_icon_name (icon); button.valign = Gtk.Align.CENTER;
+        button.add_css_class ("flat"); button.tooltip_text = label; Accessibility.label (button, label); return button;
     }
 
     private Adw.PreferencesPage build_smart_mailboxes_page () {

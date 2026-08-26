@@ -48,8 +48,6 @@ private class MisreportedOversizedAttachmentData : Camel.DataWrapper {
 }
 
 private void test_sync_memory_bounds () {
-    // There is deliberately no per-sync message cap. Memory remains bounded by
-    // the small committed batches and the MIME/attachment safety limits.
     assert (CamelMailEngine.SYNC_BATCH_SIZE > 0);
     assert (CamelMailEngine.UID_SCAN_YIELD_INTERVAL > CamelMailEngine.SYNC_BATCH_SIZE);
 
@@ -58,6 +56,44 @@ private void test_sync_memory_bounds () {
         CamelMailEngine.decode_text (new MisreportedOversizedAttachmentData (), 32);
     } catch (Error error) { failure = error; }
     assert (failure is IOError.MESSAGE_TOO_LARGE);
+}
+
+private void test_sync_session_message_limit_preserves_inventory () {
+    var result = new MailSyncResult ("bounded-account");
+    var inbox = new Mailbox ("bounded-account:inbox", "Inbox", "mail-inbox-symbolic",
+        MailboxRole.INBOX, 249, "bounded-account", "INBOX");
+    var archive = new Mailbox ("bounded-account:archive", "Archive", "package-x-generic-symbolic",
+        MailboxRole.ARCHIVE, 12, "bounded-account", "Archive");
+    result.mailboxes.add (inbox); result.mailboxes.add (archive);
+    for (int index = 0; index < 249; index++) {
+        string uid = index.to_string ();
+        result.record_remote_uid (inbox.id, uid);
+        result.states.add (new RemoteMessageState (inbox.id + ":" + uid, true, false));
+    }
+    for (int index = 0; index < 12; index++) {
+        string uid = index.to_string ();
+        result.record_remote_uid (archive.id, uid);
+        result.states.add (new RemoteMessageState (archive.id + ":" + uid, false, false));
+    }
+
+    int target = CamelMailEngine.configure_download_budget (result, 261);
+    assert (CamelMailEngine.MAX_MESSAGES_PER_SYNC_SESSION == 250);
+    assert (target == 250); assert (result.messages_to_download == 261);
+    assert (result.more_messages_available);
+
+    int scheduled = CamelMailEngine.bounded_folder_download_count (249, 0);
+    assert (scheduled == 249);
+    scheduled += CamelMailEngine.bounded_folder_download_count (12, scheduled);
+    assert (scheduled == 250);
+    assert (CamelMailEngine.bounded_folder_download_count (20, scheduled) == 0);
+
+    // Applying the MIME budget must not truncate the authoritative inventory
+    // and remote state used by CacheDatabase to reconcile every folder.
+    var inbox_uids = result.remote_uids_for (inbox.id);
+    var archive_uids = result.remote_uids_for (archive.id);
+    assert (result.mailboxes.size == 2); assert (result.states.size == 261);
+    assert (inbox_uids != null && inbox_uids.size == 249);
+    assert (archive_uids != null && archive_uids.size == 12);
 }
 
 private void test_top_level_html_body () {
@@ -75,6 +111,59 @@ private void test_top_level_html_body () {
     } catch (Error error) {
         GLib.error ("Top-level HTML extraction test failed: %s", error.message);
     }
+}
+
+private void test_unnamed_inline_calendar_is_extracted () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-calendar-mime-%s".printf (Uuid.string_random ()));
+    assert (DirUtils.create_with_parents (root, 0700) == 0);
+    try {
+        var multipart = new Camel.Multipart ();
+        multipart.set_mime_type ("multipart/mixed");
+        var body = new Camel.MimePart ();
+        body.set_content ("Message body".data, "text/plain; charset=utf-8");
+        multipart.add_part (body);
+        var calendar = new Camel.MimePart ();
+        string payload = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+            "BEGIN:VEVENT\r\nUID:mime@example.net\r\nDTSTART:20260910T130000Z\r\n" +
+            "SUMMARY:MIME invitation\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        calendar.set_content (payload.data, "text/calendar; method=REQUEST; charset=utf-8");
+        // Deliberately omit Content-Disposition and filename: Outlook and
+        // Exchange both emit this valid shape.
+        multipart.add_part (calendar);
+
+        var engine = new CamelMailEngine (new EmptyCredentialStore (),
+            Path.build_filename (root, "data"), Path.build_filename (root, "cache"),
+            Path.build_filename (root, "received"));
+        string plain = ""; string html = ""; bool has_attachment = false;
+        int attachment_index = 0;
+        int64 remaining = AttachmentService.MAX_TOTAL_ATTACHMENT_SIZE;
+        var attachments = new Gee.ArrayList<Attachment> ();
+        engine.extract_content (multipart, ref plain, ref html, ref has_attachment,
+            attachments, "mailbox:calendar", ref attachment_index, ref remaining, null);
+
+        assert (plain == "Message body"); assert (html == "");
+        assert (has_attachment); assert (attachment_index == 1);
+        assert (attachments.size == 1);
+        assert (attachments[0].name == "invitation.ics");
+        assert (attachments[0].is_calendar_invitation ());
+        assert (attachments[0].is_downloaded ());
+        string staged; FileUtils.get_contents (attachments[0].path, out staged);
+        // Camel normalizes decoded text line endings. The complete calendar
+        // object and action metadata must otherwise survive extraction.
+        assert (staged.replace ("\r\n", "\n") == payload.replace ("\r\n", "\n"));
+    } catch (Error error) {
+        GLib.error ("Inline calendar MIME extraction failed: %s", error.message);
+    }
+}
+
+private void test_html_only_remote_draft_plain_fidelity () {
+    string html = "<div>Hello <strong>provider draft</strong></div>";
+    assert (CamelMailEngine.remote_draft_plain_body ("", html) ==
+        "Hello provider draft");
+    assert (CamelMailEngine.remote_draft_plain_body ("Exact plain", html) ==
+        "Exact plain");
+    assert (CamelMailEngine.remote_draft_plain_body ("", "") == "");
 }
 
 private void test_malformed_text_charset_falls_back_safely () {
@@ -205,9 +294,12 @@ private void test_certificate_failure_detail () {
 }
 
 private void test_authentication_mechanism () {
-    assert (CamelMailEngine.authentication_mechanism (AuthenticationMode.PASSWORD) == "PLAIN");
+    assert (CamelMailEngine.authentication_mechanism (AuthenticationMode.PASSWORD, true) == null);
+    assert (CamelMailEngine.authentication_mechanism (AuthenticationMode.PASSWORD, false) == "PLAIN");
     assert (CamelMailEngine.authentication_mechanism (
-        AuthenticationMode.GNOME_ONLINE_ACCOUNTS) == "XOAUTH2");
+        AuthenticationMode.GNOME_ONLINE_ACCOUNTS, true) == "XOAUTH2");
+    assert (CamelMailEngine.authentication_mechanism (
+        AuthenticationMode.GNOME_ONLINE_ACCOUNTS, false) == "XOAUTH2");
 }
 
 private void test_oauth_token_bridge () {
@@ -232,6 +324,52 @@ private void test_oauth_token_bridge () {
         session.remove_service (service);
     } catch (Error error) {
         GLib.error ("OAuth token bridge test failed: %s", error.message);
+    }
+}
+
+private void test_idle_configuration_and_change_filter () {
+    var empty = new Camel.FolderChangeInfo ();
+    assert (!CamelLiveMailWatch.change_requires_sync (empty));
+    var changed_only = new Camel.FolderChangeInfo ();
+    changed_only.change_uid ("1");
+    assert (CamelLiveMailWatch.change_requires_sync (changed_only));
+    var added = new Camel.FolderChangeInfo ();
+    added.add_uid ("2");
+    assert (CamelLiveMailWatch.change_requires_sync (added));
+    var recent = new Camel.FolderChangeInfo ();
+    recent.recent_uid ("3");
+    assert (CamelLiveMailWatch.change_requires_sync (recent));
+    var removed = new Camel.FolderChangeInfo ();
+    removed.remove_uid ("4");
+    assert (CamelLiveMailWatch.change_requires_sync (removed));
+
+    try {
+        string root = DirUtils.make_tmp ("mailficient-idle-settings-XXXXXX");
+        // Keep this focused test independently runnable: Camel's provider
+        // registry is initialized by the production engine constructor.
+        var initializer = new CamelMailEngine (new EmptyCredentialStore (),
+            Path.build_filename (root, "init-data"),
+            Path.build_filename (root, "init-cache"),
+            Path.build_filename (root, "init-attachments"));
+        var session = new PersonalCamelSession (Path.build_filename (root, "data"),
+            Path.build_filename (root, "cache"));
+        // Mailficient has no client-side Camel rules. A null driver prevents
+        // EDS from swallowing the first Inbox change for asynchronous filter
+        // processing and avoids sharing a worker-owned driver instance.
+        assert (session.client_filter_driver_for_testing () == null);
+        var store = (Camel.Store) session.add_service (
+            "idle-settings-imap", "imapx", Camel.ProviderType.STORE);
+        var settings = store.ref_settings ();
+        Value disabled = Value (typeof (bool));
+        disabled.set_boolean (false);
+        settings.set_property ("use-idle", disabled);
+        assert (CamelLiveMailWatch.enable_idle (store));
+        Value enabled = Value (typeof (bool));
+        settings.get_property ("use-idle", ref enabled);
+        assert (enabled.get_boolean ());
+        session.remove_service (store);
+    } catch (Error error) {
+        GLib.error ("IMAP IDLE settings test failed: %s", error.message);
     }
 }
 
@@ -639,13 +777,21 @@ int main (string[] args) {
     Test.add_func ("/camel/certificate-failure-detail", Mailficient.test_certificate_failure_detail);
     Test.add_func ("/camel/authentication-mechanism", Mailficient.test_authentication_mechanism);
     Test.add_func ("/camel/oauth-token-bridge", Mailficient.test_oauth_token_bridge);
+    Test.add_func ("/camel/idle-configuration-and-change-filter",
+        Mailficient.test_idle_configuration_and_change_filter);
     Test.add_func ("/camel/folder-role-type-mask", Mailficient.test_folder_role_type_mask);
     Test.add_func ("/camel/folder-role-name-fallback", Mailficient.test_folder_role_name_fallback);
     Test.add_func ("/camel/destination-uid-recovery", Mailficient.test_destination_uid_recovery);
     Test.add_func ("/camel/failed-attachment-decode-is-atomic", Mailficient.test_failed_attachment_decode_is_atomic);
     Test.add_func ("/camel/misreported-attachment-is-bounded", Mailficient.test_misreported_attachment_is_bounded);
     Test.add_func ("/camel/sync-memory-bounds", Mailficient.test_sync_memory_bounds);
+    Test.add_func ("/camel/sync-session-message-limit-preserves-inventory",
+        Mailficient.test_sync_session_message_limit_preserves_inventory);
     Test.add_func ("/camel/top-level-html-body", Mailficient.test_top_level_html_body);
+    Test.add_func ("/camel/unnamed-inline-calendar-is-extracted",
+        Mailficient.test_unnamed_inline_calendar_is_extracted);
+    Test.add_func ("/camel/html-only-remote-draft-plain-fidelity",
+        Mailficient.test_html_only_remote_draft_plain_fidelity);
     Test.add_func ("/camel/malformed-text-charset-falls-back-safely", Mailficient.test_malformed_text_charset_falls_back_safely);
     Test.add_func ("/camel/sync-cooperatively-yields", Mailficient.test_sync_cooperatively_yields);
     Test.add_func ("/camel/remote-attachment-part-addressing", Mailficient.test_remote_attachment_part_addressing);

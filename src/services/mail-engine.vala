@@ -1,12 +1,23 @@
 namespace Mailficient {
 public interface MailEngine : Object {
     public signal void sync_batch_ready (MailSyncResult batch);
+    public signal void live_mail_changed (string account_id);
+    public signal void live_mail_unavailable (string account_id);
     public abstract async void connect_account (AccountSettings settings, Cancellable? cancellable = null) throws Error;
     public abstract async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error;
     public abstract async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error;
     public abstract async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
                                                        Cancellable? cancellable = null) throws Error;
     public abstract async SendResult send (Draft draft, Cancellable? cancellable = null) throws Error;
+    // Remote Drafts are deliberately separate from SMTP. Implementations must
+    // use Draft.remote_message_id() as an idempotency key and may return null
+    // when the provider does not advertise a writable Drafts mailbox.
+    public abstract async RemoteDraftLocation? save_remote_draft (
+        Draft draft, Cancellable? cancellable = null) throws Error;
+    // Implementations verify expected_message_id before changing server state.
+    // A missing copy is successful cleanup; an identity mismatch is not.
+    public abstract async bool delete_remote_draft (
+        PendingDraftDeletion deletion, Cancellable? cancellable = null) throws Error;
     public abstract async void save_remote_attachment (string account_id, string mailbox_name,
                                                        string remote_uid, int remote_part_index,
                                                        File destination, int64 maximum_bytes,

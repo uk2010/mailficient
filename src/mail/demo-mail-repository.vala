@@ -66,6 +66,21 @@ public class DemoMailRepository : Object, MailRepository {
         digest.add_attachment (new Attachment ("demo-inline-preview",
             "resource:///com/local/Mailficient/sample-data/mailficient-preview.png",
             "mailficient-preview.png", 60594, "image/png", "<mailficient-preview@example.net>"));
+        if (Environment.get_variable ("MAILFICIENT_QA_SECURITY") == "1") {
+            digest.reply_to = "account-review@different.example";
+            digest.authentication_results =
+                "qa-mx.example; dmarc=fail header.from=northstar.test; spf=softfail; dkim=fail";
+            digest.list_unsubscribe = "<https://northstar.test/subscriptions/leave?id=42>, " +
+                "<mailto:leave@northstar.test?subject=Unsubscribe%20Alex>";
+            digest.list_unsubscribe_post = "List-Unsubscribe=One-Click";
+            digest.raw_headers = "From: Lina from Northstar <lina@northstar.test>\n" +
+                "Reply-To: account-review@different.example\n" +
+                "Authentication-Results: " + digest.authentication_results + "\n" +
+                "List-Unsubscribe: " + digest.list_unsubscribe + "\n" +
+                "List-Unsubscribe-Post: List-Unsubscribe=One-Click\n";
+            digest.body_html = digest.body_html.replace ("View the full report when you’re ready.",
+                "<a href='https://account-review.different.example/sign-in'>northstar.test</a> when you’re ready.");
+        }
         messages.add (digest);
         messages.add (new Message ("4", "inbox", "Fedora Community", "updates@fedoraproject.org", "Alex Morgan <alex@example.com>",
             "This week in Fedora Workstation", "Desktop updates, community news, and upcoming test days…",
@@ -78,6 +93,18 @@ public class DemoMailRepository : Object, MailRepository {
         photographs.add_attachment (new Attachment ("demo-large-photo", "", "lake-original.tiff",
             78 * 1024 * 1024, "image/tiff", "", 1));
         messages.add (photographs);
+        if (Environment.get_variable ("MAILFICIENT_QA_CALENDAR_INVITE") == "1") {
+            var invitation = new Message ("calendar-invite", "inbox", "Maya Chen",
+                "maya@example.net", "Alex Morgan <alex@example.com>",
+                "Product review and launch planning", "Invitation for Thursday",
+                "Hi Alex,\n\nHere is the invitation for our product review and launch planning session.\n\nMaya",
+                "11:15 AM", true, false, true, 1, false, ACCOUNT_ID, "calendar-qa",
+                "<calendar-qa@example.net>");
+            invitation.add_attachment (new Attachment ("demo-calendar-invitation",
+                "resource:///com/local/Mailficient/sample-data/product-review-invitation.ics",
+                "product-review-invitation.ics", 585, "text/calendar; method=REQUEST"));
+            messages.add (invitation);
+        }
     }
 
     public Gee.List<Mailbox> list_mailboxes () {

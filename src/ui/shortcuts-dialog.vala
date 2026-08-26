@@ -8,18 +8,21 @@ public class ShortcutsDialog : Adw.PreferencesDialog {
         add_shortcut_row (mail, "Reply All", "Ctrl+Shift+R"); add_shortcut_row (mail, "Forward", "Ctrl+L");
         add_shortcut_row (mail, "Archive", "Ctrl+Shift+A / Ctrl+E"); add_shortcut_row (mail, "Move to Trash", "Delete");
         add_shortcut_row (mail, "Flag or Unflag", "Ctrl+Shift+L"); add_shortcut_row (mail, "Mark Read or Unread", "Ctrl+Shift+U / Ctrl+I");
-        add_shortcut_row (mail, "Reply / Forward", "Ctrl+R / Ctrl+L");
         add_shortcut_row (mail, "Select All / Clear Selection", "Ctrl+A / Escape");
         add_shortcut_row (mail, "Select a Range", "Shift-click");
         add_shortcut_row (mail, "Zoom Email Preview", "Ctrl++ / Ctrl+-");
         var navigation = new Adw.PreferencesGroup (); navigation.title = "Navigation";
         add_shortcut_row (navigation, "Search Mail", "Ctrl+F"); add_shortcut_row (navigation, "Get Mail", "F9");
+        add_shortcut_row (navigation, "Search Server", "Enter in Search");
         add_shortcut_row (navigation, "Next Message", "Alt+Down / Ctrl+J"); add_shortcut_row (navigation, "Previous Message", "Alt+Up / Ctrl+K");
         add_shortcut_row (navigation, "Snooze", "Ctrl+S");
+        add_shortcut_row (navigation, "Preferences", "Ctrl+,");
+        var tasks = new Adw.PreferencesGroup (); tasks.title = "Tasks";
+        add_shortcut_row (tasks, "New Task", "Ctrl+Shift+T");
         var compose = new Adw.PreferencesGroup (); compose.title = "Composing";
         add_shortcut_row (compose, "Send", "Ctrl+Enter"); add_shortcut_row (compose, "Save Draft", "Ctrl+S");
         add_shortcut_row (compose, "Attach Files", "Ctrl+Shift+A");
-        page.add (mail); page.add (navigation); page.add (compose); add (page);
+        page.add (mail); page.add (navigation); page.add (tasks); page.add (compose); add (page);
     }
 
     private static void add_shortcut_row (Adw.PreferencesGroup group, string title, string keys) {

@@ -18,12 +18,16 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private MailRepository repository;
+    private MailSearchService search_service;
     private MessageList message_list;
     private ReadingPane reader;
+    private TaskService task_service;
+    private TaskView task_view;
     private Gtk.SearchEntry search = new Gtk.SearchEntry ();
     private CacheDatabase cache;
     private AttachmentService attachment_service;
     private ReceivedAttachmentService received_attachment_service;
+    private CalendarIntegrationService calendar_service;
     private DraftLifecycleService draft_lifecycle;
     private OutboundService outbound_service;
     private MailSettingsStore settings;
@@ -76,6 +80,7 @@ public class MailWindow : Adw.ApplicationWindow {
     // NavigationSplitView plus custom drag widget could only move a few
     // pixels on some GTK/Adwaita layouts.
     private Gtk.Paned message_split = new Gtk.Paned (Gtk.Orientation.HORIZONTAL);
+    private Gtk.Stack workspace_stack = new Gtk.Stack ();
     private Gtk.Stack content_stack = new Gtk.Stack ();
     private Adw.NavigationPage content_page;
     private Gtk.Box? message_pane;
@@ -95,10 +100,14 @@ public class MailWindow : Adw.ApplicationWindow {
     private string preserve_unread_selection_id = "";
     private Gtk.Button? toggle_read_button;
     private MenuItem? more_toggle_read_item;
+    private Menu quick_steps_menu = new Menu ();
+    private MailSearchScope search_scope = MailSearchScope.CURRENT_FOLDER;
+    private Cancellable? server_search_cancellable;
 
     public MailWindow (Gtk.Application app, MailRepository repository, MailSearchService search_service,
                        CacheDatabase cache, AttachmentService attachment_service,
                        ReceivedAttachmentService received_attachment_service,
+                       CalendarIntegrationService calendar_service,
                        DraftLifecycleService draft_lifecycle,
                        OutboundService outbound_service, MailSettingsStore settings, RemoteContentPolicy remote_content_policy,
                        AccountProvisioningService? account_provisioner,
@@ -114,13 +123,17 @@ public class MailWindow : Adw.ApplicationWindow {
         // usable desktop minimum instead of collapsing into a phone layout.
         set_size_request (960, 560);
         this.repository = repository;
+        this.search_service = search_service;
         this.cache = cache;
+        task_service = new TaskService (cache, repository);
         this.attachment_service = attachment_service;
         this.received_attachment_service = received_attachment_service;
+        this.calendar_service = calendar_service;
         this.draft_lifecycle = draft_lifecycle;
         this.remote_content_policy = remote_content_policy;
         this.account_provisioner = account_provisioner;
-        reader = new ReadingPane (received_attachment_service, remote_content_policy);
+        reader = new ReadingPane (received_attachment_service, remote_content_policy,
+            calendar_service, cache);
         reader.add_account_requested.connect (() => show_accounts ());
         this.outbound_service = outbound_service;
         this.settings = settings;
@@ -156,11 +169,13 @@ public class MailWindow : Adw.ApplicationWindow {
         this.mail_engine = mail_engine; this.sync_service = sync_service;
         this.folder_service = folder_service; this.online_accounts = online_accounts;
         message_list = new MessageList (repository, search_service);
+        task_view = new TaskView (task_service);
         var toolbar = new Adw.ToolbarView ();
         toolbar.overflow = Gtk.Overflow.HIDDEN;
         var header = build_header (); toolbar.add_top_bar (header);
         header.hexpand = true; header.halign = Gtk.Align.FILL;
         sidebar = new MailboxSidebar (repository, cache); sidebar.set_size_request (220, -1);
+        task_service.changed.connect (() => sidebar.refresh_counts ());
         sidebar.mailbox_selected.connect ((mailbox) => {
             int64 selection_started = DebugTrace.mark ();
             string previous_mailbox_id = active_mailbox == null ? "" : active_mailbox.id;
@@ -174,6 +189,22 @@ public class MailWindow : Adw.ApplicationWindow {
             active_mailbox = mailbox;
             last_selected_mailbox_id = mailbox.id;
             if (search.text != "") search.text = "";
+            if (is_task_mailbox (mailbox.id)) {
+                selected_message = null;
+                message_list.clear_selection ();
+                workspace_stack.visible_child_name = "tasks";
+                task_view.set_mode (mailbox.id == CachedMailRepository.TASK_TODAY_ID ?
+                    TaskViewMode.TODAY : TaskViewMode.PLANNED);
+                search.placeholder_text = "Search Tasks";
+                sort_button.sensitive = false;
+                update_action_sensitivity ();
+                if (mailbox_split.collapsed) mailbox_split.show_sidebar = false;
+                DebugTrace.duration ("navigation", "task_view_complete", selection_started);
+                return;
+            }
+            workspace_stack.visible_child_name = "mail";
+            search.placeholder_text = "Search Mail";
+            sort_button.sensitive = true;
             DebugTrace.log ("navigation", "load_mailbox mailbox=%s".printf (mailbox.id));
             message_list.show_mailbox (mailbox);
             var first_message = message_list.first_message ();
@@ -243,6 +274,19 @@ public class MailWindow : Adw.ApplicationWindow {
         reader.remote_content_failed.connect ((error) => show_operation_error (error));
         reader.remote_sender_trusted.connect ((address) =>
             toast_overlay.add_toast (new Adw.Toast ("Images will load automatically from %s".printf (address))));
+        reader.safe_sender_changed.connect ((address, safe) =>
+            toast_overlay.add_toast (new Adw.Toast (safe ?
+                "%s added to Safe Senders".printf (address) :
+                "%s removed from Safe Senders".printf (address))));
+        reader.phishing_report_requested.connect ((message) => confirm_report_phishing.begin (message));
+        reader.unsubscribe_requested.connect ((message, target) => confirm_unsubscribe.begin (message, target));
+        reader.calendar_action_completed.connect ((message) =>
+            toast_overlay.add_toast (new Adw.Toast (message)));
+        reader.calendar_action_failed.connect ((error) => show_operation_error (error));
+        task_view.open_message_requested.connect (open_message);
+        task_view.toast_requested.connect ((message) =>
+            toast_overlay.add_toast (new Adw.Toast (message)));
+        task_view.operation_failed.connect ((error) => show_operation_error (error));
         outbound_service.delivery_failed.connect ((draft_id, error) =>
             toast_overlay.add_toast (new Adw.Toast ("Queued message not sent — %s".printf (error.suggestion))));
         outbound_service.sent_filing_failed.connect ((draft_id, detail) =>
@@ -303,7 +347,12 @@ public class MailWindow : Adw.ApplicationWindow {
             clamp_message_split_position ();
             message_pane_width = message_split.position;
         });
-        mailbox_split.content = message_split; toolbar.set_content (mailbox_split);
+        workspace_stack.hexpand = true; workspace_stack.vexpand = true;
+        workspace_stack.transition_type = Gtk.StackTransitionType.CROSSFADE;
+        workspace_stack.add_named (message_split, "mail");
+        workspace_stack.add_named (task_view, "tasks");
+        workspace_stack.visible_child_name = "mail";
+        mailbox_split.content = workspace_stack; toolbar.set_content (mailbox_split);
         mailbox_split.show_sidebar = settings.sidebar_visible;
         var mail_overlay = new Gtk.Overlay ();
         mail_overlay.overflow = Gtk.Overflow.HIDDEN;
@@ -386,8 +435,28 @@ public class MailWindow : Adw.ApplicationWindow {
             selected_message = repository.find_message (initial.id) ?? initial;
             display_message (selected_message); update_action_sensitivity ();
         }
-        string? qa_message = Environment.get_variable ("MAILFICIENT_QA_MESSAGE");
-        if (qa_message != null) Timeout.add (350, () => { message_list.select_message (qa_message); return Source.REMOVE; });
+        string qa_message = Environment.get_variable ("MAILFICIENT_QA_MESSAGE") ?? "";
+        string qa_search = Environment.get_variable ("MAILFICIENT_QA_SEARCH") ?? "";
+        string qa_mailbox = Environment.get_variable ("MAILFICIENT_QA_MAILBOX") ?? "";
+        // Sequence QA navigation explicitly. Today/Planned can now be the
+        // startup view, and selecting a mailbox clears its old query by
+        // design; independent timers made message-focused states racy.
+        if (qa_mailbox != "") Idle.add (() => {
+            sidebar.select_mailbox (qa_mailbox);
+            Idle.add (() => {
+                if (qa_search != "") search.text = qa_search;
+                if (qa_message != "") Timeout.add (400, () => {
+                    message_list.select_message (qa_message); return Source.REMOVE;
+                });
+                return Source.REMOVE;
+            });
+            return Source.REMOVE;
+        }); else {
+            if (qa_search != "") Idle.add (() => { search.text = qa_search; return Source.REMOVE; });
+            if (qa_message != "") Timeout.add (650, () => {
+                message_list.select_message (qa_message); return Source.REMOVE;
+            });
+        }
         if (Environment.get_variable ("MAILFICIENT_QA_PRESERVE_SELECTION") == "1") Timeout.add (900, () => {
             repository.reload ();
             return Source.REMOVE;
@@ -408,10 +477,6 @@ public class MailWindow : Adw.ApplicationWindow {
                 qa_export_rendered_print.begin (qa_print_pdf);
                 return Source.REMOVE;
             });
-        string? qa_search = Environment.get_variable ("MAILFICIENT_QA_SEARCH");
-        if (qa_search != null && qa_search != "") Idle.add (() => { search.text = qa_search; return Source.REMOVE; });
-        string? qa_mailbox = Environment.get_variable ("MAILFICIENT_QA_MAILBOX");
-        if (qa_mailbox != null && qa_mailbox != "") Idle.add (() => { sidebar.select_mailbox (qa_mailbox); return Source.REMOVE; });
         if (Environment.get_variable ("MAILFICIENT_QA_HIDE_SIDEBAR") == "1") Idle.add (() => {
             set_mailbox_sidebar_visible (false);
             return Source.REMOVE;
@@ -641,6 +706,124 @@ public class MailWindow : Adw.ApplicationWindow {
         }
     }
 
+    private async void search_server () {
+        if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) return;
+        string requested = search.text.strip (); if (requested == "") return;
+        if (!search_service.server_search_available) {
+            toast_overlay.add_toast (new Adw.Toast ("Server search is unavailable in this build")); return;
+        }
+        if (server_search_cancellable != null) server_search_cancellable.cancel ();
+        var request = new Cancellable (); server_search_cancellable = request;
+        string mailbox_id = active_mailbox == null ? "" : active_mailbox.id;
+        MailSearchScope effective_scope = search_scope;
+        if (effective_scope == MailSearchScope.CURRENT_FOLDER && mailbox_id.has_prefix ("unified-"))
+            effective_scope = MailSearchScope.ALL_MAIL;
+        toast_overlay.add_toast (new Adw.Toast ("Searching the mail server…"));
+        try {
+            int added = yield search_service.fetch_from_server (requested, effective_scope,
+                mailbox_id, 200, request);
+            if (request.is_cancelled () || search.text.strip () != requested) return;
+            message_list.search (requested);
+            toast_overlay.add_toast (new Adw.Toast (added == 0 ?
+                "No additional messages were found on the server" :
+                "%d additional server %s found".printf (added, added == 1 ? "message" : "messages")));
+        } catch (Error error) {
+            if (!(error is IOError.CANCELLED)) show_operation_error (error);
+        } finally {
+            if (server_search_cancellable == request) server_search_cancellable = null;
+        }
+    }
+
+    private void show_search_help () {
+        var dialog = new Adw.AlertDialog (
+            "Search Mail",
+            "Use quotes for exact phrases and OR between alternatives. Prefix a term with − to exclude it.\n\n" +
+            "Scopes: from:, to:, cc:, bcc:, subject:, account:, folder:, label:.\n" +
+            "Attachments: has:attachment, attachment:, type:.\n" +
+            "Status and time: is:unread, is:flagged, date:, after:, before:, size:>10MB.\n\n" +
+            "Results come from the local private index while you type. Press Enter to run a bounded search on the selected mail server scope.");
+        dialog.add_response ("close", "Close"); dialog.default_response = "close"; dialog.present (this);
+    }
+
+    private void execute_quick_step (int64 id) {
+        try {
+            QuickStep? selected = null;
+            foreach (var step in cache.list_quick_steps ()) if (step.id == id) { selected = step; break; }
+            if (selected == null) throw new MailError.STORAGE ("The Quick Step no longer exists");
+            var messages = message_list.selected_messages ();
+            if (messages.size == 0) {
+                toast_overlay.add_toast (new Adw.Toast ("Select a message before running a Quick Step")); return;
+            }
+            int applied = new QuickStepService (cache).execute (selected, messages);
+            repository.reload ();
+            toast_overlay.add_toast (new Adw.Toast (applied == 1 ?
+                "Quick Step “%s” applied".printf (selected.name) :
+                "Quick Step “%s” applied to %d messages".printf (selected.name, applied)));
+        } catch (Error error) { show_operation_error (error); }
+    }
+
+    private void rebuild_quick_steps_menu () {
+        quick_steps_menu.remove_all ();
+        try {
+            foreach (var step in cache.list_quick_steps ()) {
+                var item = new MenuItem (step.name, null);
+                item.set_action_and_target_value ("win.run-quick-step", new Variant.int64 (step.id));
+                quick_steps_menu.append_item (item);
+            }
+        } catch (Error error) { warning ("Could not load Quick Steps: %s", error.message); }
+        quick_steps_menu.append ("Manage Quick Steps…", "win.manage-quick-steps");
+    }
+
+    private async void confirm_report_phishing (Message message) {
+        var dialog = new Adw.AlertDialog ("Report this message as phishing?",
+            "Mailficient will ask the mail provider to classify it as junk, move it to Junk, and block this sender locally. This cannot verify or report the message to a third-party abuse service.");
+        dialog.add_response ("cancel", "Cancel"); dialog.add_response ("report", "Report Phishing");
+        dialog.set_response_appearance ("report", Adw.ResponseAppearance.DESTRUCTIVE);
+        dialog.default_response = "cancel"; dialog.close_response = "cancel";
+        if ((yield dialog.choose (this, null)) != "report") return;
+        try {
+            try { cache.set_safe_sender (message.sender_address, false); } catch (MailError ignored) { }
+            repository.classify_junk (message.id, true);
+            selected_message = null; show_reader_empty_state (); sidebar.refresh_counts ();
+            toast_overlay.add_toast (new Adw.Toast ("Message reported as phishing and moved to Junk"));
+        } catch (Error error) { show_operation_error (error); }
+    }
+
+    private async void confirm_unsubscribe (Message message, UnsubscribeTarget target) {
+        string detail = target.is_email ?
+            "Mailficient will prepare an unsubscribe email. You can review it before sending." :
+            (target.supports_one_click ?
+                "The list advertises one-click unsubscribe. Mailficient will open its secure HTTPS endpoint for your confirmation; it will not submit a hidden request." :
+                "Mailficient will open the secure subscription page in your browser.");
+        var dialog = new Adw.AlertDialog ("Unsubscribe from this mailing list?", detail);
+        dialog.add_response ("cancel", "Cancel"); dialog.add_response ("continue", target.is_email ? "Prepare Email" : "Open Page");
+        dialog.set_response_appearance ("continue", Adw.ResponseAppearance.SUGGESTED);
+        dialog.default_response = "cancel"; dialog.close_response = "cancel";
+        if ((yield dialog.choose (this, null)) != "continue") return;
+        try {
+            if (target.is_email) {
+                string remainder = target.uri.substring (7); string address = remainder; string subject = "Unsubscribe";
+                int query_at = remainder.index_of ("?");
+                if (query_at >= 0) {
+                    address = remainder.substring (0, query_at);
+                    foreach (var part in remainder.substring (query_at + 1).split ("&")) {
+                        if (part.down ().has_prefix ("subject=")) {
+                            string? decoded = Uri.unescape_string (part.substring (8));
+                            if (decoded != null)
+                                subject = MessageSecurityService.sanitize_unsubscribe_subject (decoded);
+                        }
+                    }
+                }
+                string? decoded_address = Uri.unescape_string (address);
+                if (decoded_address == null || !RecipientParser.is_valid_address (decoded_address.strip ()))
+                    throw new MailError.INVALID_MESSAGE ("The advertised unsubscribe address is invalid");
+                var draft = new Draft (message.account_id); draft.to = decoded_address.strip ();
+                draft.subject = subject; draft.body_text = "Please unsubscribe this address from your mailing list.";
+                open_compose (null, ComposeMode.NEW, draft);
+            } else AppInfo.launch_default_for_uri (target.uri, null);
+        } catch (Error error) { show_operation_error (error); }
+    }
+
     private Gtk.Widget build_header () {
         var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
         header.add_css_class ("mail-header-bar");
@@ -650,11 +833,17 @@ public class MailWindow : Adw.ApplicationWindow {
         message_back.visible = false;
         header.append (message_back);
 
-        search.placeholder_text = "Search Mail";
+        search.placeholder_text = search_service.server_search_available ?
+            "Search Mail — Enter searches server" : "Search Mail";
         search.set_size_request (240, -1);
         search.add_css_class ("apple-toolbar-search");
         Accessibility.label (search, "Search mail");
-        search.search_changed.connect (() => message_list.search (search.text));
+        search.search_changed.connect (() => {
+            if (active_mailbox != null && is_task_mailbox (active_mailbox.id))
+                task_view.set_query (search.text);
+            else message_list.search (search.text);
+        });
+        search.activate.connect (() => search_server.begin ());
 
         var sort_menu = new Menu (); sort_menu.append ("Newest First", "win.sort::newest");
         sort_menu.append ("Oldest First", "win.sort::oldest"); sort_menu.append ("Sender", "win.sort::sender");
@@ -669,6 +858,9 @@ public class MailWindow : Adw.ApplicationWindow {
 
         var more_menu = new Menu (); more_menu.append ("Archive", "win.archive"); more_menu.append ("Move to Trash", "win.trash");
         more_menu.append ("Junk or Not Junk", "win.junk"); more_menu.append ("Flag or Unflag", "win.flag");
+        more_menu.append ("Create Task from Message…", "win.create-task");
+        rebuild_quick_steps_menu ();
+        more_menu.append_submenu ("Quick Steps", quick_steps_menu);
         more_toggle_read_item = new MenuItem ("Mark as Read", "win.toggle-read");
         more_menu.append_item (more_toggle_read_item);
         more_menu.append ("Move or Copy…", "win.show-move");
@@ -685,6 +877,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var app_menu = new Menu ();
         var mail_menu = new Menu ();
         mail_menu.append ("New Message", "win.compose");
+        mail_menu.append ("New Task", "win.new-task");
         mail_menu.append ("Get Mail", "win.refresh");
         app_menu.append_section ("Mail", mail_menu);
 
@@ -702,6 +895,12 @@ public class MailWindow : Adw.ApplicationWindow {
         display_menu.append ("Always Show Images", "win.always-show-images");
         display_menu.append ("Display Full HTML", "win.full-html-formatting");
         view_menu.append_submenu ("Message Display", display_menu);
+        var search_scope_menu = new Menu ();
+        search_scope_menu.append ("Current Folder", "win.search-scope::current-folder");
+        search_scope_menu.append ("Current Account", "win.search-scope::current-account");
+        search_scope_menu.append ("All Mail", "win.search-scope::all-mail");
+        view_menu.append_submenu ("Search Scope", search_scope_menu);
+        view_menu.append ("Search Syntax…", "win.search-help");
         app_menu.append_section ("View", view_menu);
 
         var accounts_menu = new Menu ();
@@ -1109,6 +1308,10 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void install_actions () {
         var compose = new SimpleAction ("compose", null); compose.activate.connect (() => open_compose ()); add_action (compose);
+        var new_task = new SimpleAction ("new-task", null);
+        new_task.activate.connect (() => task_view.new_task ()); add_action (new_task);
+        var create_task = new SimpleAction ("create-task", null);
+        create_task.activate.connect (create_task_from_selected_message); add_action (create_task);
         var preferences = new SimpleAction ("preferences", null); preferences.activate.connect (() => show_preferences ()); add_action (preferences);
         var customize_toolbar = new SimpleAction ("customize-toolbar", null);
         customize_toolbar.activate.connect (() => show_toolbar_customization ());
@@ -1132,6 +1335,23 @@ public class MailWindow : Adw.ApplicationWindow {
         var shortcuts = new SimpleAction ("shortcuts", null); shortcuts.activate.connect (() => new ShortcutsDialog ().present (this)); add_action (shortcuts);
         var about = new SimpleAction ("about", null); about.activate.connect (() => show_about ()); add_action (about);
         var focus_search = new SimpleAction ("search", null); focus_search.activate.connect (() => search.grab_focus ()); add_action (focus_search);
+        var search_scope_action = new SimpleAction.stateful ("search-scope", VariantType.STRING,
+            new Variant.string ("current-folder"));
+        search_scope_action.change_state.connect ((value) => {
+            string scope = value.get_string (); search_scope_action.set_state (value);
+            if (scope == "all-mail") search_scope = MailSearchScope.ALL_MAIL;
+            else if (scope == "current-account") search_scope = MailSearchScope.CURRENT_ACCOUNT;
+            else search_scope = MailSearchScope.CURRENT_FOLDER;
+        });
+        add_action (search_scope_action);
+        var search_help = new SimpleAction ("search-help", null);
+        search_help.activate.connect (() => show_search_help ()); add_action (search_help);
+        var run_quick_step = new SimpleAction ("run-quick-step", VariantType.INT64);
+        run_quick_step.activate.connect ((parameter) => {
+            if (parameter != null) execute_quick_step (parameter.get_int64 ());
+        }); add_action (run_quick_step);
+        var manage_quick_steps = new SimpleAction ("manage-quick-steps", null);
+        manage_quick_steps.activate.connect (() => show_preferences ("rules")); add_action (manage_quick_steps);
         var zoom_in = new SimpleAction ("zoom-in", null);
         zoom_in.activate.connect (() => reader.zoom_in ());
         add_action (zoom_in);
@@ -1139,6 +1359,7 @@ public class MailWindow : Adw.ApplicationWindow {
         zoom_out.activate.connect (() => reader.zoom_out ());
         add_action (zoom_out);
         application.set_accels_for_action ("win.compose", { "<Control>n" });
+        application.set_accels_for_action ("win.new-task", { "<Control><Shift>t" });
         application.set_accels_for_action ("win.search", { "<Control>f" });
         application.set_accels_for_action ("win.zoom-in", { "<Control>plus", "<Control>equal", "<Control>KP_Add" });
         application.set_accels_for_action ("win.zoom-out", { "<Control>minus", "<Control>KP_Subtract" });
@@ -1244,6 +1465,10 @@ public class MailWindow : Adw.ApplicationWindow {
         sync_status_label.lines = 2;
         sync_status_label.xalign = 0; sync_status_label.hexpand = true;
         var heading = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 4);
+        var sync_icon = new Gtk.Image.from_icon_name ("view-refresh-symbolic");
+        sync_icon.add_css_class ("sync-status-icon");
+        sync_icon.valign = Gtk.Align.CENTER;
+        sync_icon.accessible_role = Gtk.AccessibleRole.PRESENTATION;
         sync_progress_bar.hexpand = true;
         sync_progress_bar.show_text = false;
         Accessibility.label (sync_progress_bar, "Mail download progress");
@@ -1258,6 +1483,7 @@ public class MailWindow : Adw.ApplicationWindow {
             sync_service.cancel ();
         });
         Accessibility.label (sync_cancel_button, "Cancel checking and downloading mail");
+        heading.append (sync_icon);
         heading.append (sync_status_label);
         heading.append (sync_cancel_button);
         panel.append (heading);
@@ -1354,6 +1580,9 @@ public class MailWindow : Adw.ApplicationWindow {
         }
         var trash_action = lookup_action ("trash") as SimpleAction;
         if (trash_action != null) trash_action.set_enabled (selected);
+        var create_task_action = lookup_action ("create-task") as SimpleAction;
+        if (create_task_action != null)
+            create_task_action.set_enabled (single && !is_local_draft (messages[0].id));
     }
 
     private void rebuild_move_menu () {
@@ -1439,10 +1668,29 @@ public class MailWindow : Adw.ApplicationWindow {
 
     public void open_message (string id) {
         var message = repository.find_message (id); if (message == null) return;
+        workspace_stack.visible_child_name = "mail";
+        search.placeholder_text = "Search Mail"; sort_button.sensitive = true;
+        if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) {
+            if (!sidebar.select_mailbox (message.mailbox_id))
+                sidebar.select_mailbox ("unified-inbox");
+            message_list.select_message (message.id);
+        }
         selected_message = message; display_message (message); update_action_sensitivity ();
         set_message_content_visible (true);
         if (!is_local_draft (message.id)) mark_read_after_selection (message);
         present ();
+    }
+
+    public void open_task (int64 id) {
+        try {
+            var task = task_service.find (id); if (task == null) return;
+            string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
+            string mailbox_id = !task.completed && task.due_on_or_before (today) ?
+                CachedMailRepository.TASK_TODAY_ID : CachedMailRepository.TASK_PLANNED_ID;
+            sidebar.select_mailbox (mailbox_id);
+            task_view.focus_task (id);
+            present ();
+        } catch (Error error) { show_operation_error (error); }
     }
 
     private void compose_response (ComposeMode mode) {
@@ -1474,6 +1722,7 @@ public class MailWindow : Adw.ApplicationWindow {
         dialog.account_saved.connect ((account) => account_changed (account));
         dialog.accounts_changed.connect (() => account_changed (null));
         dialog.smart_mailboxes_changed.connect (() => repository.reload ());
+        dialog.automation_changed.connect (() => { rebuild_quick_steps_menu (); repository.reload (); });
         if (page_name != "") dialog.set_visible_page_name (page_name);
         dialog.present (this);
     }
@@ -1508,7 +1757,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.2.6"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.2.8"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -1554,6 +1803,18 @@ public class MailWindow : Adw.ApplicationWindow {
 
     public void show_account_onboarding () { show_accounts (true); }
 
+    private static bool is_task_mailbox (string id) {
+        return id == CachedMailRepository.TASK_TODAY_ID ||
+            id == CachedMailRepository.TASK_PLANNED_ID;
+    }
+
+    private void create_task_from_selected_message () {
+        var messages = action_messages ();
+        if (messages.size != 1 || is_local_draft (messages[0].id)) return;
+        var source = repository.find_message (messages[0].id) ?? messages[0];
+        task_view.create_from_message (source);
+    }
+
     private void select_preferred_mailbox () {
         string preferred = settings.selected_mailbox_id;
         if (preferred != "" && preferred != CachedMailRepository.GNOME_CALENDAR_ID &&
@@ -1595,10 +1856,17 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.invalidate_cached_view ("unified-flagged");
         message_list.invalidate_current_view ();
         repository.begin_batch ();
+        int protected_tasks = 0;
         try {
-            foreach (var message in messages) { message.flagged = flag; repository.set_flagged (message.id, flag); }
+            foreach (var message in messages) {
+                if (!flag && has_open_linked_task (message.id)) { protected_tasks++; continue; }
+                message.flagged = flag; repository.set_flagged (message.id, flag);
+            }
         } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
+        if (protected_tasks > 0) toast_overlay.add_toast (new Adw.Toast (protected_tasks == 1 ?
+            "Complete or delete the linked task to clear this flag" :
+            "%d flags belong to open tasks".printf (protected_tasks)));
     }
 
     private void clear_selected_flags () {
@@ -1606,13 +1874,27 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.invalidate_cached_view ("unified-flagged");
         message_list.invalidate_current_view ();
         repository.begin_batch ();
+        int protected_tasks = 0;
         try {
             foreach (var message in messages) {
+                if (has_open_linked_task (message.id)) { protected_tasks++; continue; }
                 message.flagged = false;
                 repository.set_flagged (message.id, false);
             }
         } finally { repository.end_batch (); }
         message_list.finish_bulk_action ();
+        if (protected_tasks > 0) toast_overlay.add_toast (new Adw.Toast (protected_tasks == 1 ?
+            "Complete or delete the linked task to clear this flag" :
+            "%d flags belong to open tasks".printf (protected_tasks)));
+    }
+
+    private bool has_open_linked_task (string message_id) {
+        try { return task_service.open_task_for_message (message_id) != null; }
+        catch (Error error) {
+            show_operation_error (error);
+            // Preserve the flag when the durable task state cannot be read.
+            return true;
+        }
     }
 
     private void set_selected_flag_color (string color) {

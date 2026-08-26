@@ -7,29 +7,111 @@ internal class DecodedMimeContent : Object {
     }
 }
 
+internal class ConvertedCamelMessage : Object {
+    public Message message { get; construct; }
+    public string mime_plain { get; construct; }
+    public string mime_html { get; construct; }
+
+    public ConvertedCamelMessage (Message message, string mime_plain, string mime_html) {
+        Object (message: message, mime_plain: mime_plain, mime_html: mime_html);
+    }
+}
+
 internal class FolderDownloadPlan : Object {
     public Mailbox mailbox;
     public Camel.Folder folder;
     public Gee.ArrayList<string> unseen_uids = new Gee.ArrayList<string> ();
+    // Provider drafts are mutable even when their IMAP UID does not change.
+    // Re-read cached Drafts messages after genuinely new mail so an edit made
+    // by another client is reconciled by its content fingerprint.
+    public Gee.ArrayList<string> draft_refresh_uids = new Gee.ArrayList<string> ();
 
     public FolderDownloadPlan (Mailbox mailbox, Camel.Folder folder) {
         this.mailbox = mailbox; this.folder = folder;
     }
 }
 
+// A Drafts message can change in place while keeping the same IMAP UID. The
+// MIME cap therefore applies to both new mail and cached-draft revalidation.
+// This tracker carries only UIDs between the fresh Camel sessions used by a
+// bounded account check, so every cached draft converges instead of repeatedly
+// selecting the first 250.
+internal class DraftRefreshTracker : Object {
+    private Gee.HashMap<string, Gee.HashSet<string>> remaining =
+        new Gee.HashMap<string, Gee.HashSet<string>> ();
+
+    public Gee.ArrayList<string> plan (string mailbox_id,
+                                       Gee.Iterable<string> current_cached_uids) {
+        var ordered = new Gee.ArrayList<string> ();
+        var current = new Gee.HashSet<string> ();
+        foreach (var uid in current_cached_uids) {
+            if (current.add (uid)) ordered.add (uid);
+        }
+        var pending = remaining[mailbox_id];
+        if (pending == null) {
+            if (ordered.size == 0) return ordered;
+            pending = new Gee.HashSet<string> ();
+            pending.add_all (ordered);
+            remaining[mailbox_id] = pending;
+        } else {
+            var removed = new Gee.ArrayList<string> ();
+            foreach (var uid in pending)
+                if (!current.contains (uid)) removed.add (uid);
+            foreach (var uid in removed) pending.remove (uid);
+            if (pending.size == 0) {
+                remaining.unset (mailbox_id);
+                return new Gee.ArrayList<string> ();
+            }
+        }
+        var result = new Gee.ArrayList<string> ();
+        foreach (var uid in ordered)
+            if (pending.contains (uid)) result.add (uid);
+        return result;
+    }
+
+    public void complete (string mailbox_id, string uid) {
+        var pending = remaining[mailbox_id];
+        if (pending == null) return;
+        pending.remove (uid);
+        if (pending.size == 0) remaining.unset (mailbox_id);
+    }
+
+    public int remaining_count (string mailbox_id) {
+        var pending = remaining[mailbox_id];
+        return pending == null ? 0 : pending.size;
+    }
+
+    public void retain_account_mailboxes (string account_id,
+                                           Gee.Set<string> advertised_drafts) {
+        var stale = new Gee.ArrayList<string> ();
+        string prefix = account_id + ":";
+        foreach (var mailbox_id in remaining.keys)
+            if (mailbox_id.has_prefix (prefix) && !advertised_drafts.contains (mailbox_id))
+                stale.add (mailbox_id);
+        foreach (var mailbox_id in stale) remaining.unset (mailbox_id);
+    }
+}
+
 internal class PersonalCamelSession : Camel.Session {
     private Gee.HashMap<string, uint> rejected_certificates = new Gee.HashMap<string, uint> ();
     private Gee.HashMap<string, OAuthAccessToken> oauth_tokens = new Gee.HashMap<string, OAuthAccessToken> ();
-    private Camel.FilterDriver filter_driver;
 
     public PersonalCamelSession (string data_dir, string cache_dir) {
         Object (user_data_dir: data_dir, user_cache_dir: cache_dir, online: true);
-        filter_driver = new Camel.FilterDriver (this);
+    }
+
+    internal unowned Camel.FilterDriver? client_filter_driver_for_testing () {
+        return null;
     }
 
     public override unowned Camel.FilterDriver get_filter_driver (string type,
                                                                    Camel.Folder? for_folder) throws Error {
-        return filter_driver;
+        // Mailficient has no client-side Camel filter rules. Returning an empty
+        // driver makes Camel treat every new Inbox UID as filtering work: it
+        // freezes the folder, stops the original changed signal, and later
+        // owns/unrefs the driver from a worker. Null skips that unnecessary
+        // interception so the live Inbox observer receives the provider event.
+        return client_filter_driver_for_testing ();
     }
 
     public override string get_password (Camel.Service service, string prompt, string item, uint32 flags) throws Error {
@@ -103,10 +185,11 @@ internal class PersonalCamelSession : Camel.Session {
     }
 }
 
-public class CamelMailEngine : Object, MailEngine {
+public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
     private const int64 MAX_RECEIVED_MESSAGE_ATTACHMENT_BYTES = 100 * 1024 * 1024;
     private const int64 MAX_EXPLICIT_ATTACHMENT_DOWNLOAD_BYTES = (int64) 2 * 1024 * 1024 * 1024;
     internal const int64 MAX_RECEIVED_TEXT_PART_BYTES = 10 * 1024 * 1024;
+    internal const int MAX_MESSAGES_PER_SYNC_SESSION = 250;
     // Message bodies are streamed in small batches and the main context is
     // yielded between downloads, so a large mailbox does not monopolize GTK
     // or require building one giant in-memory result.
@@ -119,12 +202,15 @@ public class CamelMailEngine : Object, MailEngine {
     private OnlineAccountService online_accounts;
     private Gee.HashMap<string, Camel.Store> stores = new Gee.HashMap<string, Camel.Store> ();
     private Gee.HashMap<string, Camel.Transport> transports = new Gee.HashMap<string, Camel.Transport> ();
+    private Gee.HashMap<string, CamelLiveMailWatch> live_watches =
+        new Gee.HashMap<string, CamelLiveMailWatch> ();
     private Gee.HashMap<string, AccountSettings> accounts = new Gee.HashMap<string, AccountSettings> ();
     private Gee.HashMap<string, SyncState> states = new Gee.HashMap<string, SyncState> ();
     private Gee.HashSet<string> connecting_accounts = new Gee.HashSet<string> ();
     private Gee.HashMap<string, Cancellable> connection_cancellables = new Gee.HashMap<string, Cancellable> ();
     private Gee.HashMap<string, bool> connection_requirements = new Gee.HashMap<string, bool> ();
     private ReceivedAttachmentStore received_attachments;
+    private DraftRefreshTracker draft_refreshes = new DraftRefreshTracker ();
 
     public CamelMailEngine (CredentialStore credentials, string data_dir, string cache_dir,
                             string received_attachment_dir,
@@ -145,6 +231,13 @@ public class CamelMailEngine : Object, MailEngine {
         session = new PersonalCamelSession (data_dir, cache_dir);
     }
 
+    // Narrow injection seam for the separately built loopback GreenMail test.
+    // Production always uses the rejecting PersonalCamelSession above.
+    internal void replace_session_for_testing (PersonalCamelSession replacement) {
+        assert (stores.size == 0 && transports.size == 0 && connecting_accounts.size == 0);
+        session = replacement;
+    }
+
     public SyncState state_for (string account_id) {
         if (!states.has_key (account_id)) states[account_id] = new SyncState ();
         return states[account_id];
@@ -162,7 +255,12 @@ public class CamelMailEngine : Object, MailEngine {
     private async void ensure_account_connection (AccountSettings settings, bool require_transport,
                                                    Cancellable? cancellable) throws Error {
         settings.validate ();
-        if (connection_satisfies (settings.id, require_transport)) return;
+        if (connection_satisfies (settings.id, require_transport)) {
+            var connected_store = stores[settings.id];
+            if (connected_store != null)
+                yield ensure_live_watch (settings.id, connected_store, cancellable);
+            return;
+        }
         if (connecting_accounts.contains (settings.id)) {
             bool owner_requires_transport = connection_requirements.has_key (settings.id) &&
                 connection_requirements[settings.id];
@@ -173,7 +271,12 @@ public class CamelMailEngine : Object, MailEngine {
             });
             yield;
             if (cancellable != null) cancellable.set_error_if_cancelled ();
-            if (connection_satisfies (settings.id, require_transport)) return;
+            if (connection_satisfies (settings.id, require_transport)) {
+                var connected_store = stores[settings.id];
+                if (connected_store != null)
+                    yield ensure_live_watch (settings.id, connected_store, cancellable);
+                return;
+            }
             // An incoming-only caller may have won the connection race while
             // this caller still needs SMTP. Continue with the missing half.
             if (!require_transport || owner_requires_transport)
@@ -230,7 +333,12 @@ public class CamelMailEngine : Object, MailEngine {
                 store = (Camel.Store) session.add_service (settings.id + "-imap", "imapx", Camel.ProviderType.STORE);
             }
             configure_network (store, settings.incoming_host, settings.incoming_port,
-                settings.incoming_username, settings.incoming_encryption, settings.authentication);
+                settings.incoming_username, settings.incoming_encryption,
+                settings.authentication, true);
+            // IMAPX reads this setting when its connection manager comes
+            // online. Set it before the first connection as well as when the
+            // Inbox watch is attached.
+            CamelLiveMailWatch.enable_idle (store);
             session.clear_rejected_certificate (store.get_uid ());
             string? incoming_password;
             OAuthAccessToken? incoming_oauth = null;
@@ -261,7 +369,8 @@ public class CamelMailEngine : Object, MailEngine {
                 if (transport == null)
                     transport = (Camel.Transport) session.add_service (settings.id + "-smtp", "smtp", Camel.ProviderType.TRANSPORT);
                 configure_network (transport, settings.outgoing_host, settings.outgoing_port,
-                    settings.outgoing_username, settings.outgoing_encryption, settings.authentication);
+                    settings.outgoing_username, settings.outgoing_encryption,
+                    settings.authentication, false);
                 session.clear_rejected_certificate (transport.get_uid ());
                 string? outgoing_password;
                 if (settings.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS)
@@ -279,6 +388,7 @@ public class CamelMailEngine : Object, MailEngine {
                 }
             }
 
+            yield ensure_live_watch (settings.id, store, cancellable);
             stores[settings.id] = store;
             if (transport != null) transports[settings.id] = transport;
             accounts[settings.id] = settings;
@@ -287,6 +397,7 @@ public class CamelMailEngine : Object, MailEngine {
             // Camel registers services with the session before connecting them. A
             // failed test must remove both partial services or a corrected retry
             // can collide with their stable UIDs.
+            detach_live_watch (settings.id);
             if (transport != null) {
                 session.clear_oauth_token (transport);
                 try { yield transport.disconnect (false, Priority.DEFAULT, cancellable); } catch (Error ignored) { }
@@ -345,6 +456,9 @@ public class CamelMailEngine : Object, MailEngine {
             yield;
         }
         if (cancellable != null) cancellable.set_error_if_cancelled ();
+        // Detach first so an intentional service removal cannot be mistaken for
+        // a dropped IDLE connection and schedule a reconnect behind the caller.
+        detach_live_watch (account_id);
         var transport = transports[account_id];
         if (transport != null) {
             session.clear_oauth_token (transport);
@@ -362,21 +476,119 @@ public class CamelMailEngine : Object, MailEngine {
         accounts.unset (account_id); states.unset (account_id);
     }
 
+    private async void ensure_live_watch (string account_id, Camel.Store store,
+                                          Cancellable? cancellable) throws Error {
+        if (live_watches.has_key (account_id)) return;
+        try {
+            var watch = yield CamelLiveMailWatch.create (account_id, store, cancellable);
+            // A second caller may have finished while this Inbox was opening.
+            if (live_watches.has_key (account_id)) {
+                watch.detach ();
+                return;
+            }
+            weak CamelMailEngine weak_engine = this;
+            watch.mail_changed.connect (() => {
+                if (weak_engine != null) weak_engine.live_mail_changed (account_id);
+            });
+            watch.unavailable.connect (() => {
+                if (weak_engine != null) weak_engine.live_mail_unavailable (account_id);
+            });
+            live_watches[account_id] = watch;
+        } catch (Error error) {
+            if (error is IOError.CANCELLED) throw error;
+            // Opening a push watch is optional. The regular configured mail
+            // interval remains active and a bounded reconnect attempt will try
+            // to install the watch again without making this connection fail.
+            warning ("Live mail is unavailable for account %s: %s", account_id, error.message);
+            live_mail_unavailable (account_id);
+        }
+    }
+
+    private void detach_live_watch (string account_id) {
+        var watch = live_watches[account_id];
+        if (watch != null) watch.detach ();
+        live_watches.unset (account_id);
+    }
+
     private static void configure_network (Camel.Service service, string host, uint port, string user,
-                                           EncryptionMode encryption, AuthenticationMode authentication) throws MailError {
+                                           EncryptionMode encryption, AuthenticationMode authentication,
+                                           bool incoming) throws MailError {
         var network = service.ref_settings () as Camel.NetworkSettings;
         if (network == null) throw new MailError.CONNECTION ("The selected Camel provider has no network settings");
         network.set_host (host); network.set_port ((uint16) port); network.set_user (user);
         network.set_security_method (encryption == EncryptionMode.TLS ? Camel.NetworkSecurityMethod.SSL_ON_ALTERNATE_PORT : Camel.NetworkSecurityMethod.STARTTLS_ON_STANDARD_PORT);
-        network.set_auth_mechanism (authentication_mechanism (authentication));
+        network.set_auth_mechanism (authentication_mechanism (authentication, incoming));
     }
 
-    internal static string authentication_mechanism (AuthenticationMode authentication) {
+    internal static string? authentication_mechanism (AuthenticationMode authentication,
+                                                       bool incoming = false) {
         // A null SMTP mechanism means "do not authenticate" to Camel. That can
         // make connection testing appear successful while MAIL FROM is rejected
-        // later. Password accounts use SASL PLAIN only inside the configured
-        // TLS/STARTTLS channel; brokered accounts use their explicit OAuth flow.
-        return authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS ? "XOAUTH2" : "PLAIN";
+        // later, so SMTP password accounts explicitly use SASL PLAIN inside the
+        // configured TLS/STARTTLS channel. IMAP authentication is mandatory;
+        // leaving its mechanism automatic allows both protocol LOGIN and SASL
+        // PLAIN providers. Brokered accounts always use explicit OAuth.
+        if (authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS) return "XOAUTH2";
+        return incoming ? null : "PLAIN";
+    }
+
+#if EDS_LEGACY
+    [CCode (cname = "camel_folder_search_free", cheader_filename = "camel/camel.h")]
+    private static extern void free_legacy_search_results (
+        Camel.Folder folder, owned GenericArray<string> results);
+#endif
+
+    // Camel changed its folder-search ownership contract in EDS 3.58. Copy
+    // provider-owned/pstring UIDs into normal strings before any async work,
+    // then release the legacy result through Camel's required search_free
+    // vfunc. Modern EDS transfers only the nullable result container.
+    private static Gee.ArrayList<string> search_folder_uids (
+        Camel.Folder folder, string expression,
+        Cancellable? cancellable = null) throws Error {
+        var copied = new Gee.ArrayList<string> ();
+#if EDS_LEGACY
+        var matches = folder.search_by_expression (expression, cancellable);
+        for (uint index = 0; index < matches.length; index++)
+            copied.add (matches[index]);
+        free_legacy_search_results (folder, (owned) matches);
+#else
+        GenericArray<weak string>? matches = null;
+        if (!folder.search_sync (expression, out matches, cancellable))
+            throw new MailError.CONNECTION ("The server could not complete this search");
+        if (matches != null)
+            for (uint index = 0; index < matches.length; index++)
+                copied.add (matches[index]);
+#endif
+        return copied;
+    }
+
+    public async Gee.List<Message> search_remote (Mailbox mailbox, string expression,
+                                                   int limit,
+                                                   Cancellable? cancellable = null) throws Error {
+        var store = stores[mailbox.account_id];
+        if (store == null) throw new MailError.CONNECTION ("Connect this account before searching the server");
+        int bounded_limit = int.max (1, int.min (200, limit));
+        try {
+            var folder = yield store.get_folder (mailbox.remote_name,
+                Camel.StoreGetFolderFlags.NONE, Priority.DEFAULT, cancellable);
+            if (folder == null) throw new MailError.CONNECTION ("The selected search folder is unavailable");
+            yield folder.refresh_info (Priority.DEFAULT, cancellable);
+            var matches = search_folder_uids (folder, expression, cancellable);
+            var result = new Gee.ArrayList<Message> ();
+            // IMAP providers normally return UID order. Read from the newest
+            // end and enforce a hard MIME-download cap for interactive search.
+            for (int index = matches.size - 1; index >= 0 && result.size < bounded_limit; index--) {
+                if (cancellable != null) cancellable.set_error_if_cancelled ();
+                string uid = matches[index]; if (uid == "") continue;
+                var info = folder.get_message_info (uid); if (info == null) continue;
+                var mime = yield folder.get_message (uid, Priority.DEFAULT, cancellable);
+                if (mime == null) continue;
+                var converted = yield message_from_camel (mailbox.account_id, mailbox, uid,
+                    info, mime, cancellable);
+                result.add (converted.message);
+            }
+            return result;
+        } catch (Error error) { throw normalize_error (error); }
     }
 
     public async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
@@ -392,6 +604,10 @@ public class CamelMailEngine : Object, MailEngine {
                 Priority.DEFAULT, cancellable);
             collect_mailboxes (root, account_id, result.mailboxes);
             result.folder_inventory_complete = true;
+            var advertised_drafts = new Gee.HashSet<string> ();
+            foreach (var mailbox in result.mailboxes)
+                if (mailbox.role == MailboxRole.DRAFTS) advertised_drafts.add (mailbox.id);
+            draft_refreshes.retain_account_mailboxes (account_id, advertised_drafts);
             // Publish the folder tree immediately. Message batches below then
             // become visible without waiting for every subscribed folder.
             var inventory = new MailSyncResult (account_id);
@@ -427,20 +643,27 @@ public class CamelMailEngine : Object, MailEngine {
                     var uids = folder.dup_uids ();
 #endif
                     var plan = new FolderDownloadPlan (mailbox, folder);
+                    result.begin_remote_inventory (mailbox.id);
                     int unread_count = 0;
                     for (int index = 0; index < (int) uids.length; index++) {
                         string uid = uids[index];
-                        result.record_remote_uid (mailbox.id, uid);
                         string message_id = "%s:%s".printf (mailbox.id, uid);
                         var info = folder.get_message_info (uid);
                         if (info == null) continue;
                         uint32 flags = info.get_flags ();
+                        // Draft cleanup uses a precise \Deleted flag without a
+                        // folder-wide expunge. Treat those copies as absent so
+                        // they cannot be re-imported while awaiting server purge.
+                        if ((flags & Camel.MessageFlags.DELETED) != 0) continue;
+                        result.record_remote_uid (mailbox.id, uid);
                         if ((flags & Camel.MessageFlags.SEEN) == 0)
                             unread_count++;
                         if (cached_message_ids != null && cached_message_ids.contains (message_id)) {
                             result.states.add (new RemoteMessageState (message_id,
                                 (flags & Camel.MessageFlags.SEEN) == 0,
                                 (flags & Camel.MessageFlags.FLAGGED) != 0));
+                            if (mailbox.role == MailboxRole.DRAFTS)
+                                plan.draft_refresh_uids.add (uid);
                         } else plan.unseen_uids.add (uid);
                         // Camel's folder summary traversal is synchronous. Give
                         // GTK a chance to paint and dispatch input on large folders.
@@ -453,6 +676,12 @@ public class CamelMailEngine : Object, MailEngine {
                     // count for this sync pass. Otherwise the sidebar catches
                     // up only on the following mail check.
                     mailbox.unread_count = (uint) unread_count;
+                    if (mailbox.role == MailboxRole.DRAFTS) {
+                        var tracked = draft_refreshes.plan (
+                            mailbox.id, plan.draft_refresh_uids);
+                        plan.draft_refresh_uids.clear ();
+                        plan.draft_refresh_uids.add_all (tracked);
+                    }
                     total_unseen += plan.unseen_uids.size;
                     plans.add (plan);
                 } catch (Error folder_error) {
@@ -472,22 +701,40 @@ public class CamelMailEngine : Object, MailEngine {
                 state.progress = 0.03 + (0.17 * folder_index / folder_total);
             }
 
-            result.messages_to_download = total_unseen;
+            int refreshable_drafts = 0;
+            foreach (var plan in plans)
+                refreshable_drafts += plan.draft_refresh_uids.size;
+            configure_download_budget (result, total_unseen);
+            int download_target = int.min (MAX_MESSAGES_PER_SYNC_SESSION,
+                total_unseen + refreshable_drafts);
             state.messages_to_download = total_unseen;
             state.messages_downloaded = 0;
             state.detail = total_unseen == 0 ? "Mail is up to date" :
                 "Downloaded 0 of %d messages".printf (total_unseen);
             state.progress = total_unseen == 0 ? 0.95 : 0.20;
 
-            int download_target = total_unseen;
             int processed = 0;
             int downloaded = 0;
-            if (result.terminal_error == null) foreach (var plan in plans) {
+            int maintenance_processed = 0;
+            // New messages always consume the account-wide budget first. A
+            // second phase uses any remainder to revalidate cached Draft UIDs.
+            // This prevents a large Drafts folder from starving Inbox history.
+            if (result.terminal_error == null) for (int phase = 0; phase < 2; phase++) {
+              foreach (var plan in plans) {
+                var candidates = phase == 0 ? plan.unseen_uids : plan.draft_refresh_uids;
+                int folder_download_target = bounded_folder_download_count (
+                    candidates.size, processed);
+                if (folder_download_target == 0) {
+                    // An empty folder does not mean the account-wide budget is
+                    // exhausted; later folders may still contain work.
+                    if (processed >= MAX_MESSAGES_PER_SYNC_SESSION) break;
+                    continue;
+                }
                 var batch = new MailSyncResult (account_id);
                 batch.mailboxes.add (plan.mailbox);
-                for (int index = 0; index < plan.unseen_uids.size; index++) {
+                for (int index = 0; index < folder_download_target; index++) {
                     if (cancellable != null) cancellable.set_error_if_cancelled ();
-                    string uid = plan.unseen_uids[index];
+                    string uid = candidates[index];
                     var info = plan.folder.get_message_info (uid);
                     if (info == null) continue;
                     state.detail = "Downloaded %d of %d messages — %s".printf (
@@ -498,10 +745,18 @@ public class CamelMailEngine : Object, MailEngine {
                             uid, Priority.DEFAULT, cancellable);
                         if (mime == null)
                             throw new MailError.CONNECTION ("The server returned an empty message");
-                        batch.messages.add (yield message_from_camel (
-                            account_id, plan.mailbox, uid, info, mime, cancellable));
+                        var conversion = yield message_from_camel (
+                            account_id, plan.mailbox, uid, info, mime, cancellable);
+                        batch.messages.add (conversion.message);
+                        if (plan.mailbox.role == MailboxRole.DRAFTS)
+                            batch.remote_drafts.add (remote_draft_from_camel (
+                                account_id, plan.mailbox, uid, info, mime, conversion));
                         mime = null;
-                        downloaded++;
+                        if (phase == 0) downloaded++;
+                        else {
+                            draft_refreshes.complete (plan.mailbox.id, uid);
+                            maintenance_processed++;
+                        }
                         state.messages_downloaded = downloaded;
                         state.detail = "Downloaded %d of %d messages — %s".printf (
                             downloaded, total_unseen, plan.mailbox.name);
@@ -521,7 +776,17 @@ public class CamelMailEngine : Object, MailEngine {
                     yield yield_to_main_context (cancellable);
                 }
                 if (batch.messages.size > 0) sync_batch_ready (batch);
+              }
             }
+            // Failed or temporarily unavailable messages remain outstanding too.
+            // AccountSyncService will stop automatic continuation when issues are
+            // present, or when a pass makes no progress, avoiding an endless loop.
+            int maintenance_remaining = 0;
+            foreach (var plan in plans)
+                maintenance_remaining += draft_refreshes.remaining_count (plan.mailbox.id);
+            result.maintenance_items_processed = maintenance_processed;
+            result.maintenance_items_remaining = maintenance_remaining;
+            result.more_messages_available = total_unseen > downloaded || maintenance_remaining > 0;
             if (result.terminal_error == null) {
                 state.detail = "Finishing mail update…"; state.progress = 0.98;
                 try { yield store.synchronize (false, Priority.DEFAULT, cancellable); }
@@ -552,6 +817,19 @@ public class CamelMailEngine : Object, MailEngine {
             var normalized = normalize_error (error);
             state.phase = SyncPhase.FAILED; state.detail = normalized.message; throw normalized;
         }
+    }
+
+    internal static int configure_download_budget (MailSyncResult result, int total_unseen) {
+        int available = int.max (0, total_unseen);
+        result.messages_to_download = available;
+        int target = int.min (available, MAX_MESSAGES_PER_SYNC_SESSION);
+        result.more_messages_available = available > target;
+        return target;
+    }
+
+    internal static int bounded_folder_download_count (int folder_available, int already_processed) {
+        int remaining = int.max (0, MAX_MESSAGES_PER_SYNC_SESSION - int.max (0, already_processed));
+        return int.min (int.max (0, folder_available), remaining);
     }
 
     internal static async void yield_to_main_context (Cancellable? cancellable = null) throws Error {
@@ -662,8 +940,9 @@ public class CamelMailEngine : Object, MailEngine {
         return "%s:%s".printf (account_id, digest.substring (0, 20));
     }
 
-    private async Message message_from_camel (string account_id, Mailbox mailbox, string uid,
-                                       Camel.MessageInfo info, Camel.MimeMessage mime, Cancellable? cancellable) throws Error {
+    private async ConvertedCamelMessage message_from_camel (
+        string account_id, Mailbox mailbox, string uid, Camel.MessageInfo info,
+        Camel.MimeMessage mime, Cancellable? cancellable) throws Error {
         string sender_name = "Unknown Sender"; string sender_address = "";
         var from = mime.get_from ();
         if (from != null && from.length () > 0) {
@@ -688,6 +967,12 @@ public class CamelMailEngine : Object, MailEngine {
             string? formatted_cc = cc.format ();
             cc_recipients = formatted_cc ?? "";
         }
+        string bcc_recipients = "";
+        var bcc = mime.get_recipients (Camel.RECIPIENT_TYPE_BCC);
+        if (bcc != null) bcc_recipients = bcc.format () ?? "";
+        string reply_to = "";
+        var reply = mime.get_reply_to ();
+        if (reply != null) reply_to = reply.format () ?? "";
         string plain = ""; string html = ""; bool attachment = false; int attachment_index = 0;
         int64 remaining_attachment_bytes = MAX_RECEIVED_MESSAGE_ATTACHMENT_BYTES;
         var attachments = new Gee.ArrayList<Attachment> ();
@@ -695,6 +980,10 @@ public class CamelMailEngine : Object, MailEngine {
         var decoded = yield decode_secure_content (mime, cancellable);
         extract_content (decoded.content, ref plain, ref html, ref attachment, attachments, message_key,
             ref attachment_index, ref remaining_attachment_bytes, cancellable);
+        // Preserve exact MIME bodies before the message-list preview fallback.
+        // Provider drafts must never import a generated preview as editable text.
+        string exact_mime_plain = plain;
+        string exact_mime_html = html;
         string? summary_preview = info.dup_preview ();
         string preview = summary_preview == null ? "" : summary_preview;
         if (plain == "") plain = preview;
@@ -708,7 +997,84 @@ public class CamelMailEngine : Object, MailEngine {
             mime.get_header ("In-Reply-To") ?? "", mime.get_header ("References") ?? "", received,
             cc_recipients);
         message.body_html = html; message.security_status = decoded.status;
-        foreach (var item in attachments) message.add_attachment (item); return message;
+        message.bcc_recipients = bcc_recipients; message.message_size = (int64) info.get_size ();
+        message.reply_to = reply_to;
+        message.authentication_results = mime.get_header ("Authentication-Results") ?? "";
+        message.list_unsubscribe = mime.get_header ("List-Unsubscribe") ?? "";
+        message.list_unsubscribe_post = mime.get_header ("List-Unsubscribe-Post") ?? "";
+        message.raw_headers = bounded_headers_from_camel (mime);
+        foreach (var item in attachments) message.add_attachment (item);
+        return new ConvertedCamelMessage (
+            message, exact_mime_plain, exact_mime_html);
+    }
+
+    private static string bounded_headers_from_camel (Camel.MimeMessage mime) {
+        var result = new StringBuilder (); var headers = mime.get_headers ();
+        uint maximum = uint.min (headers.get_length (), 512);
+        for (uint index = 0; index < maximum; index++) {
+            unowned string? name = headers.get_name (index);
+            unowned string? value = headers.get_value (index);
+            if (name == null || name == "" || value == null) continue;
+            result.append (name); result.append (": "); result.append (value); result.append_c ('\n');
+            if (result.len >= MessageSecurityService.MAX_RAW_HEADER_BYTES) break;
+        }
+        return MessageSecurityService.bounded_raw_headers (result.str);
+    }
+
+    private static RemoteDraftSnapshot remote_draft_from_camel (
+        string account_id, Mailbox mailbox, string uid, Camel.MessageInfo info,
+        Camel.MimeMessage mime, ConvertedCamelMessage conversion) {
+        var converted = conversion.message;
+        string internet_message_id = bare_message_id (mime.get_message_id () ?? "");
+        string managed_id = (mime.get_header ("X-Mailficient-Draft-ID") ?? "").strip ();
+        string revision_text = (mime.get_header ("X-Mailficient-Draft-Revision") ?? "").strip ();
+        int64 managed_revision = 0;
+        bool managed = Uuid.string_is_valid (managed_id) &&
+            int64.try_parse (revision_text, out managed_revision) && managed_revision > 0 &&
+            internet_message_id == Draft.remote_message_id_for (managed_id, managed_revision);
+        string local_id;
+        if (managed) local_id = managed_id;
+        else {
+            string remote_identity = internet_message_id == "" ? "uid:" + uid : internet_message_id;
+            string digest = Checksum.compute_for_string (ChecksumType.SHA256,
+                account_id + "\n" + mailbox.remote_name + "\n" + remote_identity);
+            local_id = "remote-" + digest.substring (0, 32);
+        }
+        var draft = new Draft (account_id, local_id);
+        draft.to = converted.recipients; draft.cc = converted.cc_recipients;
+        var bcc = mime.get_recipients (Camel.RECIPIENT_TYPE_BCC);
+        if (bcc != null) draft.bcc = bcc.format () ?? "";
+        draft.subject = mime.get_subject () ?? "";
+        draft.body_html = conversion.mime_html;
+        draft.body_text = remote_draft_plain_body (
+            conversion.mime_plain, conversion.mime_html);
+        draft.in_reply_to = mime.get_header ("In-Reply-To") ?? "";
+        draft.references = mime.get_header ("References") ?? "";
+        int64 timestamp = info.get_date_received ();
+        if (timestamp <= 0) timestamp = info.get_date_sent ();
+        draft.modified_at = timestamp > 0 ? timestamp : new DateTime.now_utc ().to_unix ();
+        draft.revision = managed ? managed_revision : 1;
+        draft.remote_mailbox = mailbox.remote_name; draft.remote_uid = uid;
+        draft.remote_revision = draft.revision;
+        draft.remote_internet_message_id = internet_message_id;
+        draft.remote_owned = managed;
+        foreach (var attachment in converted.attachments) draft.attachments.add (attachment);
+        draft.mark_saved ();
+        return new RemoteDraftSnapshot (draft, mailbox.remote_name, uid,
+            internet_message_id, managed, DraftFingerprint.calculate (draft, uid));
+    }
+
+    internal static string remote_draft_plain_body (string mime_plain, string mime_html) {
+        if (mime_plain != "") return mime_plain;
+        if (mime_html != "") return HtmlSanitizer.to_plain_text (mime_html);
+        return "";
+    }
+
+    private static string bare_message_id (string value) {
+        string result = value.strip ();
+        if (result.length >= 2 && result.has_prefix ("<") && result.has_suffix (">"))
+            result = result.substring (1, result.length - 2).strip ();
+        return result;
     }
 
     private async DecodedMimeContent decode_secure_content (Camel.MimePart original,
@@ -759,10 +1125,10 @@ public class CamelMailEngine : Object, MailEngine {
         return new DecodedMimeContent (content, status);
     }
 
-    private void extract_content (Camel.DataWrapper wrapper, ref string plain, ref string html, ref bool attachment,
-                                  Gee.ArrayList<Attachment> attachments, string message_key, ref int attachment_index,
-                                  ref int64 remaining_attachment_bytes,
-                                  Cancellable? cancellable) throws Error {
+    internal void extract_content (Camel.DataWrapper wrapper, ref string plain, ref string html, ref bool attachment,
+                                   Gee.ArrayList<Attachment> attachments, string message_key, ref int attachment_index,
+                                   ref int64 remaining_attachment_bytes,
+                                   Cancellable? cancellable) throws Error {
         var multipart = wrapper as Camel.Multipart;
         if (multipart != null) {
             for (uint index = 0; index < multipart.get_number (); index++) {
@@ -787,11 +1153,20 @@ public class CamelMailEngine : Object, MailEngine {
         var content = part.get_content (); if (content == null) return;
         string mime_type = part.get_content_type () == null ? content.get_mime_type () : part.get_content_type ().simple ();
         bool inline_image = content_id != "" && mime_type.down ().has_prefix ("image/");
+        // Meeting requests commonly arrive as an inline text/calendar MIME
+        // part with neither Content-Disposition nor a filename. Treat it as a
+        // bounded attachment so it is never discarded as an unknown text body.
+        bool calendar_invitation = mime_type.down ().split (";", 2)[0].strip () ==
+            "text/calendar";
         if ((filename != null && filename != "") ||
-            (disposition != null && disposition.down ().contains ("attachment")) || inline_image) {
+            (disposition != null && disposition.down ().contains ("attachment")) ||
+            inline_image || calendar_invitation) {
             attachment = true;
             attachment_index++;
-            var saved = received_attachments.save (content, filename, mime_type,
+            string? attachment_name = filename;
+            if (calendar_invitation && (attachment_name == null || attachment_name == ""))
+                attachment_name = "invitation.ics";
+            var saved = received_attachments.save (content, attachment_name, mime_type,
                 message_key, attachment_index, cancellable, content_id, remaining_attachment_bytes);
             if (saved != null) {
                 attachments.add (saved);
@@ -891,6 +1266,129 @@ public class CamelMailEngine : Object, MailEngine {
         return yield file_in_sent (draft.account_id, message, cancellable);
     }
 
+    public async RemoteDraftLocation? save_remote_draft (
+        Draft draft, Cancellable? cancellable = null) throws Error {
+        var store = stores[draft.account_id]; var settings = accounts[draft.account_id];
+        if (store == null || settings == null)
+            throw new MailError.CONNECTION ("The account is not connected");
+        Camel.Folder? folder = yield find_remote_drafts_folder (store, cancellable);
+        if (folder == null) return null;
+        try {
+            yield folder.refresh_info (Priority.DEFAULT, cancellable);
+            string expected_id = draft.remote_message_id ();
+            var matches = yield matching_remote_draft_uids (folder, expected_id, cancellable);
+            if (matches.size == 0) {
+                var message = yield build_mime_message_with_options (
+                    draft, settings, true, cancellable);
+                // EDS 3.56 documents append metadata as nullable, but its
+                // asynchronous wrapper unconditionally g_object_ref()s it.
+                // Provider-specific metadata also preserves the intended
+                // summary implementation when the append completes.
+                var append_info = folder.get_folder_summary ().info_new_from_message (message);
+                string? appended_uid;
+                bool appended = yield folder.append_message (message, append_info,
+                    Priority.DEFAULT, cancellable, out appended_uid);
+                if (!appended)
+                    throw new MailError.CONNECTION ("The server rejected the Drafts copy");
+                yield folder.synchronize (false, Priority.DEFAULT, cancellable);
+                matches = yield matching_remote_draft_uids (folder, expected_id, cancellable);
+                if (matches.size == 0 && appended_uid != null && appended_uid != "")
+                    matches.add (appended_uid);
+            }
+            if (matches.size == 0)
+                throw new MailError.CONNECTION ("The server did not return an identifier for the Drafts copy");
+            string canonical_uid = canonical_remote_uid (matches);
+            uint32 managed_mask = Camel.MessageFlags.DRAFT | Camel.MessageFlags.SEEN |
+                Camel.MessageFlags.DELETED;
+            uint32 managed_flags = Camel.MessageFlags.DRAFT | Camel.MessageFlags.SEEN;
+            foreach (var uid in matches) {
+                if (uid == canonical_uid)
+                    folder.set_message_flags (uid, managed_mask, managed_flags);
+                else
+                    folder.set_message_flags (uid, Camel.MessageFlags.DELETED,
+                        Camel.MessageFlags.DELETED);
+            }
+            yield folder.synchronize (false, Priority.DEFAULT, cancellable);
+            return new RemoteDraftLocation (folder.get_full_name (), canonical_uid);
+        } catch (MailError error) { throw error; }
+        catch (Error error) { throw normalize_error (error); }
+    }
+
+    public async bool delete_remote_draft (PendingDraftDeletion deletion,
+                                           Cancellable? cancellable = null) throws Error {
+        var store = stores[deletion.account_id];
+        if (store == null) throw new MailError.CONNECTION ("The account is not connected");
+        try {
+            var folder = yield store.get_folder (deletion.mailbox_name,
+                Camel.StoreGetFolderFlags.NONE, Priority.DEFAULT, cancellable);
+            if (folder == null) return true;
+            yield folder.refresh_info (Priority.DEFAULT, cancellable);
+            var info = folder.get_message_info (deletion.remote_uid);
+            // Missing is successful idempotent cleanup. Never search for a
+            // replacement by Message-ID here: concurrent, identical appends
+            // deliberately share that ID, and a stale cleanup must not delete
+            // the canonical copy adopted by another worker.
+            if (info == null) return true;
+            var candidate = yield folder.get_message (
+                deletion.remote_uid, Priority.DEFAULT, cancellable);
+            if (candidate == null || bare_message_id (candidate.get_message_id () ?? "") !=
+                bare_message_id (deletion.expected_message_id))
+                return false;
+            folder.set_message_flags (deletion.remote_uid,
+                Camel.MessageFlags.DELETED, Camel.MessageFlags.DELETED);
+            yield folder.synchronize (false, Priority.DEFAULT, cancellable);
+            return true;
+        } catch (Error error) { throw normalize_error (error); }
+    }
+
+    private async Camel.Folder? find_remote_drafts_folder (
+        Camel.Store store, Cancellable? cancellable) throws Error {
+        var root = yield store.get_folder_info (null,
+            Camel.StoreGetFolderInfoFlags.RECURSIVE |
+            Camel.StoreGetFolderInfoFlags.SUBSCRIBED,
+            Priority.DEFAULT, cancellable);
+        string? drafts_name = find_role_folder (root, MailboxRole.DRAFTS);
+        if (drafts_name == null) return null;
+        return yield store.get_folder (drafts_name, Camel.StoreGetFolderFlags.NONE,
+            Priority.DEFAULT, cancellable);
+    }
+
+    private async Gee.ArrayList<string> matching_remote_draft_uids (
+        Camel.Folder folder, string expected_message_id,
+        Cancellable? cancellable) throws Error {
+        var result = new Gee.ArrayList<string> ();
+        string exact_id = bare_message_id (expected_message_id);
+        if (exact_id == "") return result;
+        string escaped = exact_id.replace ("\\", "\\\\")
+            .replace ("\"", "\\\"").replace ("\r", " ").replace ("\n", " ");
+        var matches = search_folder_uids (folder,
+            "(header-contains \"Message-ID\" \"%s\")".printf (escaped), cancellable);
+        for (int index = 0; index < matches.size; index++) {
+            string uid = matches[index];
+            if (uid == "") continue;
+            // Camel's folder search is only a candidate filter: header-contains
+            // can also return a longer, attacker-controlled Message-ID. Fetch
+            // and compare the normalized header before any flag is changed.
+            var candidate = yield folder.get_message (uid, Priority.DEFAULT, cancellable);
+            if (candidate != null && bare_message_id (candidate.get_message_id () ?? "") == exact_id)
+                result.add (uid);
+        }
+        return result;
+    }
+
+    private static string canonical_remote_uid (Gee.List<string> uids) {
+        string canonical = uids[0];
+        foreach (var uid in uids) {
+            uint64 candidate_number = 0; uint64 canonical_number = 0;
+            bool candidate_numeric = uint64.try_parse (uid, out candidate_number);
+            bool canonical_numeric = uint64.try_parse (canonical, out canonical_number);
+            if ((candidate_numeric && canonical_numeric && candidate_number < canonical_number) ||
+                (!(candidate_numeric && canonical_numeric) && strcmp (uid, canonical) < 0))
+                canonical = uid;
+        }
+        return canonical;
+    }
+
     public async void save_remote_attachment (string account_id, string mailbox_name,
                                               string remote_uid, int remote_part_index,
                                               File destination, int64 maximum_bytes,
@@ -983,10 +1481,21 @@ public class CamelMailEngine : Object, MailEngine {
 
     internal async Camel.MimeMessage build_mime_message (Draft draft, AccountSettings settings,
                                                           Cancellable? cancellable = null) throws Error {
+        return yield build_mime_message_with_options (draft, settings, false, cancellable);
+    }
+
+    private async Camel.MimeMessage build_mime_message_with_options (
+        Draft draft, AccountSettings settings, bool remote_draft,
+        Cancellable? cancellable = null) throws Error {
         AttachmentService.validate_declared_total (draft.attachments);
         var message = new Camel.MimeMessage (); message.set_subject (draft.subject);
-        message.set_message_id (Uuid.string_random () + "@mailficient.local");
+        message.set_message_id (remote_draft ? draft.remote_message_id () :
+            Uuid.string_random () + "@mailficient.local");
         message.set_date ((time_t) new DateTime.now_utc ().to_unix (), 0);
+        if (remote_draft) {
+            message.set_header ("X-Mailficient-Draft-ID", draft.id);
+            message.set_header ("X-Mailficient-Draft-Revision", draft.revision.to_string ());
+        }
         if (draft.in_reply_to != "") {
             message.set_header ("In-Reply-To", draft.in_reply_to);
             message.set_header ("References", draft.references == "" ? draft.in_reply_to : draft.references);
@@ -996,6 +1505,8 @@ public class CamelMailEngine : Object, MailEngine {
         var to = parse_addresses (draft.to, ignored_envelope); message.set_recipients (Camel.RECIPIENT_TYPE_TO, to);
         if (draft.cc.strip () != "") message.set_recipients (Camel.RECIPIENT_TYPE_CC, parse_addresses (draft.cc, ignored_envelope));
         // Bcc recipients belong in the SMTP envelope only and must not leak into message headers.
+        if (remote_draft && draft.bcc.strip () != "")
+            message.set_recipients (Camel.RECIPIENT_TYPE_BCC, parse_addresses (draft.bcc, ignored_envelope));
 
         uint8[] body_content = draft.body_text.data;
         Camel.Multipart? alternative = null;
@@ -1040,7 +1551,7 @@ public class CamelMailEngine : Object, MailEngine {
             }
             ((Camel.Medium) message).set_content (multipart);
         }
-        if (draft.sign_message || draft.encrypt_message)
+        if (!remote_draft && (draft.sign_message || draft.encrypt_message))
             yield secure_mime_body (message, draft, settings, cancellable);
         return message;
     }
@@ -1120,8 +1631,9 @@ public class CamelMailEngine : Object, MailEngine {
                 Priority.DEFAULT, cancellable);
             if (sent == null) return new SendResult (false, "The Sent mailbox is unavailable");
             string? appended_uid;
-            bool appended = yield sent.append_message (message, null, Priority.DEFAULT,
-                cancellable, out appended_uid);
+            var append_info = sent.get_folder_summary ().info_new_from_message (message);
+            bool appended = yield sent.append_message (message, append_info, Priority.DEFAULT,
+                                                       cancellable, out appended_uid);
             if (!appended) return new SendResult (false, "The server rejected the Sent copy");
             yield sent.synchronize (false, Priority.DEFAULT, cancellable);
             return new SendResult ();
@@ -1240,9 +1752,25 @@ public class CamelMailEngine : Object, MailEngine {
     public async void create_folder (string account_id, string parent_name, string folder_name,
                                      Cancellable? cancellable = null) throws Error {
         var store = stores[account_id]; if (store == null) throw new MailError.CONNECTION ("The account is not connected");
-        var created = yield store.create_folder (parent_name == "" ? null : parent_name, folder_name,
-            Priority.DEFAULT, cancellable);
-        if (created == null) throw new MailError.CONNECTION ("The server did not create the folder");
+        // Stop selecting Inbox while its store processes CREATE/LIST updates.
+        // Older IMAPX releases can otherwise race folder construction against
+        // an active IDLE watch and instantiate the wrong base folder type.
+        detach_live_watch (account_id);
+        try {
+            // Do not use get_folder(CREATE) here. EDS 3.56 reserves the folder
+            // name in CamelStore's object bag while IMAPX CREATE performs its
+            // confirming LIST on another worker. The mailbox-created callback
+            // can then observe that reservation as if it were a CamelFolder.
+            var created = yield store.create_folder (parent_name, folder_name,
+                Priority.DEFAULT, cancellable);
+            if (created == null)
+                throw new MailError.CONNECTION ("The server did not create the folder");
+        } catch (Error error) {
+            try { yield ensure_live_watch (account_id, store, cancellable); }
+            catch (Error ignored) { }
+            throw error;
+        }
+        yield ensure_live_watch (account_id, store, cancellable);
     }
 
     public async void rename_folder (string account_id, string old_name, string old_display_name,
@@ -1251,15 +1779,48 @@ public class CamelMailEngine : Object, MailEngine {
         string new_name = new_display_name;
         if (old_display_name != "" && old_name.has_suffix (old_display_name))
             new_name = old_name.substring (0, old_name.length - old_display_name.length) + new_display_name;
-        if (!(yield store.rename_folder (old_name, new_name, Priority.DEFAULT, cancellable)))
-            throw new MailError.CONNECTION ("The server did not rename the folder");
+        detach_live_watch (account_id);
+        Camel.Folder? retained_folder = null;
+        try {
+            // EDS's IMAPX store keeps weak folder references in its object bag.
+            // Retain the source until the provider's post-RENAME LIST callback
+            // has re-keyed it; otherwise older releases can observe an object
+            // whose finalizer is already running.
+            retained_folder = yield store.get_folder (old_name,
+                Camel.StoreGetFolderFlags.NONE, Priority.DEFAULT, cancellable);
+            if (retained_folder == null ||
+                !(yield store.rename_folder (old_name, new_name, Priority.DEFAULT, cancellable)))
+                throw new MailError.CONNECTION ("The server did not rename the folder");
+            // Keep the explicit reference live across the asynchronous rename.
+            retained_folder.get_full_name ();
+        } catch (Error error) {
+            try { yield ensure_live_watch (account_id, store, cancellable); }
+            catch (Error ignored) { }
+            throw error;
+        }
+        yield ensure_live_watch (account_id, store, cancellable);
     }
 
     public async void delete_folder (string account_id, string folder_name,
                                      Cancellable? cancellable = null) throws Error {
         var store = stores[account_id]; if (store == null) throw new MailError.CONNECTION ("The account is not connected");
-        if (!(yield store.delete_folder (folder_name, Priority.DEFAULT, cancellable)))
-            throw new MailError.CONNECTION ("The server did not delete the folder");
+        detach_live_watch (account_id);
+        Camel.Folder? retained_folder = null;
+        try {
+            // Retain the provider folder through the mailbox-deleted callback
+            // for the same CamelObjectBag lifetime reason as rename_folder().
+            retained_folder = yield store.get_folder (folder_name,
+                Camel.StoreGetFolderFlags.NONE, Priority.DEFAULT, cancellable);
+            if (retained_folder == null ||
+                !(yield store.delete_folder (folder_name, Priority.DEFAULT, cancellable)))
+                throw new MailError.CONNECTION ("The server did not delete the folder");
+            retained_folder.get_full_name ();
+        } catch (Error error) {
+            try { yield ensure_live_watch (account_id, store, cancellable); }
+            catch (Error ignored) { }
+            throw error;
+        }
+        yield ensure_live_watch (account_id, store, cancellable);
     }
 
     public async void permanently_delete_message (string account_id, string mailbox_name,

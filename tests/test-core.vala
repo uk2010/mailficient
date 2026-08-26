@@ -72,6 +72,8 @@ private class ProvisioningMailEngine : Object, MailEngine {
     public async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
                                               Cancellable? cancellable = null) throws Error { return new MailSyncResult (account_id); }
     public async SendResult send (Draft draft, Cancellable? cancellable = null) throws Error { return new SendResult (); }
+    public async RemoteDraftLocation? save_remote_draft (Draft draft, Cancellable? cancellable = null) throws Error { return null; }
+    public async bool delete_remote_draft (PendingDraftDeletion deletion, Cancellable? cancellable = null) throws Error { return true; }
     public async void save_remote_attachment (string account_id, string mailbox_name,
                                                string remote_uid, int remote_part_index,
                                                File destination, int64 maximum_bytes,
@@ -108,6 +110,12 @@ private class FailingMailEngine : Object, MailEngine {
         return new MailSyncResult (account_id);
     }
     public async SendResult send (Draft draft, Cancellable? cancellable = null) throws Error { return new SendResult (); }
+    public async RemoteDraftLocation? save_remote_draft (Draft draft, Cancellable? cancellable = null) throws Error {
+        throw new MailError.CONNECTION ("Test server is unreachable");
+    }
+    public async bool delete_remote_draft (PendingDraftDeletion deletion, Cancellable? cancellable = null) throws Error {
+        throw new MailError.CONNECTION ("Test server is unreachable");
+    }
     public async void save_remote_attachment (string account_id, string mailbox_name,
                                                string remote_uid, int remote_part_index,
                                                File destination, int64 maximum_bytes,
@@ -147,6 +155,8 @@ private class RecordingMailEngine : Object, MailEngine {
     public int active_synchronizations;
     public int maximum_active_synchronizations;
     public int send_calls;
+    public string last_sent_subject = "";
+    public string last_sent_body = "";
     public bool fail_send;
     public bool reject_send;
     public bool rate_limit_send;
@@ -159,6 +169,7 @@ private class RecordingMailEngine : Object, MailEngine {
     public Gee.ArrayList<string> state_changes = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> transfers = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> operations = new Gee.ArrayList<string> ();
+    public Gee.ArrayList<string> lifecycle = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> permanent_deletions = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> emptied_folders = new Gee.ArrayList<string> ();
     public Gee.ArrayList<MailSyncResult> batches = new Gee.ArrayList<MailSyncResult> ();
@@ -183,18 +194,18 @@ private class RecordingMailEngine : Object, MailEngine {
             }
         }
         if (cancellable != null) cancellable.set_error_if_cancelled ();
-        connect_calls++;
+        connect_calls++; lifecycle.add ("connect");
     }
     public async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
         yield connect_account (settings, cancellable);
     }
     public async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error {
-        disconnect_calls++;
+        disconnect_calls++; lifecycle.add ("disconnect");
     }
     public async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
                                               Cancellable? cancellable = null) throws Error {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
-        synchronize_calls++; active_synchronizations++;
+        synchronize_calls++; active_synchronizations++; lifecycle.add ("synchronize");
         if (synchronize_failure != null) {
             active_synchronizations--;
             throw synchronize_failure;
@@ -229,6 +240,8 @@ private class RecordingMailEngine : Object, MailEngine {
     public async SendResult send (Draft draft, Cancellable? cancellable = null) throws Error {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         send_calls++;
+        last_sent_subject = draft.subject;
+        last_sent_body = draft.body_text;
         if (stall_send) {
             if (cancellable == null) {
                 yield;
@@ -245,6 +258,16 @@ private class RecordingMailEngine : Object, MailEngine {
         if (reject_send) throw new MailError.SEND_REJECTED ("550 Recipient address rejected");
         if (fail_send) throw new MailError.CONNECTION ("SMTP response was lost");
         return new SendResult ();
+    }
+    public async RemoteDraftLocation? save_remote_draft (Draft draft, Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        operations.add ("draft-save:%s:%s".printf (draft.id, draft.revision.to_string ()));
+        return new RemoteDraftLocation ("Drafts", "draft-" + draft.revision.to_string ());
+    }
+    public async bool delete_remote_draft (PendingDraftDeletion deletion, Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        operations.add ("draft-delete:%s:%s".printf (deletion.mailbox_name, deletion.remote_uid));
+        return true;
     }
     public async void save_remote_attachment (string account_id, string mailbox_name,
                                                string remote_uid, int remote_part_index,
@@ -297,6 +320,172 @@ private class RecordingMailEngine : Object, MailEngine {
         if (!states.has_key (account_id)) states[account_id] = new SyncState ();
         return states[account_id];
     }
+}
+
+private class SearchMailEngine : RecordingMailEngine, RemoteMailSearchProvider {
+    public int messages_per_mailbox = 150;
+    public int search_round;
+    public Gee.ArrayList<string> searched_mailboxes = new Gee.ArrayList<string> ();
+    public Gee.ArrayList<string> search_expressions = new Gee.ArrayList<string> ();
+    public Gee.ArrayList<int> search_limits = new Gee.ArrayList<int> ();
+
+    public SearchMailEngine () { base ("server-search-account"); }
+
+    public async Gee.List<Message> search_remote (
+        Mailbox mailbox, string expression, int limit,
+        Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        searched_mailboxes.add (mailbox.id); search_expressions.add (expression);
+        search_limits.add (limit);
+        var result = new Gee.ArrayList<Message> ();
+        int count = int.min (messages_per_mailbox, limit);
+        for (int index = 0; index < count; index++) {
+            string id = "%s:remote-search:%d:%d".printf (
+                mailbox.id, search_round, index);
+            result.add (new Message (id, mailbox.id, "Search Provider",
+                "provider@example.net", "alex@example.net", "Needle result",
+                "Server candidate", "Bounded server search candidate", "Now",
+                true, false, false, 1, false, mailbox.account_id,
+                "remote-%d-%d".printf (search_round, index)));
+        }
+        return result;
+    }
+
+    public void begin_search_round () {
+        search_round++; searched_mailboxes.clear (); search_expressions.clear ();
+        search_limits.clear ();
+    }
+}
+
+private class ServerSearchOutcome : Object {
+    public int installed = -1;
+    public Error? failure;
+}
+
+private ServerSearchOutcome fetch_server_sync (
+    MailSearchService service, string input, MailSearchScope scope,
+    string mailbox_id, int maximum_messages) {
+    var outcome = new ServerSearchOutcome (); var loop = new MainLoop ();
+    service.fetch_from_server.begin (input, scope, mailbox_id, maximum_messages,
+        null, (object, result) => {
+            try { outcome.installed = service.fetch_from_server.end (result); }
+            catch (Error error) { outcome.failure = error; }
+            loop.quit ();
+        });
+    loop.run (); return outcome;
+}
+
+private void test_new_mail_summary_is_bounded () {
+    var summary = new NewMailSummary ("summary-account", "alex@example.net");
+    for (int index = 0; index < 8; index++) {
+        var message = new Message (
+            "summary-account:inbox:%d".printf (index), "summary-account:inbox",
+            "Sender %d".printf (index), "sender%d@example.net".printf (index),
+            "alex@example.net", "Message %d".printf (index), "", "Body", "Now",
+            true, false, false, 1, false, "summary-account", index.to_string ());
+        assert (summary.add (message));
+    }
+    assert (!summary.add (summary.samples[0]));
+    assert (summary.total == 8);
+    assert (summary.samples.size == NewMailSummary.MAX_SAMPLE_MESSAGES);
+    assert (summary.has_overflow ());
+    assert (NotificationService.summary_title (summary) ==
+        "8 new messages for alex@example.net");
+    assert (NotificationService.summary_body (summary).has_prefix ("Includes: Sender 0 — Message 0"));
+
+    var continuation = new NewMailSummary ("summary-account", "alex@example.net");
+    assert (continuation.add (summary.samples[0]));
+    for (int index = 8; index < 13; index++) {
+        continuation.add (new Message (
+            "summary-account:inbox:%d".printf (index), "summary-account:inbox",
+            "Sender %d".printf (index), "sender%d@example.net".printf (index),
+            "alex@example.net", "Message %d".printf (index), "", "Body", "Now",
+            true, false, false, 1, false, "summary-account", index.to_string ()));
+    }
+    summary.merge (continuation);
+    assert (summary.total == 13);
+    assert (summary.samples.size == NewMailSummary.MAX_SAMPLE_MESSAGES);
+}
+
+private void test_live_mail_coordinator_debounces_and_cancels () {
+    assert (LiveMailCoordinator.reconnect_delay_for (0) == 5);
+    assert (LiveMailCoordinator.reconnect_delay_for (1) == 10);
+    assert (LiveMailCoordinator.reconnect_delay_for (20) == 300);
+    var coordinator = new LiveMailCoordinator ();
+    int requests = 0;
+    LiveSyncReason? requested_reason = null;
+    var loop = new MainLoop ();
+    uint safety_source = 0;
+    safety_source = Timeout.add_seconds (2, () => {
+        safety_source = 0;
+        loop.quit ();
+        return Source.REMOVE;
+    });
+    coordinator.sync_requested.connect ((account_id, reason) => {
+        assert (account_id == "live-account");
+        requests++;
+        requested_reason = reason;
+        loop.quit ();
+    });
+    coordinator.live_mail_changed ("live-account");
+    coordinator.live_mail_changed ("live-account");
+    assert (coordinator.has_pending ("live-account"));
+    loop.run ();
+    if (safety_source != 0) Source.remove (safety_source);
+    assert (requests == 1);
+    assert (requested_reason == LiveSyncReason.ARRIVAL);
+    assert (!coordinator.has_pending ("live-account"));
+
+    coordinator.live_mail_unavailable ("live-account");
+    coordinator.live_mail_unavailable ("live-account");
+    assert (coordinator.has_pending ("live-account"));
+    assert (coordinator.reconnect_attempt ("live-account") == 1);
+    coordinator.suppress_account ("live-account");
+    assert (!coordinator.has_pending ("live-account"));
+    assert (coordinator.reconnect_attempt ("live-account") == 0);
+    coordinator.resume_account ("live-account");
+    coordinator.live_mail_changed ("live-account");
+    coordinator.cancel_all ();
+    assert (!coordinator.has_pending ("live-account"));
+}
+
+private void test_live_arrival_triggers_one_sync () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-live-arrival-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Live", "live@example.net");
+        account.id = "live-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var engine = new RecordingMailEngine (account.id);
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
+        int completions = 0;
+        var loop = new MainLoop ();
+        uint safety_source = 0;
+        safety_source = Timeout.add_seconds (2, () => {
+            safety_source = 0;
+            loop.quit ();
+            return Source.REMOVE;
+        });
+        service.synchronized.connect ((account_id) => {
+            if (account_id == account.id) {
+                completions++;
+                loop.quit ();
+            }
+        });
+        engine.live_mail_changed (account.id);
+        engine.live_mail_changed (account.id);
+        loop.run ();
+        if (safety_source != 0) Source.remove (safety_source);
+        assert (completions == 1);
+        assert (engine.synchronize_calls == 1);
+        service.cancel ();
+    } catch (Error error) { GLib.error ("live arrival test failed: %s", error.message); }
 }
 
 private void test_search () {
@@ -1257,6 +1446,10 @@ private void test_settings_store () {
         settings.always_show_images = true;
         assert (settings.full_html_formatting);
         settings.full_html_formatting = false;
+        assert (settings.spellcheck_enabled);
+        settings.spellcheck_enabled = false;
+        assert (settings.undo_send_seconds == 10);
+        settings.undo_send_seconds = 24;
         assert (settings.appearance == "system");
         settings.appearance = "dark";
         var reopened = new MailSettingsStore (new CacheDatabase (path));
@@ -1276,6 +1469,8 @@ private void test_settings_store () {
         assert (!reopened.group_messages);
         assert (reopened.always_show_images);
         assert (!reopened.full_html_formatting);
+        assert (!reopened.spellcheck_enabled);
+        assert (reopened.undo_send_seconds == 24);
         assert (reopened.appearance == "dark");
         reopened.save_window_state (1920, 1080, true);
         var maximized = new MailSettingsStore (new CacheDatabase (path));
@@ -1291,8 +1486,50 @@ private void test_settings_store () {
         assert (maximized.preferences_page == "general");
         maximized.appearance = "invalid";
         assert (maximized.appearance == "system");
+        maximized.undo_send_seconds = 1;
+        assert (maximized.undo_send_seconds == 5);
+        maximized.undo_send_seconds = 60;
+        assert (maximized.undo_send_seconds == 30);
     } catch (Error caught) { GLib.error ("settings store test failed: %s", caught.message); }
     FileUtils.unlink (path);
+}
+
+private void test_compose_safety () {
+    assert (ComposeSafetyService.mentions_missing_attachment (
+        "Quarterly report attached", "Please review it.", false));
+    assert (ComposeSafetyService.mentions_missing_attachment (
+        "", "I included the spreadsheet for review.", false));
+    assert (!ComposeSafetyService.mentions_missing_attachment (
+        "Quarterly report attached", "Please review it.", true));
+    assert (!ComposeSafetyService.mentions_missing_attachment (
+        "No attachment", "This note intentionally has no attachment.", false));
+    assert (!ComposeSafetyService.mentions_missing_attachment ("Re: Files",
+        "Thanks.\n\nOn Tuesday, Maya wrote:\n> The document is attached.", false));
+
+    var issues = LocalSpellChecker.fallback_check (
+        "Café notes: teh address is alex@example.net; recieve it tomorow.");
+    assert (issues.size == 3);
+    assert (issues[0].word == "teh"); assert (issues[0].suggestions[0] == "the");
+    assert (issues[1].word == "recieve"); assert (issues[1].suggestions[0] == "receive");
+    assert (issues[2].word == "tomorow"); assert (issues[2].suggestions[0] == "tomorrow");
+    // Offsets are character offsets, not UTF-8 bytes; the accented character
+    // before the first error must not shift the applied Gtk.TextTag.
+    assert (issues[0].start_offset == "Café notes: ".char_count ());
+
+    // The portable correction table must honor the same per-message Ignore
+    // action as an installed Enchant/Aspell dictionary.
+    var fallback_checker = new LocalSpellChecker (true);
+    fallback_checker.ignore ("teh");
+    var filtered_issues = new Gee.ArrayList<SpellingIssue> ();
+    Error? spelling_error = null; var spelling_loop = new MainLoop ();
+    fallback_checker.check.begin ("teh recieve", null, (object, result) => {
+        try { filtered_issues = fallback_checker.check.end (result); }
+        catch (Error error) { spelling_error = error; }
+        spelling_loop.quit ();
+    });
+    spelling_loop.run ();
+    assert (spelling_error == null); assert (filtered_issues.size == 1);
+    assert (filtered_issues[0].word == "recieve");
 }
 
 private void test_startup_sync_gate () {
@@ -1421,6 +1658,49 @@ private void test_outbound_queue () {
         assert (cache.list_pending_sends (account.id, true).size == 0);
         cache.complete_send (draft.id); assert (cache.outbox_count () == 1); assert (cache.load_draft (draft.id) == null);
     } catch (Error error) { GLib.error ("outbound test failed: %s", error.message); }
+}
+
+private void test_undo_send_outbox_window () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-undo-send-%s".printf (Uuid.string_random ()));
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var service = new OutboundService (cache, null,
+            new AttachmentService (Path.build_filename (root, "attachments")));
+        var draft = new Draft ("demo-account"); draft.to = "maya@example.net";
+        draft.body_text = "This exact version waits behind Undo Send";
+        int64 before = new DateTime.now_utc ().to_unix ();
+        int64 deadline = service.defer_for_undo (draft, 1);
+        assert (deadline >= before + 5); assert (deadline <= before + 6);
+        var item = cache.find_outbox_item (draft.id); assert (item != null);
+        assert (item.can_undo (before)); assert (item.undo_until == deadline);
+        assert (item.next_attempt_at == deadline);
+        assert (cache.list_pending_sends (draft.account_id, true).size == 0);
+        // Even an explicit non-due retry cannot bypass the Undo Send fence.
+        assert (!cache.claim_queued_send (draft.id, "early-worker", deadline + 60, false));
+        assert (service.cancel_undo_send (draft.id, draft.account_id));
+        assert (cache.find_outbox_item (draft.id) == null);
+        assert (cache.load_draft (draft.id) != null);
+
+        // Canceling a deferred resend restores the original uncertain state;
+        // losing that warning could let a possible duplicate send look safe.
+        cache.queue_for_sending (draft); cache.mark_send_started (draft.id);
+        cache.record_send_uncertain (draft.id, "SMTP reply was lost");
+        var uncertain = cache.find_outbox_item (draft.id); assert (uncertain != null);
+        assert (uncertain.delivery_state == OutboxDeliveryState.SENDING);
+        int prior_attempts = uncertain.attempts;
+        service.defer_for_undo (draft, 30, true);
+        item = cache.find_outbox_item (draft.id); assert (item != null && item.can_undo ());
+        assert (service.cancel_undo_send (draft.id, draft.account_id));
+        var restored = cache.find_outbox_item (draft.id); assert (restored != null);
+        assert (restored.delivery_state == OutboxDeliveryState.SENDING);
+        assert (restored.attempts == prior_attempts);
+        assert (restored.last_error == "SMTP reply was lost");
+        assert (!service.cancel_undo_send (draft.id, draft.account_id));
+    } catch (Error error) {
+        GLib.error ("Undo Send test failed: %s", error.message);
+    }
 }
 
 private void test_scheduled_delivery_timer () {
@@ -1582,8 +1862,8 @@ private void test_outbox_delivery_state_machine () {
 
         // Pressing Send from the reopened Outbox editor is an explicit retry.
         engine.fail_send = false; failure = null;
-        service.deliver.begin (draft, null, (object, result) => {
-            try { service.deliver.end (result); } catch (Error error) { failure = error; }
+        service.deliver_confirmed_resend.begin (draft, null, (object, result) => {
+            try { service.deliver_confirmed_resend.end (result); } catch (Error error) { failure = error; }
             loop.quit ();
         });
         loop.run (); assert (failure == null); assert (engine.send_calls == send_calls + 1);
@@ -2163,7 +2443,13 @@ private void test_long_running_streamed_sync_is_bounded () {
         var service = new AccountSyncService (cache, engine,
             new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
         int notifications = 0; int failures = 0; int successes = 0;
+        int summary_count = 0; int summarized_messages = 0;
         service.new_message.connect ((message) => notifications++);
+        service.new_mail_summary.connect ((summary) => {
+            summary_count++;
+            summarized_messages += summary.total;
+            assert (summary.samples.size <= NewMailSummary.MAX_SAMPLE_MESSAGES);
+        });
         service.failed.connect ((id, error) => failures++);
         service.synchronized.connect ((id) => successes++);
         int64 baseline_rss = current_rss_kb (); int64 peak_rss = baseline_rss;
@@ -2202,12 +2488,13 @@ private void test_long_running_streamed_sync_is_bounded () {
         // times per pass and releasing the backend after every pass.
         assert (failures == 40); assert (successes == 200);
         assert (notifications == 1000);
+        assert (summary_count == 200); assert (summarized_messages == 20000);
         assert (cache.cached_message_count (account.id) == 20001);
         assert (engine.disconnect_calls == 0);
         assert (engine.maximum_active_synchronizations == 1);
-        var summaries = cache.list_cached_messages (inbox.id);
-        assert (summaries.size == CacheDatabase.MESSAGE_LIST_LIMIT);
-        foreach (var summary in summaries) {
+        var cached_summaries = cache.list_cached_messages (inbox.id);
+        assert (cached_summaries.size == CacheDatabase.MESSAGE_LIST_LIMIT);
+        foreach (var summary in cached_summaries) {
             assert (summary.body == ""); assert (summary.body_html == "");
             assert (summary.attachments.size == 0);
         }
@@ -2226,7 +2513,7 @@ private void test_automatic_history_backfill () {
         account.id = "backfill-account"; account.incoming_host = "imap.example.net";
         account.outgoing_host = "smtp.example.net"; cache.save_account (account);
         var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
-            MailboxRole.INBOX, 4, account.id, "INBOX");
+            MailboxRole.INBOX, 502, account.id, "INBOX");
         var initial = new MailSyncResult (account.id); initial.mailboxes.add (inbox);
         initial.messages.add (new Message (account.id + ":inbox:seed", inbox.id, "Seed",
             "seed@example.net", account.email, "Seed", "", "Seed", "Earlier", false,
@@ -2234,13 +2521,16 @@ private void test_automatic_history_backfill () {
         cache.store_sync_result (initial);
 
         var engine = new RecordingMailEngine (account.id);
+        int sequence = 0;
         for (int pass = 0; pass < 3; pass++) {
             var snapshot = new MailSyncResult (account.id); snapshot.mailboxes.add (inbox);
-            snapshot.messages_to_download = 3 - pass;
-            snapshot.messages.add (new Message ("%s:inbox:%d".printf (account.id, pass),
-                inbox.id, "History", "history@example.net", account.email,
-                "History %d".printf (pass), "", "Body", "Earlier", true, false,
-                false, 1, false, account.id, pass.to_string ()));
+            int pass_size = pass < 2 ? 250 : 1;
+            snapshot.messages_to_download = 501 - sequence;
+            for (int item = 0; item < pass_size; item++, sequence++)
+                snapshot.messages.add (new Message ("%s:inbox:%d".printf (account.id, sequence),
+                    inbox.id, "History", "history@example.net", account.email,
+                    "History %d".printf (sequence), "", "Body", "Earlier", true, false,
+                    false, 1, false, account.id, sequence.to_string ()));
             snapshot.more_messages_available = pass < 2;
             engine.queued_snapshots.add (snapshot);
         }
@@ -2248,14 +2538,20 @@ private void test_automatic_history_backfill () {
         var service = new AccountSyncService (cache, engine,
             new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
         int completed = 0; int checkpoints = 0; int notifications = 0; int failures = 0;
+        int summaries = 0; int summarized_messages = 0;
         bool saw_initial_total = false; bool saw_background_total = false;
         service.synchronized.connect ((id) => completed++);
         service.pass_completed.connect ((id) => checkpoints++);
         service.new_message.connect ((message) => notifications++);
+        service.new_mail_summary.connect ((summary) => {
+            summaries++;
+            summarized_messages += summary.total;
+            assert (summary.samples.size <= NewMailSummary.MAX_SAMPLE_MESSAGES);
+        });
         service.failed.connect ((id, error) => failures++);
         service.progress_changed.connect ((id, fraction, detail) => {
-            if (detail == "Downloaded 0 of 3 messages") saw_initial_total = true;
-            if (detail == "Downloaded 1 of 3 messages — continuing in background") saw_background_total = true;
+            if (detail == "Downloaded 0 of 501 messages") saw_initial_total = true;
+            if (detail == "Downloaded 250 of 501 messages — continuing in background") saw_background_total = true;
         });
         var loop = new MainLoop ();
         service.sync_account.begin (account, null, (object, result) => {
@@ -2268,13 +2564,147 @@ private void test_automatic_history_backfill () {
         loop.run ();
         if (timeout_source != 0) Source.remove (timeout_source);
         assert (failures == 0); assert (completed == 3); assert (checkpoints == 2);
-        assert (engine.synchronize_calls == 3); assert (engine.disconnect_calls == 0);
-        assert (cache.cached_message_count (account.id) == 4);
+        assert (engine.synchronize_calls == 3); assert (engine.disconnect_calls == 2);
+        assert (cache.cached_message_count (account.id) == 502);
         assert (saw_initial_total); assert (saw_background_total);
-        // Each streamed pass announces newly cached mail while the remaining
-        // history continues automatically in the background.
-        assert (notifications == 3);
+        assert (engine.lifecycle.size == 8);
+        assert (engine.lifecycle[0] == "connect"); assert (engine.lifecycle[1] == "synchronize");
+        assert (engine.lifecycle[2] == "disconnect"); assert (engine.lifecycle[3] == "connect");
+        assert (engine.lifecycle[4] == "synchronize"); assert (engine.lifecycle[5] == "disconnect");
+        assert (engine.lifecycle[6] == "connect"); assert (engine.lifecycle[7] == "synchronize");
+        // The three fresh backend sessions form one logical mail check. Publish
+        // one bounded notification only after all 501 arrivals are durable.
+        assert (notifications == NewMailSummary.MAX_SAMPLE_MESSAGES);
+        assert (summaries == 1); assert (summarized_messages == 501);
     } catch (Error error) { GLib.error ("automatic backfill test failed: %s", error.message); }
+}
+
+private void test_initial_history_backfill_stays_silent () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-initial-backfill-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Initial", "initial@example.net");
+        account.id = "initial-backfill-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
+            MailboxRole.INBOX, 501, account.id, "INBOX");
+
+        var engine = new RecordingMailEngine (account.id);
+        int sequence = 0;
+        for (int pass = 0; pass < 3; pass++) {
+            var snapshot = new MailSyncResult (account.id);
+            snapshot.mailboxes.add (inbox);
+            int pass_size = pass < 2 ? 250 : 1;
+            snapshot.messages_to_download = 501 - sequence;
+            for (int item = 0; item < pass_size; item++, sequence++)
+                snapshot.messages.add (new Message (
+                    "%s:inbox:%d".printf (account.id, sequence), inbox.id,
+                    "History", "history@example.net", account.email,
+                    "Initial history %d".printf (sequence), "", "Body", "Earlier",
+                    true, false, false, 1, false, account.id, sequence.to_string ()));
+            snapshot.more_messages_available = pass < 2;
+            engine.queued_snapshots.add (snapshot);
+        }
+
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
+        int completed = 0; int messages = 0; int summaries = 0;
+        service.synchronized.connect ((id) => completed++);
+        service.new_message.connect ((message) => messages++);
+        service.new_mail_summary.connect ((summary) => summaries++);
+        var loop = new MainLoop ();
+        uint timeout_source = Timeout.add_seconds (8, () => {
+            loop.quit ();
+            return Source.REMOVE;
+        });
+        service.synchronized.connect ((id) => {
+            if (completed >= 3) loop.quit ();
+        });
+        service.sync_account.begin (account, null, (object, result) => {
+            service.sync_account.end (result);
+        });
+        loop.run ();
+        if (timeout_source != 0) Source.remove (timeout_source);
+        assert (completed == 3);
+        assert (engine.synchronize_calls == 3);
+        assert (cache.cached_message_count (account.id) == 501);
+        assert (messages == 0); assert (summaries == 0);
+    } catch (Error error) {
+        GLib.error ("initial backfill notification test failed: %s", error.message);
+    }
+}
+
+private void test_initial_history_cancel_resume_stays_silent () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-initial-cancel-resume-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Initial resume", "resume@example.net");
+        account.id = "initial-cancel-resume-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
+            MailboxRole.INBOX, 501, account.id, "INBOX");
+
+        var engine = new RecordingMailEngine (account.id);
+        int sequence = 0;
+        for (int pass = 0; pass < 2; pass++) {
+            var snapshot = new MailSyncResult (account.id);
+            snapshot.mailboxes.add (inbox);
+            int pass_size = pass == 0 ? 250 : 251;
+            snapshot.messages_to_download = 501 - sequence;
+            for (int item = 0; item < pass_size; item++, sequence++)
+                snapshot.messages.add (new Message (
+                    "%s:inbox:%d".printf (account.id, sequence), inbox.id,
+                    "History", "history@example.net", account.email,
+                    "Initial history %d".printf (sequence), "", "Body", "Earlier",
+                    true, false, false, 1, false, account.id, sequence.to_string ()));
+            snapshot.more_messages_available = pass == 0;
+            engine.queued_snapshots.add (snapshot);
+        }
+
+        var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+        var service = new AccountSyncService (cache, engine,
+            new OutboundService (cache, engine, attachments), new JunkFilterService (cache));
+        int completions = 0; int messages = 0; int summaries = 0; int failures = 0;
+        service.synchronized.connect ((id) => completions++);
+        service.new_message.connect ((message) => messages++);
+        service.new_mail_summary.connect ((summary) => summaries++);
+        service.failed.connect ((id, error) => failures++);
+        var loop = new MainLoop ();
+        uint timeout_source = Timeout.add_seconds (8, () => {
+            loop.quit ();
+            return Source.REMOVE;
+        });
+        service.sync_account.begin (account, null, (object, first_result) => {
+            service.sync_account.end (first_result);
+            // Cancel the queued 250 ms continuation, then explicitly resume.
+            // The account-scoped initial-import marker must survive cancel().
+            service.cancel ();
+            Idle.add (() => {
+                service.sync_account.begin (account, null, (second_object, second_result) => {
+                    service.sync_account.end (second_result);
+                    loop.quit ();
+                });
+                return Source.REMOVE;
+            });
+        });
+        loop.run ();
+        if (timeout_source != 0) Source.remove (timeout_source);
+        assert (failures == 0); assert (completions == 2);
+        assert (engine.synchronize_calls == 2);
+        assert (cache.cached_message_count (account.id) == 501);
+        assert (messages == 0); assert (summaries == 0);
+    } catch (Error error) {
+        GLib.error ("initial backfill cancel/resume test failed: %s", error.message);
+    }
 }
 
 private void test_active_sync_can_be_cancelled () {
@@ -2722,8 +3152,10 @@ private void test_demo_is_testing_only () {
         var cache = new CacheDatabase (path); var demo = new DemoMailRepository ();
         var normal = new CachedMailRepository (cache, demo);
         var normal_mailboxes = normal.list_mailboxes ();
-        assert (normal_mailboxes.size == 1);
-        assert (normal_mailboxes[0].id == CachedMailRepository.GNOME_CALENDAR_ID);
+        assert (normal_mailboxes.size == 3);
+        assert (normal_mailboxes[0].id == CachedMailRepository.TASK_TODAY_ID);
+        assert (normal_mailboxes[1].id == CachedMailRepository.TASK_PLANNED_ID);
+        assert (normal_mailboxes[2].id == CachedMailRepository.GNOME_CALENDAR_ID);
         assert (normal.list_messages ("inbox").size == 0);
         assert (normal.find_message ("1") == null);
         var testing = new CachedMailRepository (cache, demo, true);
@@ -2920,6 +3352,425 @@ private void test_toolbar_layout () {
     assert (ToolbarLayout.icon_name ("junk") == "dialog-warning-symbolic");
 }
 
+private void test_task_views_recurrence_and_email_flags () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-tasks-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var repository = new CachedMailRepository (cache, new DemoMailRepository (), false);
+        var service = new TaskService (cache, repository);
+        int changes = 0; service.changed.connect (() => changes++);
+        int64 now = new DateTime.local (2026, 8, 25, 12, 0, 0).to_unix ();
+
+        var source = new Message ("task-source", "inbox", "Maya", "maya@example.net",
+            "Alex", "Release checklist", "", "Please review", "Today");
+        cache.cache_message (source);
+        var linked = service.create_from_message (source, "Review release checklist",
+            "2026-08-25", "Confirm owners", 0, TaskRecurrence.NONE, 1);
+        var linked_message = cache.find_cached_message (source.id);
+        assert (linked_message != null && linked_message.flagged);
+        assert (service.open_task_for_message (source.id).id == linked.id);
+        assert (service.list (TaskViewMode.TODAY, false, "", now).size == 1);
+
+        var future = service.create ("Prepare launch mail", "2026-08-30");
+        assert (service.list (TaskViewMode.TODAY, false, "", now).size == 1);
+        assert (service.list (TaskViewMode.PLANNED, false, "launch", now).size == 1);
+        assert (service.list (TaskViewMode.PLANNED, false, "", now).size == 2);
+        assert (cache.mail_task_count (true, now) == 1);
+        assert (cache.mail_task_count () == 2);
+
+        linked = service.update (linked, linked.title, linked.due_at, linked.notes, 0,
+            TaskRecurrence.DAILY, 2);
+        var next = service.set_completed (linked, true, now);
+        assert (next != null && next.due_at == "2026-08-27");
+        assert (cache.find_mail_task (linked.id).completed);
+        linked_message = cache.find_cached_message (source.id);
+        assert (linked_message != null && linked_message.flagged);
+
+        // A non-recurring linked task clears its email flag on completion;
+        // deleting the final linked task has the same lossless follow-up rule.
+        var source_two = new Message ("task-source-two", "inbox", "Noah", "noah@example.net",
+            "Alex", "Budget", "", "Budget attached", "Today");
+        cache.cache_message (source_two);
+        var single = service.create_from_message (source_two, "Approve budget", "2026-08-25");
+        service.set_completed (single, true, now);
+        assert (!cache.find_cached_message (source_two.id).flagged);
+        var delete_me = service.create_from_message (source_two, "Archive notes", "2026-08-30");
+        assert (cache.find_cached_message (source_two.id).flagged);
+        service.delete (delete_me);
+        assert (!cache.find_cached_message (source_two.id).flagged);
+
+        var monthly = new MailTask (77, "Month end", "2026-01-31", false, "", "", 0,
+            TaskRecurrence.MONTHLY, 1);
+        assert (monthly.next_due_date () == "2026-02-28");
+        assert (next.recurrence_label () == "Every 2 days");
+        assert (service.sync_status () == "Stored on this device");
+        bool rejected = false;
+        try { service.create ("Broken date", "2026-02-31"); }
+        catch (MailError error) { rejected = true; }
+        assert (rejected);
+
+        var mailboxes = repository.list_mailboxes ();
+        bool found_today = false, found_planned = false;
+        foreach (var mailbox in mailboxes) {
+            if (mailbox.id == CachedMailRepository.TASK_TODAY_ID) found_today = true;
+            if (mailbox.id == CachedMailRepository.TASK_PLANNED_ID) found_planned = true;
+        }
+        assert (found_today && found_planned && changes >= 7);
+        assert (future.id > 0);
+    } catch (Error error) { GLib.error ("task lifecycle test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
+private void test_task_reminder_delivery_is_durable () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-task-reminders-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var repository = new CachedMailRepository (cache, new DemoMailRepository (), false);
+        var service = new TaskService (cache, repository);
+        int64 now = new DateTime.local (2026, 8, 25, 12, 0, 0).to_unix ();
+        var task = service.create ("Call Maya", "2026-08-25", "", "", now - 30);
+        var reminders = new TaskReminderService (cache);
+        int notifications = 0; int64 reminded_id = 0;
+        reminders.reminder_due.connect ((due) => { notifications++; reminded_id = due.id; });
+        assert (reminders.dispatch_due (now) == 1);
+        assert (notifications == 1 && reminded_id == task.id);
+        assert (cache.find_mail_task (task.id).reminder_sent_at == now);
+        assert (reminders.dispatch_due (now + 1) == 0);
+
+        // Editing the reminder time resets its delivery claim exactly once.
+        task = service.update (task, task.title, task.due_at, task.notes, now + 120,
+            TaskRecurrence.NONE, 1);
+        assert (task.reminder_sent_at == 0);
+        assert (reminders.dispatch_due (now + 119) == 0);
+        assert (reminders.dispatch_due (now + 120) == 1);
+        assert (notifications == 2);
+        service.set_completed (task, true, now + 121);
+        assert (reminders.dispatch_due (now + 500) == 0);
+    } catch (Error error) { GLib.error ("task reminder test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
+private void test_message_security_assessment_and_unsubscribe () {
+    var service = new MessageSecurityService ();
+    var message = new Message ("security-1", "inbox", "Accounts Example.com",
+        "billing@xn--exampl-3ve.net", "alex@example.net", "Action required", "", "",
+        "Today");
+    message.reply_to = "collect@different.example";
+    message.authentication_results = "mx.example; dmarc=fail; spf=softfail; dkim=fail";
+    message.body_html = "<p><a href='https://collect.example/sign-in'>example.com</a></p>";
+    var assessment = service.assess (message, true);
+    // A Safe Sender entry is an address-book preference, never an override
+    // for authentication failure or a misleading destination.
+    assert (assessment.sender_is_safe);
+    assert (assessment.authentication_reported);
+    assert (assessment.level == MessageThreatLevel.DANGER);
+    assert (assessment.findings.size >= 4);
+
+    message.list_unsubscribe = "<https://lists.example/unsubscribe?id=42>, " +
+        "<mailto:leave@lists.example?subject=unsubscribe>, <http://unsafe.example>, " +
+        "<javascript:alert(1)>";
+    message.list_unsubscribe_post = "List-Unsubscribe=One-Click";
+    var targets = service.unsubscribe_targets (message);
+    assert (targets.size == 2);
+    assert (!targets[0].is_email && targets[0].supports_one_click);
+    assert (targets[1].is_email && !targets[1].supports_one_click);
+
+    assert (MessageSecurityService.sanitize_unsubscribe_subject (
+        "  Leave this list  ") == "Leave this list");
+    assert (MessageSecurityService.sanitize_unsubscribe_subject (
+        "Leave this list\r\nBcc: victim@example.net") == "Unsubscribe");
+    var long_subject = new StringBuilder ();
+    for (int index = 0; index < 254; index++) long_subject.append_c ('A');
+    long_subject.append ("😀tail");
+    string bounded_subject = MessageSecurityService.sanitize_unsubscribe_subject (
+        long_subject.str);
+    assert (bounded_subject.validate ());
+    assert (bounded_subject.length <= 255);
+    assert (!bounded_subject.contains ("😀"));
+
+    var authenticated = new Message ("security-2", "inbox", "Billing",
+        "billing@xn--exampl-3ve.net", "alex@example.net", "Receipt", "", "", "Today");
+    authenticated.authentication_results = "mx.example; dmarc=pass; spf=pass; dkim=pass";
+    authenticated.reply_to = authenticated.sender_address;
+    var passing = service.assess (authenticated);
+    assert (passing.level == MessageThreatLevel.CAUTION); // punycode remains visible
+
+    var safe_with_misleading_link = new Message ("security-3", "inbox", "Maya",
+        "maya@example.net", "alex@example.net", "Shared document", "", "", "Today");
+    safe_with_misleading_link.body_html =
+        "<p><a href='https://credential-check.example/login'>example.net</a></p>";
+    var safe_link_assessment = service.assess (safe_with_misleading_link, true);
+    assert (safe_link_assessment.sender_is_safe);
+    assert (safe_link_assessment.level == MessageThreatLevel.CAUTION);
+    assert (safe_link_assessment.findings.size == 1);
+}
+
+private void test_security_metadata_and_safe_senders_are_durable () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-security-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        cache.set_safe_sender ("  MAYA@Example.NET ", true);
+        assert (cache.is_safe_sender ("maya@example.net"));
+        assert (cache.list_safe_senders ().size == 1);
+
+        var raw = new StringBuilder ();
+        for (int index = 0; index < MessageSecurityService.MAX_RAW_HEADER_BYTES - 1; index++)
+            raw.append_c ('A');
+        raw.append ("😀tail");
+        var message = new Message ("security-cache", "inbox", "Maya", "maya@example.net",
+            "alex@example.net", "Headers", "", "Body", "Today");
+        message.bcc_recipients = "audit@example.net";
+        message.message_size = 9001;
+        message.reply_to = "reply@example.net";
+        message.authentication_results = "mx.example; dmarc=pass";
+        message.list_unsubscribe = "<https://lists.example/leave>";
+        message.list_unsubscribe_post = "List-Unsubscribe=One-Click";
+        message.raw_headers = raw.str;
+        cache.cache_message (message);
+        var loaded = cache.find_cached_message (message.id);
+        assert (loaded != null);
+        assert (loaded.bcc_recipients == message.bcc_recipients);
+        assert (loaded.message_size == 9001);
+        assert (loaded.reply_to == message.reply_to);
+        assert (loaded.authentication_results == message.authentication_results);
+        assert (loaded.list_unsubscribe == message.list_unsubscribe);
+        assert (loaded.raw_headers.validate ());
+        assert (loaded.raw_headers.contains ("headers truncated by Mailficient"));
+        assert (loaded.raw_headers.length < MessageSecurityService.MAX_RAW_HEADER_BYTES + 128);
+        cache.set_safe_sender ("Maya@example.net", false);
+        assert (!cache.is_safe_sender ("maya@example.net"));
+    } catch (Error error) { GLib.error ("message security durability test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
+private void test_advanced_search_boolean_scopes () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-advanced-search-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var alex = AccountSettings.for_email ("Alex Personal", "alex@example.net");
+        alex.id = "account-one"; alex.incoming_host = "imap.example.net";
+        alex.outgoing_host = "smtp.example.net"; cache.save_account (alex);
+        var work = AccountSettings.for_email ("Work", "work@example.org");
+        work.id = "account-two"; work.incoming_host = "imap.example.org";
+        work.outgoing_host = "smtp.example.org"; cache.save_account (work);
+
+        var first = new Message ("advanced-1", "account-one:inbox", "Maya", "maya@example.net",
+            "Alex <alex@example.net>", "Quarterly launch plan", "", "Project alpha notes",
+            "Today", true, true, true, 1, false, alex.id);
+        first.bcc_recipients = "audit@example.net"; first.message_size = 2 * 1024 * 1024;
+        first.date_unix = new DateTime.local (2026, 1, 15, 12, 0, 0).to_unix ();
+        first.add_attachment (new Attachment ("a1", "", "launch-plan.pdf", 4096, "application/pdf"));
+        cache.cache_message (first);
+        var second = new Message ("advanced-2", "account-two:archive", "Noah", "noah@example.org",
+            "Work <work@example.org>", "Dinner", "", "Thursday evening", "Yesterday",
+            false, false, false, 1, false, work.id);
+        second.date_unix = new DateTime.local (2026, 1, 16, 12, 0, 0).to_unix ();
+        cache.cache_message (second);
+
+        assert (cache.search_messages (SearchQuery.parse ("project OR from:noah")).size == 2);
+        assert (cache.search_messages (SearchQuery.parse ("\"project alpha\"")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse ("-from:noah")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse ("-account:account-two")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse ("account:alex")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse (
+            "bcc:audit attachment:launch type:pdf size:>1MB is:unread")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse ("size:<1KB")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse ("date:2026-01-15")).size == 1);
+        assert (cache.search_messages (SearchQuery.parse ("-date:2026-01-15")).size == 1);
+
+        string escaped = ServerSearchExpression.build (SearchQuery.parse ("from:\"a\\\"b\""));
+        assert (escaped.contains ("a\\\"b"));
+        assert (!escaped.contains ("\n"));
+        assert (ServerSearchExpression.build (SearchQuery.parse ("-label:work")) ==
+            "(match-all #t)");
+        string excluded_date = ServerSearchExpression.build (
+            SearchQuery.parse ("-date:2026-01-15"));
+        assert (excluded_date.contains ("(not (and (>= (get-sent-date)"));
+    } catch (Error error) { GLib.error ("advanced search test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
+private void test_server_search_scope_bound_and_cache () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-server-search-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var first_account = AccountSettings.for_email ("First", "first@example.net");
+        first_account.id = "search-account-one";
+        first_account.incoming_host = "imap.example.net";
+        first_account.outgoing_host = "smtp.example.net";
+        cache.save_account (first_account);
+        var second_account = AccountSettings.for_email ("Second", "second@example.org");
+        second_account.id = "search-account-two";
+        second_account.incoming_host = "imap.example.org";
+        second_account.outgoing_host = "smtp.example.org";
+        cache.save_account (second_account);
+
+        var first_snapshot = new MailSyncResult (first_account.id);
+        first_snapshot.folder_inventory_complete = true;
+        first_snapshot.mailboxes.add (new Mailbox ("search-account-one:inbox",
+            "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, 0,
+            first_account.id, "INBOX"));
+        first_snapshot.mailboxes.add (new Mailbox ("search-account-one:archive",
+            "Archive", "folder-symbolic", MailboxRole.ARCHIVE, 0,
+            first_account.id, "Archive"));
+        cache.store_sync_result (first_snapshot);
+        var second_snapshot = new MailSyncResult (second_account.id);
+        second_snapshot.folder_inventory_complete = true;
+        second_snapshot.mailboxes.add (new Mailbox ("search-account-two:inbox",
+            "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, 0,
+            second_account.id, "INBOX"));
+        cache.store_sync_result (second_snapshot);
+
+        var engine = new SearchMailEngine ();
+        var service = new MailSearchService (cache, engine, engine);
+        engine.begin_search_round ();
+        var bounded = fetch_server_sync (service, "subject:Needle",
+            MailSearchScope.CURRENT_ACCOUNT, "search-account-one:inbox", 500);
+        assert (bounded.failure == null); assert (bounded.installed == 200);
+        assert (engine.connect_calls == 1);
+        assert (engine.searched_mailboxes.size == 2);
+        assert (engine.searched_mailboxes[0].has_prefix (first_account.id + ":"));
+        assert (engine.searched_mailboxes[1].has_prefix (first_account.id + ":"));
+        assert (engine.search_limits[0] == 200 && engine.search_limits[1] == 50);
+        assert (engine.search_expressions[0].has_prefix ("(match-all "));
+        assert (cache.count_search_messages (
+            SearchQuery.parse ("subject:Needle")) == 200);
+
+        engine.messages_per_mailbox = 12; engine.begin_search_round ();
+        var one_folder = fetch_server_sync (service, "Needle",
+            MailSearchScope.CURRENT_FOLDER, "search-account-two:inbox", 40);
+        assert (one_folder.failure == null); assert (one_folder.installed == 12);
+        assert (engine.searched_mailboxes.size == 1);
+        assert (engine.searched_mailboxes[0] == "search-account-two:inbox");
+        assert (engine.connect_calls == 2);
+        assert (cache.count_search_messages (
+            SearchQuery.parse ("subject:Needle")) == 212);
+
+        engine.begin_search_round ();
+        var missing_scope = fetch_server_sync (service, "Needle",
+            MailSearchScope.CURRENT_ACCOUNT, "unified-inbox", 40);
+        assert (missing_scope.failure is MailError.INVALID_MESSAGE);
+        assert (engine.searched_mailboxes.size == 0);
+    } catch (Error error) {
+        GLib.error ("server search orchestration test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_advanced_rules_and_quick_steps () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-advanced-rules-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var message = new Message ("advanced-rule-message", "inbox", "Build Bot",
+            "build@example.net", "alex@example.net", "Nightly release report", "", "Passed",
+            "Today", true, false, true, 1, false, "rules-account");
+        message.message_size = 5000;
+        message.add_attachment (new Attachment ("log", "", "results.txt", 120, "text/plain"));
+        cache.cache_message (message);
+
+        var rule = new MailRule (0, "Triage successful builds", "rules-account",
+            MailRuleField.SENDER, "build@", MailRuleAction.MARK_READ);
+        rule.replace_legacy_parts ();
+        rule.conditions.add (new MailRuleCondition (MailRuleField.SENDER, "build@"));
+        rule.conditions.add (new MailRuleCondition (MailRuleField.ATTACHMENT_NAME, ".txt",
+            MailRuleOperator.ENDS_WITH));
+        rule.conditions.add (new MailRuleCondition (MailRuleField.MESSAGE_SIZE, "4 KB",
+            MailRuleOperator.GREATER_THAN));
+        rule.exceptions.add (new MailRuleCondition (MailRuleField.SUBJECT, "failed"));
+        rule.operations.add (new MailRuleOperation (MailRuleAction.MARK_READ));
+        rule.operations.add (new MailRuleOperation (MailRuleAction.FLAG));
+        rule.stop_processing = true;
+        var saved = cache.save_mail_rule (rule);
+        cache.add_mail_rule ("Would label", "", MailRuleField.SUBJECT, "release",
+            MailRuleAction.LABEL, "Later rule");
+        var loaded_rules = cache.list_mail_rules ();
+        assert (loaded_rules.size == 2);
+        assert (loaded_rules[0].conditions.size == 3);
+        assert (loaded_rules[0].exceptions.size == 1);
+        assert (loaded_rules[0].operations.size == 2);
+        assert (loaded_rules[0].stop_processing);
+        var snapshot = new MailSyncResult ("rules-account"); snapshot.messages.add (message);
+        assert (new MailRuleService (cache).apply (snapshot) == 1);
+        var after_rule = cache.find_cached_message (message.id);
+        assert (!after_rule.unread && after_rule.flagged);
+        assert (cache.labels_for_message (message.id).size == 0);
+
+        var excepted = new Message ("advanced-rule-excepted", "inbox", "Build Bot",
+            "build@example.net", "alex@example.net", "Nightly release failed", "",
+            "Failed", "Today", true, false, true, 1, false, "rules-account");
+        excepted.message_size = 5000;
+        excepted.add_attachment (new Attachment ("failed-log", "", "results.txt",
+            120, "text/plain"));
+        cache.cache_message (excepted);
+        var excepted_snapshot = new MailSyncResult ("rules-account");
+        excepted_snapshot.messages.add (excepted);
+        // The exception skips the first stop-processing rule, allowing the
+        // later label rule to run.
+        assert (new MailRuleService (cache).apply (excepted_snapshot) == 1);
+        assert (cache.find_cached_message (excepted.id).unread);
+        assert (!cache.find_cached_message (excepted.id).flagged);
+        assert (cache.labels_for_message (excepted.id).size == 1);
+
+        var any_rule = new MailRule (0, "Any failure signal", "rules-account",
+            MailRuleField.SENDER, "never-matches@example.net", MailRuleAction.MARK_READ);
+        any_rule.replace_legacy_parts ();
+        any_rule.conditions.add (new MailRuleCondition (MailRuleField.SENDER,
+            "never-matches@example.net"));
+        any_rule.conditions.add (new MailRuleCondition (MailRuleField.SUBJECT, "failed"));
+        any_rule.operations.add (new MailRuleOperation (MailRuleAction.MARK_READ));
+        any_rule.match_mode = MailRuleMatchMode.ANY;
+        var saved_any = cache.save_mail_rule (any_rule);
+        assert (cache.list_mail_rules ()[2].match_mode == MailRuleMatchMode.ANY);
+        assert (new MailRuleService (cache).run_now (saved_any) == 1);
+        assert (!cache.find_cached_message (excepted.id).unread);
+        cache.remove_mail_rule (saved_any.id);
+
+        var invalid_operations = new Gee.ArrayList<MailRuleOperation> ();
+        invalid_operations.add (new MailRuleOperation (MailRuleAction.MOVE, "archive"));
+        invalid_operations.add (new MailRuleOperation (MailRuleAction.COPY, "backup"));
+        bool invalid_quick_step_rejected = false;
+        try { cache.add_quick_step ("Invalid transfer order", "rules-account",
+            invalid_operations); }
+        catch (MailError error) { invalid_quick_step_rejected = true; }
+        assert (invalid_quick_step_rejected);
+
+        var operations = new Gee.ArrayList<MailRuleOperation> ();
+        operations.add (new MailRuleOperation (MailRuleAction.MARK_UNREAD));
+        operations.add (new MailRuleOperation (MailRuleAction.LABEL, "Follow up"));
+        var step = cache.add_quick_step ("Follow up", "rules-account", operations);
+        assert (cache.list_quick_steps ().size == 1);
+        var selected = new Gee.ArrayList<Message> (); selected.add (after_rule);
+        assert (new QuickStepService (cache).execute (step, selected) == 1);
+        assert (cache.find_cached_message (message.id).unread);
+        assert (cache.labels_for_message (message.id).size == 1);
+        cache.remove_quick_step (step.id); assert (cache.list_quick_steps ().size == 0);
+        cache.move_mail_rule (saved.id, 1);
+        assert (cache.list_mail_rules ()[1].id == saved.id);
+
+        // Older databases migrate all legacy rules with position zero. A new
+        // cache connection must preserve their id order while assigning
+        // unique positions so Up/Down works immediately.
+        Sqlite.Database legacy; assert (Sqlite.Database.open (path, out legacy) == Sqlite.OK);
+        string? migration_detail = null;
+        assert (legacy.exec ("UPDATE mail_rules SET position=0", null,
+            out migration_detail) == Sqlite.OK);
+        var migrated = new CacheDatabase (path);
+        var migrated_rules = migrated.list_mail_rules ();
+        assert (migrated_rules.size == 2);
+        assert (migrated_rules[0].position == 0 && migrated_rules[1].position == 1);
+        int64 first_migrated_id = migrated_rules[0].id;
+        migrated.move_mail_rule (first_migrated_id, 1);
+        assert (migrated.list_mail_rules ()[1].id == first_migrated_id);
+    } catch (Error error) { GLib.error ("advanced rules test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
 int main (string[] args) {
     Test.init (ref args);
     Test.add_func ("/search/parse", test_search);
@@ -2930,13 +3781,20 @@ int main (string[] args) {
     Test.add_func ("/security/html-content-policy", test_html_content_policy);
     Test.add_func ("/security/inline-content-resolver", test_inline_content_resolver);
     Test.add_func ("/security/filename", test_filename);
+    Test.add_func ("/security/message-assessment-and-unsubscribe",
+        test_message_security_assessment_and_unsubscribe);
+    Test.add_func ("/security/metadata-and-safe-senders-durable",
+        test_security_metadata_and_safe_senders_are_durable);
     Test.add_func ("/attachments/import", test_attachment_import);
     Test.add_func ("/attachments/forward-copy-is-private", test_forward_attachment_copy_is_private);
     Test.add_func ("/attachments/draft-discard-is-database-first", test_draft_discard_is_database_first);
     Test.add_func ("/attachments/cancelled-import-cleanup", test_cancelled_attachment_import_leaves_no_copy);
     Test.add_func ("/attachments/remote-download", test_remote_attachment_download);
     Test.add_func ("/models/initials", test_message_initials);
+    Test.add_func ("/models/new-mail-summary-is-bounded", test_new_mail_summary_is_bounded);
     Test.add_func ("/models/toolbar-layout", test_toolbar_layout);
+    Test.add_func ("/tasks/views-recurrence-and-email-flags", test_task_views_recurrence_and_email_flags);
+    Test.add_func ("/tasks/reminder-delivery-is-durable", test_task_reminder_delivery_is_durable);
     Test.add_func ("/mail/sorting", test_message_sorting);
     Test.add_func ("/mail/conversation", test_conversation_builder);
     Test.add_func ("/account/validation", test_account_validation);
@@ -2950,16 +3808,20 @@ int main (string[] args) {
     Test.add_func ("/mail/reply-all-recipients", test_reply_all_recipients);
     Test.add_func ("/storage/cc-recipient-roundtrip", test_cc_recipient_cache_roundtrip);
     Test.add_func ("/compose/recipient-completion", test_recipient_completion);
+    Test.add_func ("/compose/safety", test_compose_safety);
     Test.add_func ("/storage/local-data-migration", test_local_data_migration);
     Test.add_func ("/storage/failed-local-data-migration-is-atomic",
         test_failed_local_data_migration_is_atomic);
     Test.add_func ("/draft/state", test_draft_state);
     Test.add_func ("/storage/settings", test_settings_store);
     Test.add_func ("/sync/startup-network-gate", test_startup_sync_gate);
+    Test.add_func ("/sync/live-mail-coordinator", test_live_mail_coordinator_debounces_and_cancels);
+    Test.add_func ("/sync/live-arrival-triggers-one-sync", test_live_arrival_triggers_one_sync);
     Test.add_func ("/compose/signatures", test_signature_service);
     Test.add_func ("/storage/cache-maintenance", test_cache_maintenance);
     Test.add_func ("/storage/drafts", test_cache_drafts);
     Test.add_func ("/outbound/queue-and-retry", test_outbound_queue);
+    Test.add_func ("/outbound/undo-send-window", test_undo_send_outbox_window);
     Test.add_func ("/outbound/scheduled-delivery-timer", test_scheduled_delivery_timer);
     Test.add_func ("/outbound/deadlines", test_outbound_deadlines);
     Test.add_func ("/outbound/attachment-preflight", test_attachment_send_preflight);
@@ -2982,6 +3844,10 @@ int main (string[] args) {
     Test.add_func ("/sync/pipeline", test_sync_pipeline);
     Test.add_func ("/sync/long-running-stream-is-bounded", test_long_running_streamed_sync_is_bounded);
     Test.add_func ("/sync/automatic-history-backfill", test_automatic_history_backfill);
+    Test.add_func ("/sync/initial-history-backfill-stays-silent",
+        test_initial_history_backfill_stays_silent);
+    Test.add_func ("/sync/initial-history-cancel-resume-stays-silent",
+        test_initial_history_cancel_resume_stays_silent);
     Test.add_func ("/sync/can-be-cancelled", test_active_sync_can_be_cancelled);
     Test.add_func ("/sync/partial-result-is-installed", test_partial_sync_is_installed_and_reported);
     Test.add_func ("/sync/mutation-serialization", test_mutation_flush_serialization);
@@ -2990,6 +3856,10 @@ int main (string[] args) {
     Test.add_func ("/sync/junk-classification-is-durable", test_junk_classification_is_durable);
     Test.add_func ("/junk/rules-and-filter", test_junk_rules_and_filter);
     Test.add_func ("/mail/rules-and-labels", test_mail_rules_and_labels);
+    Test.add_func ("/mail/advanced-rules-and-quick-steps", test_advanced_rules_and_quick_steps);
+    Test.add_func ("/search/advanced-boolean-scopes", test_advanced_search_boolean_scopes);
+    Test.add_func ("/search/server-scope-bound-and-cache",
+        test_server_search_scope_bound_and_cache);
     Test.add_func ("/mail/smart-mailboxes-and-planner", test_smart_mailboxes_and_planner);
     Test.add_func ("/mail/scheduling-snooze-and-templates", test_scheduling_snooze_and_templates);
     Test.add_func ("/mail/vacation-responder", test_vacation_responder);

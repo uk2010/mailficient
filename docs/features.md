@@ -10,23 +10,61 @@ Use the selection control above the list to enter multi-select mode, select the 
 
 The read-state action is context-aware: it says **Mark as Read** for unread selection and **Mark as Unread** for read selection. Marking a selected message unread keeps it unread until you move away and select it again.
 
+## Message identity, headers, and mailing lists
+
+The shield beside each message opens **Message Security** with the retained raw headers, bounded to 64 KiB, and any identity signals Mailficient can explain. A receiving-server SPF, DKIM, or DMARC failure, a different Reply-To or display-name domain, punycode, and a visible link label that opens another domain are surfaced conservatively. Passing authentication is context, not proof that a request, link, or attachment is safe. **Safe Senders** under **Preferences → Privacy** can reduce ordinary sender/reply-name mismatch notices, but never suppresses an authentication failure or misleading link destination.
+
+**Report Phishing** requires confirmation, removes the sender from Safe Senders, asks the configured provider to classify the message as junk, moves it to Junk, and retains the local sender block. This standard IMAP/Junk path does not claim to submit a separate report to a provider-specific abuse API.
+
+For a standards-based `List-Unsubscribe` header, the reader offers **Unsubscribe…**. Only HTTPS and `mailto:` targets are accepted. Mailficient never follows a hidden one-click POST: it confirms first, then opens the secure web page, or prepares a reviewable unsubscribe draft. Plain HTTP, script schemes, control characters, invalid addresses, and oversized targets are ignored.
+
 ## Composition
 
-The composer supports bold, italic, underline, strike-through, code, bulleted and numbered lists, links, normal attachments, and CID-backed inline images. Drafts preserve formatted HTML, the plain-text alternative, attachment metadata, and message-security choices. **Send later** offers one hour, four hours, tomorrow morning, or next week; due messages leave Outbox during a subsequent configured mail check.
+The composer supports bold, italic, underline, strike-through, code, bulleted and numbered lists, links, normal attachments, and CID-backed inline images. Drafts preserve formatted HTML, the plain-text alternative, attachment metadata, and message-security choices. The single **Drafts** favorite is the editable view for every configured account: Mailficient mirrors each provider's Drafts folder into that view and does not expose a second raw, read-only Drafts mailbox under the account.
+
+Spelling is checked while typing with the device's local Enchant/Aspell dictionary; a built-in common-correction fallback remains available in minimal sandboxes. Possible errors are underlined, and the spelling button offers local corrections or ignores a word for the current message. Message text is never sent to an online spelling service. Configure the feature under **Preferences → Composing**.
+
+If the authored subject or body says that a file is attached or included but the message has no attachment, Send and Send Later ask whether to keep editing. Quoted replies and forwarded history do not trigger that reminder. Normal Send then places the complete message behind a configurable 5–30 second **Undo Send** deadline. The countdown is stored in Outbox, so neither the foreground scheduler nor the background worker can submit early. Choose **Undo** in the composer or reopen the countdown item from Outbox to return it safely to Drafts.
+
+Edits made by another mail client are imported, including an edit that keeps the same IMAP UID. A local unsynchronized edit is never overwritten by a provider refresh. Explicitly discarding an imported draft removes its exact provider UID after verifying its Message-ID; a missing or mismatched message is not substituted by another copy. Provider attachments that cannot be cached within the outgoing safety limits remain visible as **Not available locally** placeholders and block sending until removed or reattached.
+
+**Send later** offers one hour, four hours, tomorrow morning, or next week. Scheduled and retryable messages are durably claimed from Outbox by background delivery, including while the main window is closed. Native packages start one resident worker when real provider work is queued and install an XDG autostart entry for later logins. The Flatpak asks the desktop Background portal for permission when a real-account Draft or Outbox item first needs background work, then starts the current-session worker only after the portal confirms access. Demo and local-only queues never launch it or prompt. If permission is unavailable, the item remains safely queued for a foreground mail check or the next launch.
 
 Choose **Contacts** beside the To field to open the GNOME Contacts picker; it initially lists up to 50 email contacts and can be narrowed with search. The Cc and Bcc fields have matching contact buttons when revealed. Recipient completion also searches enabled GNOME address books—including local GNOME Contacts and configured CardDAV sources—after two typed characters. Searches are asynchronous, cancellable, and bounded. Mailficient merges those contacts with cached correspondents, removes duplicates and the sending identity, and does not copy the complete system address book into its own database.
 
 Use the template buttons at the bottom of the composer to save the current subject/body or insert a stored template. Templates are local to this Mailficient installation.
 
-## Rules, labels, snooze, and vacation replies
+## Search, rules, Quick Steps, labels, and snooze
 
-Open **Preferences → Rules** to match Sender, Recipient, Subject, body text, attachment state, read state, or flag state and mark read/unread, flag/unflag, archive, trash, move, or apply a label to newly synchronized messages. Rules are local and run in their displayed order. Labels can be created and applied to one or many selected messages; search with `label:Name`.
+Search is local and private while you type. Use quoted phrases, uppercase `OR`, and a leading `-` to exclude a term. Available scopes include `from:`, `to:`, `cc:`, `bcc:`, `subject:`, `account:`, `folder:`/`mailbox:`, `label:`, `attachment:`/`filename:`, and `type:`. Status, date, and size filters include `is:unread`, `is:flagged`, `has:attachment`, `date:2026-08-25`, `after:`, `before:`, and `size:>10MB`.
+
+Press **Enter** in Search to request older matches from the selected **Current Folder**, **Current Account**, or **All Mail** server scope. Remote search is explicit, cancellable, and capped at 200 downloaded messages across the request; matching candidates join the private local cache and are then evaluated by the complete query. Ordinary typing never starts a network search.
+
+Open **Preferences → Rules** to build ordered local rules with multiple AND/OR conditions, exceptions, account scope, multiple actions, and **Stop processing**. Conditions cover sender and recipients, subject/body, mailbox, attachment name/state, message size, read state, and flag state. Actions can mark read/unread, flag/unflag, archive, trash, label, move, or copy. Reorder or disable rules, edit them, or choose **Run Now** for a bounded pass over at most 10,000 cached messages.
+
+**Quick Steps** are named, reusable action sequences created on the same page and run against the current message selection from **More → Quick Steps**. They use the same durable local operations as rules, including multi-message read, flag, label, move, and copy workflows. Labels can also be created and applied directly to one or many selected messages; search with `label:Name`.
 
 Open **Preferences → Smart Mailboxes** to save searches such as `is:unread has:attachment` or `from:alice@example.com after:2026-01-01`. Saved searches appear in the left column with live unread counts.
 
-**Calendar** is available directly in Favorites and opens the installed GNOME Calendar application. Mailficient does not maintain a second calendar database or embedded calendar view. Calendar invitations continue to offer **Add to Calendar**, which hands the bounded `.ics` invitation to the desktop calendar application.
+## Calendar invitations and meeting drafts
+
+**Calendar** in Favorites opens GNOME Calendar. Mailficient remains mail-focused: Evolution Data Server and the desktop calendar remain the authoritative event store, with no second calendar database or embedded calendar view.
+
+An inline `text/calendar` part or `.ics` attachment is parsed within strict input, line, component, and attendee limits. The reader presents its title, local time or all-day range, location, organizer, recurrence, description, cancellation state, and the account's current participation. If the organizer address differs from the email sender, a warning appears before any response action.
+
+When the exact configured address for the message's account is an attendee, builds with EDS calendar support offer **Accept**, **Tentative**, and **Decline**. The confirmation dialog independently controls whether EDS sends an iTIP response to the organizer; turning it off updates only the default calendar. Unlisted identities cannot respond on another attendee's behalf. A build without direct EDS support says so and offers **Open in Calendar to Respond**, using a private, size-bounded temporary `.ics` file instead of pretending the response was saved.
+
+Choose **Create Meeting from Email** beside the subject to prefill an event from the message sender, subject, and excerpt. Review its date, time, duration, title, and attendee before saving. With EDS support it is added to the default writable calendar and GNOME Calendar opens for final review; automatic iTIP delivery is explicitly disabled. The portable fallback opens a private `.ics` event draft in the registered calendar application. Neither path sends an invitation merely because an email was converted to a meeting.
 
 Snooze removes selected mail from ordinary views until the chosen time and keeps it under the unified **Snoozed** mailbox meanwhile. Preferences contains per-account vacation-response dates, subject, and body. The responder skips no-reply senders and the account's own address, and records senders locally so each receives at most one response for the active period.
+
+## Tasks and email follow-up
+
+**Today** and **Planned** are available in Favorites even before an email account is added. Today includes every unfinished task due today or overdue; Planned shows the complete schedule. Use **New Task** to choose a due date, desktop reminder, and daily, weekly, monthly, or yearly recurrence. Completed tasks can be revealed, reopened, edited, or deleted from either view. Completing a recurring occurrence atomically records it and creates the next occurrence, so a crash cannot silently end the series.
+
+Select an email and choose **More → Create Task from Message…** to create a linked follow-up. Mailficient flags the email while any linked task remains open, opens the original email from the task row, and clears the flag after the last linked task is completed or deleted. An existing open task is edited instead of creating an accidental duplicate. Ordinary flags remain lightweight markers and do not create tasks automatically.
+
+Task data and reminder-delivery state are durable in Mailficient's local database. Reminders are checked on startup and once per minute while Mailficient is running; selecting one opens the exact task. The service exposes a provider-sync boundary, but this build does not claim EDS/CalDAV task synchronization: no task-capable libecal provider or authorized CalDAV/GOA account is currently wired. Local create, edit, recurrence, reminder, and email-link behavior do not depend on external credentials.
 
 ## Export and printing
 
