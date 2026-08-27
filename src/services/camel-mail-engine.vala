@@ -186,7 +186,8 @@ internal class PersonalCamelSession : Camel.Session {
     }
 }
 
-public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
+public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
+                               RemoteMailSearchProvider {
     private const int64 MAX_RECEIVED_MESSAGE_ATTACHMENT_BYTES = 100 * 1024 * 1024;
     private const int64 MAX_EXPLICIT_ATTACHMENT_DOWNLOAD_BYTES = (int64) 2 * 1024 * 1024 * 1024;
     internal const int64 MAX_RECEIVED_TEXT_PART_BYTES = 10 * 1024 * 1024;
@@ -213,8 +214,14 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
     private Gee.HashMap<string, CamelLiveMailWatch> live_watches =
         new Gee.HashMap<string, CamelLiveMailWatch> ();
     private Gee.HashMap<string, AccountSettings> accounts = new Gee.HashMap<string, AccountSettings> ();
+    // AccountSettings is mutable, so retaining that object cannot prove which
+    // endpoints configured an already-connected Camel service. Capture an
+    // immutable value when the session is established instead.
+    private Gee.HashMap<string, string> account_session_identities =
+        new Gee.HashMap<string, string> ();
     private Gee.HashMap<string, SyncState> states = new Gee.HashMap<string, SyncState> ();
     private Gee.HashSet<string> connecting_accounts = new Gee.HashSet<string> ();
+    private Gee.HashSet<string> connecting_outgoing_accounts = new Gee.HashSet<string> ();
     private Gee.HashMap<string, Cancellable> connection_cancellables = new Gee.HashMap<string, Cancellable> ();
     private Gee.HashMap<string, bool> connection_requirements = new Gee.HashMap<string, bool> ();
     private ReceivedAttachmentStore received_attachments;
@@ -242,7 +249,8 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
     // Narrow injection seam for the separately built loopback GreenMail test.
     // Production always uses the rejecting PersonalCamelSession above.
     internal void replace_session_for_testing (PersonalCamelSession replacement) {
-        assert (stores.size == 0 && transports.size == 0 && connecting_accounts.size == 0);
+        assert (stores.size == 0 && transports.size == 0 &&
+            account_session_identities.size == 0 && connecting_accounts.size == 0);
         session = replacement;
     }
 
@@ -260,10 +268,199 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
         yield ensure_account_connection (settings, false, cancellable);
     }
 
+    // Length-prefixed fields make this stable and unambiguous without hashing
+    // secrets. Password changes are handled by the unconditional invalidation
+    // on account save; every setting that can affect the dedicated SMTP/IMAP
+    // session is represented here.
+    internal static string account_session_identity (AccountSettings settings) {
+        string[] fields = {
+            settings.display_name,
+            settings.email,
+            settings.incoming_host,
+            settings.incoming_port.to_string (),
+            ((int) settings.incoming_encryption).to_string (),
+            settings.incoming_username,
+            settings.outgoing_host,
+            settings.outgoing_port.to_string (),
+            ((int) settings.outgoing_encryption).to_string (),
+            settings.outgoing_username,
+            ((int) settings.authentication).to_string (),
+            settings.online_account_path
+        };
+        var identity = new StringBuilder ();
+        foreach (var field in fields) {
+            identity.append_printf ("%d:", field.length);
+            identity.append (field);
+        }
+        return identity.str;
+    }
+
+    private bool account_session_matches (AccountSettings settings) {
+        return account_session_identities.has_key (settings.id) &&
+            account_session_identities[settings.id] ==
+                account_session_identity (settings);
+    }
+
+    private bool has_account_session (string account_id) {
+        return transports.has_key (account_id) || stores.has_key (account_id) ||
+            accounts.has_key (account_id) ||
+            account_session_identities.has_key (account_id);
+    }
+
+    private void remove_account_session (string account_id) {
+        // Detach first so intentional service removal is never interpreted as
+        // an IDLE drop which should reconnect. remove_service() closes the
+        // socket without waiting on a provider logout round-trip.
+        detach_live_watch (account_id);
+        var transport = transports[account_id];
+        if (transport != null) {
+            session.clear_oauth_token (transport);
+            session.remove_service (transport);
+        }
+        var store = stores[account_id];
+        if (store != null) {
+            session.clear_oauth_token (store);
+            session.remove_service (store);
+        }
+        transports.unset (account_id);
+        stores.unset (account_id);
+        accounts.unset (account_id);
+        account_session_identities.unset (account_id);
+        states.unset (account_id);
+    }
+
+    public async void connect_outgoing_account (AccountSettings settings,
+                                                 Cancellable? cancellable = null) throws Error {
+        settings.validate ();
+        var connected = transports[settings.id];
+        if (connected != null &&
+            connected.get_connection_status () ==
+                Camel.ServiceConnectionStatus.CONNECTED &&
+            account_session_matches (settings)) {
+            accounts[settings.id] = settings;
+            return;
+        }
+        if (connecting_outgoing_accounts.contains (settings.id)) {
+            ulong handler_id = 0;
+            handler_id = account_connection_finished.connect ((finished_id) => {
+                if (finished_id != settings.id) return;
+                disconnect (handler_id); connect_outgoing_account.callback ();
+            });
+            yield;
+            if (cancellable != null) cancellable.set_error_if_cancelled ();
+            connected = transports[settings.id];
+            if (connected != null &&
+                connected.get_connection_status () ==
+                    Camel.ServiceConnectionStatus.CONNECTED &&
+                account_session_matches (settings)) {
+                accounts[settings.id] = settings;
+                return;
+            }
+            // A caller with different settings may have waited behind the
+            // owner which established the old identity. Take a fresh turn so
+            // it can discard that session under the same serialization gate.
+            if (has_account_session (settings.id)) {
+                yield connect_outgoing_account (settings, cancellable);
+                return;
+            }
+            throw new MailError.CONNECTION (state_for (settings.id).detail);
+        }
+
+        connecting_outgoing_accounts.add (settings.id);
+        try {
+            // A connected SMTP fast path is valid only for the immutable
+            // identity captured when it was configured. Drop the entire
+            // dedicated account session on mismatch because Sent filing may
+            // have retained an IMAP store with the old incoming settings.
+            if (has_account_session (settings.id) &&
+                !account_session_matches (settings))
+                remove_account_session (settings.id);
+            yield establish_outgoing_connection (settings, cancellable);
+        } finally {
+            connecting_outgoing_accounts.remove (settings.id);
+            account_connection_finished (settings.id);
+        }
+    }
+
+    private async void establish_outgoing_connection (
+        AccountSettings settings, Cancellable? cancellable) throws Error {
+        var state = state_for (settings.id); state.phase = SyncPhase.CONNECTING;
+        state.detail = "Connecting to the outgoing mail server…"; state.progress = 0;
+        Camel.Transport? transport = transports[settings.id];
+        try {
+            if (transport == null)
+                transport = (Camel.Transport) session.add_service (
+                    settings.id + "-smtp", "smtp", Camel.ProviderType.TRANSPORT);
+            configure_network (transport, settings.outgoing_host,
+                settings.outgoing_port, settings.outgoing_username,
+                settings.outgoing_encryption, settings.authentication, false);
+            session.clear_rejected_certificate (transport.get_uid ());
+
+            string? password = null;
+            OAuthAccessToken? oauth = null;
+            if (settings.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS) {
+                oauth = yield online_accounts.request_access_token (
+                    settings.online_account_path, cancellable);
+                password = oauth.value;
+            } else {
+                password = yield credentials.lookup_password (
+                    settings.id, "smtp", cancellable);
+                if (password == null)
+                    password = yield credentials.lookup_password (
+                        settings.id, "imap", cancellable);
+            }
+            if (password == null)
+                throw new MailError.AUTHENTICATION (
+                    "No outgoing-mail credential is stored");
+            transport.set_password (password);
+            if (oauth != null) session.cache_oauth_token (transport, oauth);
+            if (transport.get_connection_status () !=
+                Camel.ServiceConnectionStatus.CONNECTED) {
+                bool accepted = yield transport.connect (
+                    Priority.DEFAULT, cancellable);
+                if (!accepted)
+                    throw new MailError.CONNECTION (
+                        "The outgoing-mail server rejected the connection");
+            }
+            transports[settings.id] = transport;
+            accounts[settings.id] = settings;
+            account_session_identities[settings.id] =
+                account_session_identity (settings);
+            state.phase = SyncPhase.IDLE; state.detail = "Connected";
+            state.progress = 1;
+        } catch (Error error) {
+            account_session_identities.unset (settings.id);
+            if (transport != null) {
+                uint certificate_errors = 0;
+                bool certificate_rejected = session.take_rejected_certificate (
+                    transport.get_uid (), out certificate_errors);
+                session.clear_oauth_token (transport);
+                try {
+                    yield transport.disconnect (false, Priority.DEFAULT,
+                        cancellable);
+                } catch (Error ignored) { }
+                session.remove_service (transport);
+                transports.unset (settings.id); accounts.unset (settings.id);
+                Error normalized = certificate_rejected ?
+                    new MailError.TLS (certificate_failure_detail (
+                        settings.outgoing_host,
+                        (TlsCertificateFlags) certificate_errors)) :
+                    normalize_error (error);
+                state.phase = SyncPhase.FAILED;
+                state.detail = normalized.message;
+                throw normalized;
+            }
+            state.phase = SyncPhase.FAILED;
+            state.detail = error.message;
+            throw normalize_error (error);
+        }
+    }
+
     private async void ensure_account_connection (AccountSettings settings, bool require_transport,
                                                    Cancellable? cancellable) throws Error {
         settings.validate ();
-        if (connection_satisfies (settings.id, require_transport)) {
+        if (connection_satisfies (settings.id, require_transport) &&
+            account_session_matches (settings)) {
             var connected_store = stores[settings.id];
             if (connected_store != null)
                 yield ensure_live_watch (settings.id, connected_store, cancellable);
@@ -279,10 +476,17 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             });
             yield;
             if (cancellable != null) cancellable.set_error_if_cancelled ();
-            if (connection_satisfies (settings.id, require_transport)) {
+            if (connection_satisfies (settings.id, require_transport) &&
+                account_session_matches (settings)) {
                 var connected_store = stores[settings.id];
                 if (connected_store != null)
                     yield ensure_live_watch (settings.id, connected_store, cancellable);
+                return;
+            }
+            if (has_account_session (settings.id) &&
+                !account_session_matches (settings)) {
+                yield ensure_account_connection (
+                    settings, require_transport, cancellable);
                 return;
             }
             // An incoming-only caller may have won the connection race while
@@ -302,6 +506,12 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             if (cancellable.is_cancelled ()) attempt_cancellable.cancel ();
         }
         try {
+            // This path also runs when the delivery-only engine opens IMAP to
+            // file Sent mail. Never reuse a connected store or transport whose
+            // immutable account identity differs from the requested settings.
+            if (has_account_session (settings.id) &&
+                !account_session_matches (settings))
+                remove_account_session (settings.id);
             yield establish_account_connection (settings, attempt_cancellable, require_transport);
         } finally {
             if (cancellable != null && cancellation_handler != 0)
@@ -400,6 +610,8 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             stores[settings.id] = store;
             if (transport != null) transports[settings.id] = transport;
             accounts[settings.id] = settings;
+            account_session_identities[settings.id] =
+                account_session_identity (settings);
             state.phase = SyncPhase.IDLE; state.detail = "Connected"; state.progress = 1;
         } catch (Error error) {
             // Camel registers services with the session before connecting them. A
@@ -417,6 +629,7 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
                 session.remove_service (store);
             }
             transports.unset (settings.id); stores.unset (settings.id); accounts.unset (settings.id);
+            account_session_identities.unset (settings.id);
             uint certificate_errors = 0;
             string? certificate_host = null;
             uint service_certificate_errors = 0;
@@ -453,7 +666,8 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
     }
 
     public async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error {
-        if (connecting_accounts.contains (account_id)) {
+        while (connecting_accounts.contains (account_id) ||
+               connecting_outgoing_accounts.contains (account_id)) {
             var pending = connection_cancellables[account_id];
             if (pending != null) pending.cancel ();
             ulong handler_id = 0;
@@ -464,24 +678,7 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             yield;
         }
         if (cancellable != null) cancellable.set_error_if_cancelled ();
-        // Detach first so an intentional service removal cannot be mistaken for
-        // a dropped IDLE connection and schedule a reconnect behind the caller.
-        detach_live_watch (account_id);
-        var transport = transports[account_id];
-        if (transport != null) {
-            session.clear_oauth_token (transport);
-            // Removing the service closes its socket without waiting for a
-            // provider logout round-trip. Gmail can leave Camel's disconnect
-            // operation pending indefinitely after successful OAuth login.
-            session.remove_service (transport);
-        }
-        var store = stores[account_id];
-        if (store != null) {
-            session.clear_oauth_token (store);
-            session.remove_service (store);
-        }
-        transports.unset (account_id); stores.unset (account_id);
-        accounts.unset (account_id); states.unset (account_id);
+        remove_account_session (account_id);
     }
 
     private async void ensure_live_watch (string account_id, Camel.Store store,
@@ -1631,7 +1828,17 @@ public class CamelMailEngine : Object, MailEngine, RemoteMailSearchProvider {
             throw new MailError.SEND_FAILED (
                 "The SMTP server did not accept the message");
         if (saved || provider_files_sent_automatically (settings)) return new SendResult ();
-        return yield file_in_sent (draft.account_id, message, cancellable);
+        // The delivery lane connects SMTP only. For providers which do not
+        // file Sent automatically, open IMAP only after SMTP acceptance and
+        // treat every filing problem as a warning. A Sent-folder outage must
+        // never turn a confirmed delivery into an automatic duplicate retry.
+        try {
+            if (stores[draft.account_id] == null)
+                yield connect_incoming_account (settings, cancellable);
+            return yield file_in_sent (draft.account_id, message, cancellable);
+        } catch (Error error) {
+            return new SendResult (false, error.message);
+        }
     }
 
     public async RemoteDraftLocation? save_remote_draft (

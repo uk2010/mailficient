@@ -158,7 +158,25 @@ public class DemoMailRepository : Object, MailRepository {
         return null;
     }
     public Gee.List<Message> conversation_for (Message message) {
-        return new ConversationBuilder ().build (messages, message);
+        var related = new ConversationBuilder ().build (messages, message);
+        MailboxRole selected_role = role_for_mailbox (message.mailbox_id);
+        bool discard = selected_role == MailboxRole.TRASH ||
+            selected_role == MailboxRole.JUNK;
+        var visible = new Gee.ArrayList<Message> ();
+        foreach (var candidate in related) {
+            MailboxRole role = role_for_mailbox (candidate.mailbox_id);
+            if (candidate.id == message.id ||
+                (discard ? role == selected_role :
+                 role != MailboxRole.TRASH && role != MailboxRole.JUNK))
+                visible.add (candidate);
+        }
+        return visible;
+    }
+
+    private MailboxRole role_for_mailbox (string mailbox_id) {
+        foreach (var mailbox in mailboxes)
+            if (mailbox.id == mailbox_id) return mailbox.role;
+        return MailboxRole.CUSTOM;
     }
     public void mark_read (string id, bool read) {
         var message = find_message (id);

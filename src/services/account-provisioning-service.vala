@@ -4,12 +4,18 @@ public class AccountProvisioningService : Object {
     private CredentialStore credentials;
     private CredentialCleanupService credential_cleanup;
     private MailEngine engine;
+    private OutboundService? outbound_service;
+    private AccountSyncService? sync_service;
 
     public AccountProvisioningService (AccountStore accounts, CredentialStore credentials,
                                        CredentialCleanupService credential_cleanup,
-                                       MailEngine engine) {
+                                       MailEngine engine,
+                                       OutboundService? outbound_service = null,
+                                       AccountSyncService? sync_service = null) {
         this.accounts = accounts; this.credentials = credentials;
         this.credential_cleanup = credential_cleanup; this.engine = engine;
+        this.outbound_service = outbound_service;
+        this.sync_service = sync_service;
     }
 
     public async void provision (AccountSettings account, string? incoming_password = null,
@@ -19,6 +25,10 @@ public class AccountProvisioningService : Object {
         account.validate ();
         string? old_imap = null; string? old_smtp = null;
         string? candidate_id = null;
+        string replacement_imap = "";
+        string replacement_smtp = "";
+        OutboundAccountSessionLease? outbound_lease = null;
+        bool sync_quiesced = false;
         bool candidate_connection_attempted = false;
         bool actual_connection_attempted = false;
         bool existing_disconnect_attempted = false;
@@ -36,10 +46,14 @@ public class AccountProvisioningService : Object {
                 if (!nonempty (incoming))
                     throw new MailError.AUTHENTICATION ("Enter a password or app password");
                 if (!nonempty (outgoing)) outgoing = incoming;
+                replacement_imap = incoming ?? "";
+                replacement_smtp = outgoing ?? replacement_imap;
 
                 candidate_id = "candidate-" + Uuid.string_random ();
-                yield credentials.store_password (candidate_id, "imap", incoming, cancellable);
-                yield credentials.store_password (candidate_id, "smtp", outgoing, cancellable);
+                yield credentials.store_password (candidate_id, "imap",
+                    replacement_imap, cancellable);
+                yield credentials.store_password (candidate_id, "smtp",
+                    replacement_smtp, cancellable);
                 var candidate = copy_with_id (account, candidate_id);
                 candidate_connection_attempted = true;
                 yield engine.connect_account (candidate, cancellable);
@@ -47,10 +61,6 @@ public class AccountProvisioningService : Object {
                 candidate_connection_attempted = false;
                 yield credential_cleanup.schedule_cleanup (candidate_id);
                 candidate_id = null;
-
-                yield credentials.store_password (account.id, "imap", incoming, cancellable);
-                actual_credentials_changed = true;
-                yield credentials.store_password (account.id, "smtp", outgoing, cancellable);
             }
 
             // GOA credentials are short-lived and never persisted by us, so a
@@ -58,12 +68,40 @@ public class AccountProvisioningService : Object {
             // Connect the real account once below and save it only after both
             // IMAP and SMTP have authenticated successfully.
 
+            // Main-account sync and mutation flushing use the other Camel
+            // session. Stop them before replacing credentials or services and
+            // keep them suppressed through either commit or rollback. This
+            // must happen before taking the outbound lane: an in-flight sync
+            // can itself be finishing an Outbox retry on that lane.
+            if (sync_service != null) {
+                yield sync_service.quiesce_account (account.id);
+                sync_quiesced = true;
+            }
+            // Acquire and invalidate before replacing real credentials. Keep
+            // the lane until settings are committed (or fully rolled back), so
+            // no PREPARING send can combine an old cached account with the new
+            // password in the gap between a disconnect and the database save.
+            outbound_lease = yield acquire_outbound_account_lease (
+                account.id, cancellable);
+            if (outbound_lease != null) outbound_lease.ensure_valid ();
+            if (account.authentication == AuthenticationMode.PASSWORD) {
+                yield credentials.store_password (account.id, "imap",
+                    replacement_imap, cancellable);
+                actual_credentials_changed = true;
+                if (outbound_lease != null) outbound_lease.ensure_valid ();
+                yield credentials.store_password (account.id, "smtp",
+                    replacement_smtp, cancellable);
+                if (outbound_lease != null) outbound_lease.ensure_valid ();
+            }
+
             if (existing != null) {
                 existing_disconnect_attempted = true;
                 yield engine.disconnect_account (existing.id, cancellable);
+                if (outbound_lease != null) outbound_lease.ensure_valid ();
             }
             actual_connection_attempted = true;
             yield engine.connect_account (account, cancellable);
+            if (outbound_lease != null) outbound_lease.ensure_valid ();
             accounts.save_account (account);
         } catch (Error error) {
             if (candidate_connection_attempted && candidate_id != null) {
@@ -93,7 +131,18 @@ public class AccountProvisioningService : Object {
             if (rollback_error != null)
                 throw new MailError.STORAGE ("The account change failed and the previous connection could not be fully restored: " + rollback_error.message);
             throw error;
+        } finally {
+            if (outbound_lease != null) outbound_lease.release ();
+            if (sync_quiesced && sync_service != null)
+                sync_service.resume_account (account.id);
         }
+    }
+
+    internal async OutboundAccountSessionLease? acquire_outbound_account_lease (
+        string account_id, Cancellable? cancellable = null) throws Error {
+        if (outbound_service == null) return null;
+        return yield outbound_service.acquire_account_session_lease (
+            account_id, cancellable);
     }
 
     private static bool nonempty (string? value) {

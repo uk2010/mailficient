@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.3.1', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.3.2', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 cc = meson.get_compiler('c')
 

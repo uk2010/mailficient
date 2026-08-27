@@ -125,8 +125,27 @@ public class BackgroundSendRunner : Object {
                 // folder cannot delay a due SMTP delivery.
                 yield outbound.retry_pending (account.id, true, cancellable);
                 if (draft_sync != null && cache.has_pending_remote_draft_work (account.id)) {
-                    yield engine.connect_incoming_account (account, cancellable);
-                    yield draft_sync.synchronize_account (account.id, cancellable);
+                    // Draft upload/deletion is remote account work too. Hold
+                    // the same cross-process maintenance boundary used by
+                    // account edits/removal, then reload settings after owning
+                    // it so this process cannot continue with a stale account
+                    // snapshot from before a GUI-side edit.
+                    var draft_lease = yield outbound.acquire_account_session_lease (
+                        account.id, cancellable);
+                    try {
+                        if (draft_lease != null) draft_lease.ensure_valid ();
+                        var current_account = cache.find_account (account.id);
+                        if (current_account != null) {
+                            yield engine.connect_incoming_account (
+                                current_account, cancellable);
+                            if (draft_lease != null) draft_lease.ensure_valid ();
+                            yield draft_sync.synchronize_account (
+                                account.id, cancellable);
+                            if (draft_lease != null) draft_lease.ensure_valid ();
+                        }
+                    } finally {
+                        if (draft_lease != null) draft_lease.release ();
+                    }
                 }
             } catch (Error error) {
                 if (first_error == null) first_error = error;

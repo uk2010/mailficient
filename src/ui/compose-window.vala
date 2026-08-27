@@ -1,5 +1,7 @@
 namespace Mailficient {
 public class ComposeWindow : Adw.Window {
+    private const int64 OUTBOX_EDITOR_LEASE_SECONDS = 180;
+    private const uint OUTBOX_EDITOR_RENEW_SECONDS = 45;
     private static int child_window_dimension (int preferred, int parent_size, int minimum) {
         if (parent_size <= 0) return preferred;
         int available = parent_size - 64;
@@ -37,7 +39,6 @@ public class ComposeWindow : Adw.Window {
     private Gtk.Button send_later_button;
     private Gtk.Button cancel_button;
     private Gtk.Button? delete_queued_button;
-    private Gtk.Button undo_send_button;
     private Gtk.Button attach_button;
     private Gtk.Button spellcheck_button;
     private Gtk.Button security_button;
@@ -56,9 +57,14 @@ public class ComposeWindow : Adw.Window {
     private bool signature_initialized;
     private ulong signature_settings_handler;
     private OutboxItem? queued_item;
-    private uint undo_countdown_source;
+    private bool opened_from_outbox;
     private bool accepted_pending_cleanup;
     private bool outbox_read_only;
+    private string outbox_editor_owner = "";
+    private uint outbox_editor_renew_source;
+    private uint outbox_editor_expiry_source;
+    private int64 outbox_editor_until;
+    private bool outbox_editor_conflict;
     private bool uncertain_resend_confirmed;
     private Gee.ArrayList<RecipientCompletionController> recipient_completions = new Gee.ArrayList<RecipientCompletionController> ();
     private ContactSuggestionProvider? address_book;
@@ -111,10 +117,26 @@ public class ComposeWindow : Adw.Window {
         this.settings = settings;
         this.signatures = new SignatureService (settings);
         opened_saved_draft = saved_draft != null;
+        opened_from_outbox = queued;
         draft = saved_draft ?? new Draft (source_message == null || source_message.account_id == "" ? "demo-account" : source_message.account_id);
         if (queued) {
-            try { queued_item = cache.find_outbox_item (draft.id); }
-            catch (Error error) { warning ("Could not load Outbox delivery status: %s", error.message); }
+            try {
+                queued_item = cache.find_outbox_item (draft.id);
+                if (queued_item == null)
+                    // The worker may have completed this row after the Outbox
+                    // list loaded its Draft but before this constructor lookup.
+                    // Never turn that stale snapshot back into editable mail.
+                    outbox_editor_conflict = true;
+                else
+                    acquire_outbox_editor_if_needed ();
+            }
+            catch (Error error) {
+                warning ("Could not load Outbox delivery status: %s",
+                    error.message);
+                // Never leave a retryable Outbox copy editable when durable
+                // single-editor ownership could not be established.
+                outbox_editor_conflict = true;
+            }
         }
         var toolbar = new Adw.ToolbarView ();
         var header = new Adw.HeaderBar ();
@@ -137,12 +159,6 @@ public class ComposeWindow : Adw.Window {
             delete_queued_button.clicked.connect (() => delete_queued_message.begin ());
             header.pack_start (delete_queued_button);
         }
-        undo_send_button = new Gtk.Button.with_label ("Undo");
-        undo_send_button.add_css_class ("suggested-action");
-        undo_send_button.tooltip_text = "Cancel this send and keep editing";
-        Accessibility.label (undo_send_button, "Undo Send and keep editing");
-        undo_send_button.clicked.connect (undo_send); undo_send_button.visible = false;
-        header.pack_start (undo_send_button);
         send_button = new Gtk.Button.with_label ("Send");
         send_button.add_css_class ("suggested-action");
         send_button.tooltip_text = "Send message (Ctrl+Enter)";
@@ -612,8 +628,9 @@ public class ComposeWindow : Adw.Window {
     protected override bool close_request () {
         if (sending) { overlay.add_toast (new Adw.Toast ("Wait for the current send attempt to finish.")); return true; }
         if (force_close) {
-            attachment_operations.cancel (); cancel_undo_countdown (); cancel_spellcheck ();
+            attachment_operations.cancel (); cancel_spellcheck ();
             disconnect_signature_settings ();
+            release_outbox_editor ();
             return false;
         }
         confirm_close.begin (); return true;
@@ -621,6 +638,145 @@ public class ComposeWindow : Adw.Window {
 
     internal void request_close () {
         confirm_close.begin ();
+    }
+
+    private void acquire_outbox_editor_if_needed () throws MailError {
+        if (queued_item == null || !queued_item.can_attempt_delivery () ||
+            queued_item.can_undo ()) return;
+        string candidate = outbox_editor_owner == "" ?
+            Uuid.string_random () : outbox_editor_owner;
+        int64 until = new DateTime.now_utc ().to_unix () +
+            OUTBOX_EDITOR_LEASE_SECONDS;
+        if (!cache.acquire_outbox_editor (draft.id, candidate, until)) {
+            queued_item = cache.find_outbox_item (draft.id);
+            outbox_editor_conflict = queued_item == null ||
+                (queued_item.can_attempt_delivery () &&
+                 !queued_item.can_undo ());
+            return;
+        }
+        outbox_editor_owner = candidate;
+        outbox_editor_until = until;
+        outbox_editor_conflict = false;
+        arm_outbox_editor_renewal ();
+        arm_outbox_editor_expiry ();
+    }
+
+    private void arm_outbox_editor_renewal () {
+        if (outbox_editor_renew_source != 0)
+            Source.remove (outbox_editor_renew_source);
+        outbox_editor_renew_source = Timeout.add_seconds (
+            OUTBOX_EDITOR_RENEW_SECONDS, () => {
+                if (outbox_editor_owner == "") {
+                    outbox_editor_renew_source = 0;
+                    return Source.REMOVE;
+                }
+                try {
+                    int64 until = new DateTime.now_utc ().to_unix () +
+                        OUTBOX_EDITOR_LEASE_SECONDS;
+                    if (!cache.renew_outbox_editor (draft.id,
+                            outbox_editor_owner, until)) {
+                        outbox_editor_renew_source = 0;
+                        lose_outbox_editor ();
+                        return Source.REMOVE;
+                    }
+                    outbox_editor_until = until;
+                    arm_outbox_editor_expiry ();
+                } catch (Error error) {
+                    warning ("Could not renew Outbox editor ownership: %s",
+                        error.message);
+                    if (new DateTime.now_utc ().to_unix () >=
+                            outbox_editor_until) {
+                        outbox_editor_renew_source = 0;
+                        lose_outbox_editor ();
+                        return Source.REMOVE;
+                    }
+                }
+                return Source.CONTINUE;
+            });
+    }
+
+    private void arm_outbox_editor_expiry () {
+        if (outbox_editor_expiry_source != 0)
+            Source.remove (outbox_editor_expiry_source);
+        int64 remaining = outbox_editor_until -
+            new DateTime.now_utc ().to_unix ();
+        outbox_editor_expiry_source = Timeout.add_seconds (
+            (uint) int64.max (1, remaining), () => {
+                outbox_editor_expiry_source = 0;
+                if (outbox_editor_owner == "") return Source.REMOVE;
+                if (new DateTime.now_utc ().to_unix () <
+                        outbox_editor_until) {
+                    arm_outbox_editor_expiry ();
+                    return Source.REMOVE;
+                }
+                lose_outbox_editor ();
+                return Source.REMOVE;
+            });
+    }
+
+    private void lose_outbox_editor () {
+        if (outbox_editor_renew_source != 0) {
+            Source.remove (outbox_editor_renew_source);
+            outbox_editor_renew_source = 0;
+        }
+        if (outbox_editor_expiry_source != 0) {
+            Source.remove (outbox_editor_expiry_source);
+            outbox_editor_expiry_source = 0;
+        }
+        outbox_editor_conflict = true;
+        outbox_editor_owner = "";
+        outbox_editor_until = 0;
+        cancel_autosave ();
+        configure_outbox_state ();
+    }
+
+    private bool revalidate_outbox_editor () {
+        if (!opened_from_outbox) return true;
+        if (outbox_read_only || outbox_editor_owner == "") return false;
+        try {
+            int64 until = new DateTime.now_utc ().to_unix () +
+                OUTBOX_EDITOR_LEASE_SECONDS;
+            if (!cache.renew_outbox_editor (draft.id,
+                    outbox_editor_owner, until)) {
+                lose_outbox_editor ();
+                return false;
+            }
+            outbox_editor_until = until;
+            arm_outbox_editor_expiry ();
+            return true;
+        } catch (Error error) {
+            warning ("Could not verify Outbox editor ownership: %s",
+                error.message);
+            lose_outbox_editor ();
+            return false;
+        }
+    }
+
+    private bool require_outbox_editor () {
+        if (revalidate_outbox_editor ()) return true;
+        overlay.add_toast (new Adw.Toast (
+            "This Outbox message changed elsewhere. Close this window and reopen it."));
+        return false;
+    }
+
+    private void release_outbox_editor () {
+        if (outbox_editor_renew_source != 0) {
+            Source.remove (outbox_editor_renew_source);
+            outbox_editor_renew_source = 0;
+        }
+        if (outbox_editor_expiry_source != 0) {
+            Source.remove (outbox_editor_expiry_source);
+            outbox_editor_expiry_source = 0;
+        }
+        string owner = outbox_editor_owner;
+        outbox_editor_owner = "";
+        outbox_editor_until = 0;
+        if (owner == "") return;
+        try { cache.release_outbox_editor (draft.id, owner); }
+        catch (Error error) {
+            warning ("Could not release Outbox editor ownership: %s",
+                error.message);
+        }
     }
 
     private void populate_draft () {
@@ -1189,9 +1345,11 @@ public class ComposeWindow : Adw.Window {
         set_draft_status (has_content () ? "Saving…" : "");
         autosave_source = Timeout.add_seconds (2, () => {
             autosave_source = 0;
+            if (!revalidate_outbox_editor ()) return Source.REMOVE;
             try {
                 if (has_content ()) {
-                    update_draft (); cache.save_draft (draft);
+                    update_draft (); cache.save_draft (draft,
+                        outbox_editor_owner);
                     set_draft_status ("Draft saved");
                 } else set_draft_status ("");
             }
@@ -1204,6 +1362,7 @@ public class ComposeWindow : Adw.Window {
     }
 
     private void save_draft_now () {
+        if (!require_outbox_editor ()) return;
         if (importing_forward_attachments) {
             overlay.add_toast (new Adw.Toast (
                 "Wait for the forwarded attachments to finish copying."));
@@ -1212,7 +1371,8 @@ public class ComposeWindow : Adw.Window {
         cancel_autosave ();
         set_draft_status ("Saving…");
         try {
-            update_draft (); cache.save_draft (draft); draft_changed ();
+            update_draft (); cache.save_draft (draft, outbox_editor_owner);
+            draft_changed ();
             opened_saved_draft = true; changed_by_user = false;
             set_draft_status ("Draft saved");
             overlay.add_toast (new Adw.Toast ("Draft saved"));
@@ -1276,36 +1436,134 @@ public class ComposeWindow : Adw.Window {
             if ((yield confirmation.choose (this, null)) != "send") return;
         }
         if (!(yield confirm_attachment_intent ())) return;
-        // Freeze every producer of draft changes before OutboundService takes its
-        // durable Undo Send snapshot. A late autosave must never overwrite the
-        // exact version waiting behind the Outbox deadline.
+        // Every confirmation above yields to the main loop. The durable
+        // editor lease may have expired, moved, or been consumed by a worker
+        // while the dialog was open; never continue with that stale snapshot.
+        if (!require_outbox_editor ()) return;
+        // Freeze every producer of draft changes before OutboundService takes
+        // its durable send snapshot. A late autosave must never overwrite the
+        // exact version being prepared for SMTP.
         cancel_autosave (); cancel_spellcheck (); attachment_operations.cancel ();
         sending = true; set_editor_sensitive (false); send_button.sensitive = false;
-        send_button.label = "Saving to Outbox…";
+        send_button.label = "Sending…";
+        bool began_from_outbox = opened_from_outbox;
+        var send_progress = new OutboundSendProgress ();
         try {
-            int seconds = settings.undo_send_seconds;
-            outbound_service.defer_for_undo (draft, seconds, uncertain_resend_confirmed);
-            queued_item = cache.find_outbox_item (draft.id);
-            if (queued_item == null)
-                throw new MailError.STORAGE ("The Undo Send item could not be reopened from Outbox");
+            if (settings.undo_send_enabled) {
+                outbound_service.defer_for_undo (draft, settings.undo_send_seconds,
+                    uncertain_resend_confirmed, outbox_editor_owner,
+                    send_progress);
+                draft.mark_saved (); draft_changed (); sending = false;
+                force_close = true; close ();
+                return;
+            }
+
+            SendDisposition disposition;
+            if (uncertain_resend_confirmed)
+                disposition = yield outbound_service.deliver_confirmed_resend_from_editor (
+                    draft, outbox_editor_owner, send_progress);
+            else
+                disposition = yield outbound_service.deliver_from_editor (
+                    draft, outbox_editor_owner, send_progress);
             draft.mark_saved (); draft_changed (); sending = false;
+            if (disposition == SendDisposition.SENT) {
+                force_close = true; close ();
+                return;
+            }
+
+            // Queue-only/demo builds have no SMTP provider. Preserve the exact
+            // message in Outbox and show an honest static state without an
+            // in-composer countdown.
+            queued_item = cache.find_outbox_item (draft.id);
+            opened_from_outbox = true;
+            opened_saved_draft = true;
+            if (queued_item == null)
+                outbox_editor_conflict = true;
+            else
+                acquire_outbox_editor_if_needed ();
             attachment_operations = new Cancellable ();
-            configure_outbox_state (); begin_undo_countdown ();
+            configure_outbox_state ();
             overlay.add_toast (new Adw.Toast (
-                "Message saved to Outbox — Undo is available for %d seconds.".printf (seconds)));
+                "The message is safely queued in Outbox, but no sending service is available."));
             return;
         } catch (Error error) {
             var friendly = UserFacingError.from_error (error);
             bool preserved = false;
+            bool stale_or_ambiguous = false;
+            bool outbox_status_known = false;
             try {
                 queued_item = cache.find_outbox_item (draft.id);
-                preserved = queued_item != null;
+                outbox_status_known = true;
             } catch (Error status_error) {
-                warning ("Could not verify Outbox preservation: %s", status_error.message);
+                warning ("Could not verify Outbox preservation: %s",
+                    status_error.message);
             }
-            overlay.add_toast (new Adw.Toast (preserved ?
-                "%s — the message remains in Outbox.".printf (friendly.title) :
-                "%s — the message was not queued. Keep this window open and save the draft.".printf (friendly.title)));
+            if (outbox_status_known && queued_item != null) {
+                preserved = true;
+                opened_from_outbox = true;
+                opened_saved_draft = true;
+                try {
+                    acquire_outbox_editor_if_needed ();
+                } catch (Error ownership_error) {
+                    warning ("Could not acquire Outbox editor ownership: %s",
+                        ownership_error.message);
+                    outbox_editor_conflict = true;
+                    stale_or_ambiguous = true;
+                }
+            } else if (outbox_status_known &&
+                       (began_from_outbox ||
+                        send_progress.outbox_was_or_may_have_been_published () ||
+                        error is MailError.DELIVERY_UNCERTAIN)) {
+                // Once an Outbox row was (or may have been) published, another
+                // process can complete it while this window is paused. Its
+                // later absence must never turn the stale snapshot editable.
+                opened_from_outbox = true;
+                outbox_editor_conflict = true;
+                stale_or_ambiguous = true;
+            } else if (outbox_status_known) {
+                // The Outbox was authoritatively absent and this send never
+                // reached a publishable stage. A Draft lookup can refine close
+                // behavior, but its own read failure must not disable the only
+                // in-memory copy.
+                opened_from_outbox = false;
+                outbox_editor_conflict = false;
+                Draft? preserved_draft = null;
+                try {
+                    preserved_draft = cache.load_draft (draft.id);
+                } catch (Error draft_status_error) {
+                    warning ("Could not verify preserved Draft: %s",
+                        draft_status_error.message);
+                }
+                opened_saved_draft = preserved_draft != null;
+                if (!opened_saved_draft) changed_by_user = true;
+            } else if (!began_from_outbox &&
+                       send_progress.definitely_pre_publication () &&
+                       !send_progress.outbox_was_or_may_have_been_published ()) {
+                // Recipient/account/attachment preflight did not touch the
+                // database. A coincident read error must not disable the only
+                // in-memory copy.
+                opened_from_outbox = false;
+                outbox_editor_conflict = false;
+                opened_saved_draft = false;
+                changed_by_user = true;
+            } else {
+                // A durable state may exist, but it cannot be inspected or
+                // owner-locked. Fail closed until Outbox can be reopened.
+                opened_from_outbox = true;
+                outbox_editor_conflict = true;
+                stale_or_ambiguous = true;
+            }
+            string failure_message;
+            if (preserved)
+                failure_message = "%s — the message remains in Outbox.".printf (
+                    friendly.title);
+            else if (stale_or_ambiguous)
+                failure_message = "%s — check Sent and Outbox before trying again.".printf (
+                    friendly.title);
+            else
+                failure_message = "%s — the message was not queued. Keep this window open and save the draft.".printf (
+                    friendly.title);
+            overlay.add_toast (new Adw.Toast (failure_message));
             draft_changed ();
             uncertain_resend_confirmed = false;
         }
@@ -1357,6 +1615,7 @@ public class ComposeWindow : Adw.Window {
         dialog.extra_child = picker; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("schedule", "Schedule");
         dialog.default_response = "schedule"; dialog.close_response = "cancel";
         if ((yield dialog.choose (this, null)) != "schedule") return;
+        if (!require_outbox_editor ()) return;
         var date = calendar.get_date ();
         int selected_hour = hour.get_value_as_int () % 12 +
             (period.selected == 1 ? 12 : 0);
@@ -1364,7 +1623,8 @@ public class ComposeWindow : Adw.Window {
             date.get_day_of_month (), selected_hour,
             minute.get_value_as_int (), 0);
         try {
-            outbound_service.schedule (draft, selected_time.to_unix ());
+            outbound_service.schedule (draft, selected_time.to_unix (),
+                outbox_editor_owner);
             cancel_autosave (); draft_changed (); force_close = true; close ();
         } catch (Error error) { yield show_message_validation_error (error, body); }
     }
@@ -1379,9 +1639,10 @@ public class ComposeWindow : Adw.Window {
         dialog.default_response = "cancel"; dialog.close_response = "cancel";
         dialog.set_response_appearance ("delete", Adw.ResponseAppearance.DESTRUCTIVE);
         if ((yield dialog.choose (this, null)) != "delete") return;
+        if (!require_outbox_editor ()) return;
         cancel_autosave (); attachment_operations.cancel ();
         try {
-            draft_lifecycle.discard (draft);
+            draft_lifecycle.discard (draft, outbox_editor_owner);
             outbound_service.outbox_changed (draft.account_id);
         } catch (Error error) {
             overlay.add_toast (new Adw.Toast ("The Outbox message could not be deleted."));
@@ -1437,89 +1698,6 @@ public class ComposeWindow : Adw.Window {
         outbox_status_container.visible = queued_item != null;
     }
 
-    private void begin_undo_countdown () {
-        cancel_undo_countdown ();
-        if (queued_item == null || !queued_item.can_undo ()) return;
-        update_undo_countdown_copy ();
-        undo_countdown_source = Timeout.add_seconds (1, () => {
-            try { queued_item = cache.find_outbox_item (draft.id); }
-            catch (Error error) {
-                warning ("Could not refresh Undo Send status: %s", error.message);
-                undo_countdown_source = 0; return Source.REMOVE;
-            }
-            if (queued_item != null && queued_item.can_undo ()) {
-                update_undo_countdown_copy (); refresh_outbox_status ();
-                return Source.CONTINUE;
-            }
-            undo_countdown_source = 0; undo_send_button.visible = false;
-            // The durable deadline has elapsed. Closing prevents an editor from
-            // racing the worker as it moves QUEUED to its exclusive PREPARING
-            // lease; the Outbox remains visible in the main window.
-            draft_changed (); force_close = true; close ();
-            return Source.REMOVE;
-        });
-    }
-
-    private void update_undo_countdown_copy () {
-        if (queued_item == null) return;
-        int64 remaining = int64.max (1,
-            queued_item.undo_until - new DateTime.now_utc ().to_unix ());
-        send_button.label = remaining == 1 ? "Sending in 1 second…" :
-            "Sending in %lld seconds…".printf (remaining);
-        undo_send_button.tooltip_text = remaining == 1 ?
-            "1 second remains to cancel this send" :
-            "%lld seconds remain to cancel this send".printf (remaining);
-    }
-
-    private void cancel_undo_countdown () {
-        if (undo_countdown_source != 0) {
-            Source.remove (undo_countdown_source); undo_countdown_source = 0;
-        }
-    }
-
-    private void undo_send () {
-        if (queued_item == null || !queued_item.can_undo ()) return;
-        cancel_undo_countdown ();
-        try {
-            if (!outbound_service.cancel_undo_send (draft.id, draft.account_id)) {
-                queued_item = cache.find_outbox_item (draft.id);
-                overlay.add_toast (new Adw.Toast (
-                    "The Undo Send window ended before the message could be canceled."));
-                configure_outbox_state ();
-                force_close = true;
-                Idle.add (() => { close (); return Source.REMOVE; });
-                return;
-            }
-            queued_item = cache.find_outbox_item (draft.id);
-        } catch (Error error) {
-            overlay.add_toast (new Adw.Toast (
-                "Undo Send could not update Outbox. The message remains queued."));
-            try { queued_item = cache.find_outbox_item (draft.id); }
-            catch (Error status_error) {
-                warning ("Could not reload Outbox after Undo Send failure: %s", status_error.message);
-            }
-            if (queued_item == null || !queued_item.can_undo ()) {
-                force_close = true; Idle.add (() => { close (); return Source.REMOVE; });
-            } else begin_undo_countdown ();
-            return;
-        }
-        uncertain_resend_confirmed = false;
-        if (queued_item == null) {
-            title = "Edit Draft"; outbox_read_only = false; accepted_pending_cleanup = false;
-            set_editor_sensitive (true); cancel_button.label = "Cancel";
-            send_button.sensitive = true; send_later_button.sensitive = true;
-            undo_send_button.visible = false;
-            if (delete_queued_button != null) delete_queued_button.visible = false;
-            attachment_operations = new Cancellable (); restore_send_button_label ();
-            refresh_outbox_status (); schedule_spellcheck ();
-            overlay.add_toast (new Adw.Toast ("Send canceled — the message is back in Drafts."));
-        } else {
-            configure_outbox_state ();
-            overlay.add_toast (new Adw.Toast ("Send canceled — the previous Outbox state was restored."));
-        }
-        draft_changed ();
-    }
-
     private void set_editor_sensitive (bool sensitive) {
         cancel_button.sensitive = sensitive; from_selector.sensitive = sensitive;
         to_entry.sensitive = sensitive; cc_entry.sensitive = sensitive; bcc_entry.sensitive = sensitive;
@@ -1531,7 +1709,7 @@ public class ComposeWindow : Adw.Window {
 
     private void configure_outbox_state () {
         outbox_read_only = false; accepted_pending_cleanup = false;
-        undo_send_button.visible = false; cancel_button.label = "Cancel";
+        cancel_button.label = "Cancel";
         set_editor_sensitive (true); send_button.sensitive = true;
         send_later_button.sensitive = true;
         if (delete_queued_button != null) {
@@ -1539,14 +1717,33 @@ public class ComposeWindow : Adw.Window {
             delete_queued_button.sensitive = true;
         }
         refresh_outbox_status ();
+        if (outbox_editor_conflict) {
+            outbox_read_only = true;
+            set_editor_sensitive (false);
+            cancel_button.sensitive = true;
+            cancel_button.label = "Close";
+            send_button.sensitive = false;
+            send_button.label = queued_item == null ?
+                "Already Sent" : "Open Elsewhere";
+            send_later_button.sensitive = false;
+            if (delete_queued_button != null)
+                delete_queued_button.sensitive = false;
+            return;
+        }
         if (queued_item == null) { restore_send_button_label (); return; }
         if (queued_item.can_undo ()) {
             outbox_read_only = true; set_editor_sensitive (false);
             cancel_button.sensitive = true; cancel_button.label = "Close";
-            undo_send_button.sensitive = true; undo_send_button.visible = true;
             send_button.sensitive = false; send_later_button.sensitive = false;
             if (delete_queued_button != null) delete_queued_button.sensitive = false;
-            update_undo_countdown_copy (); begin_undo_countdown ();
+            send_button.label = "Queued to Send";
+        } else if (queued_item.is_actively_sending ()) {
+            outbox_read_only = true;
+            set_editor_sensitive (false); cancel_button.sensitive = true;
+            cancel_button.label = "Close";
+            send_button.sensitive = false; send_button.label = "Sending…";
+            send_later_button.sensitive = false;
+            if (delete_queued_button != null) delete_queued_button.sensitive = false;
         } else if (queued_item.delivery_state == OutboxDeliveryState.SENDING) {
             send_button.label = "Send Again…";
         } else if (queued_item.delivery_state == OutboxDeliveryState.PREPARING) {
@@ -1565,7 +1762,7 @@ public class ComposeWindow : Adw.Window {
 
     private void restore_send_button_label () {
         if (queued_item != null && queued_item.can_undo ())
-            update_undo_countdown_copy ();
+            send_button.label = "Queued to Send";
         else if (queued_item != null && queued_item.requires_resend_confirmation ())
             send_button.label = "Send Again…";
         else if (queued_item != null && queued_item.attempts > 0)
@@ -1582,7 +1779,7 @@ public class ComposeWindow : Adw.Window {
             attachment_operations.cancel ();
             if (!opened_saved_draft) {
                 try {
-                    draft_lifecycle.discard (draft);
+                    draft_lifecycle.discard (draft, outbox_editor_owner);
                 } catch (Error error) {
                     force_close = false;
                     attachment_operations = new Cancellable ();
@@ -1600,6 +1797,7 @@ public class ComposeWindow : Adw.Window {
         dialog.set_response_appearance ("discard", Adw.ResponseAppearance.DESTRUCTIVE);
         dialog.set_response_appearance ("save", Adw.ResponseAppearance.SUGGESTED);
         string response = yield dialog.choose (this, null);
+        if (response != "cancel" && !require_outbox_editor ()) return;
         if (response == "save") {
             if (importing_forward_attachments) {
                 overlay.add_toast (new Adw.Toast (
@@ -1609,7 +1807,10 @@ public class ComposeWindow : Adw.Window {
             cancel_autosave ();
             force_close = true;
             attachment_operations.cancel ();
-            try { update_draft (); cache.save_draft (draft); }
+            try {
+                update_draft ();
+                cache.save_draft (draft, outbox_editor_owner);
+            }
             catch (Error error) {
                 force_close = false;
                 attachment_operations = new Cancellable ();
@@ -1621,7 +1822,7 @@ public class ComposeWindow : Adw.Window {
         if (response == "discard") {
             cancel_autosave (); force_close = true; attachment_operations.cancel ();
             try {
-                draft_lifecycle.discard (draft);
+                draft_lifecycle.discard (draft, outbox_editor_owner);
             } catch (Error error) {
                 force_close = false;
                 attachment_operations = new Cancellable ();

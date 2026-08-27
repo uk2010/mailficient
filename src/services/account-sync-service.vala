@@ -106,6 +106,7 @@ public class AccountSyncService : Object {
     }
 
     private void schedule_pending_flush (string account_id) {
+        if (suppressed_accounts.contains (account_id)) return;
         uint existing = queued_flush_sources.has_key (account_id) ? queued_flush_sources[account_id] : 0;
         if (existing != 0) Source.remove (existing);
         queued_flush_sources[account_id] = Timeout.add (
@@ -349,7 +350,9 @@ public class AccountSyncService : Object {
             // Mail checks only need the incoming IMAP service. SMTP is opened
             // lazily by outbound delivery instead of delaying every refresh.
             yield engine.connect_incoming_account (account, cancellable);
-            yield outbound.retry_pending (account.id, true, cancellable);
+            // SMTP has its own connection lane and lifetime. Canceling Get
+            // Mail must never cancel a Send after the user has committed it.
+            yield outbound.retry_pending (account.id, true, null);
             yield flush_pending (account.id, cancellable);
             int cached_before = cache.cached_message_count (account.id);
             established_cache = cached_before > 0;
@@ -497,6 +500,11 @@ public class AccountSyncService : Object {
             queued_history_sources[account_id] : 0;
         if (history_source != 0) Source.remove (history_source);
         queued_history_sources.unset (account_id);
+        uint flush_source = queued_flush_sources.has_key (account_id) ?
+            queued_flush_sources[account_id] : 0;
+        if (flush_source != 0) Source.remove (flush_source);
+        queued_flush_sources.unset (account_id);
+        flush_again.remove (account_id);
         progress_contexts.unset (account_id);
         pending_new_mail.unset (account_id);
         initial_backfill_accounts.remove (account_id);
@@ -506,6 +514,35 @@ public class AccountSyncService : Object {
         // this account is hidden. Publish exactly one edge here so a window
         // that already saw progress can retire its account-scoped UI state.
         if (stopped_active_sync) cancelled (account_id);
+    }
+
+    // Account settings and removal may replace the Camel services and the
+    // server identity behind an existing account id. Suppress new work,
+    // cancel the current sync, and do not return until every account-scoped
+    // sync/mutation operation has stopped touching the engine or cache.
+    public async void quiesce_account (string account_id) {
+        suppress_account (account_id);
+        while (syncing_accounts.contains (account_id) ||
+               flushing_accounts.contains (account_id)) {
+            bool resumed = false;
+            ulong sync_handler = 0;
+            ulong flush_handler = 0;
+            sync_handler = account_sync_finished.connect ((finished_id) => {
+                if (finished_id != account_id || resumed) return;
+                resumed = true;
+                disconnect (sync_handler);
+                disconnect (flush_handler);
+                quiesce_account.callback ();
+            });
+            flush_handler = pending_flush_finished.connect ((finished_id) => {
+                if (finished_id != account_id || resumed) return;
+                resumed = true;
+                disconnect (sync_handler);
+                disconnect (flush_handler);
+                quiesce_account.callback ();
+            });
+            yield;
+        }
     }
 
     public void resume_account (string account_id) {
@@ -528,6 +565,7 @@ public class AccountSyncService : Object {
     }
 
     private async void flush_pending (string account_id, Cancellable? cancellable = null) {
+        if (suppressed_accounts.contains (account_id)) return;
         if (queued_flush_sources.has_key (account_id)) {
             uint source = queued_flush_sources[account_id]; queued_flush_sources.unset (account_id);
             if (source != 0) Source.remove (source);

@@ -11,6 +11,11 @@
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
+    <release version="0.3.2" date="2026-08-27">
+      <description>
+        <p>Makes Send own a reliable isolated SMTP attempt, moves optional Undo Send to a bottom-window action, fixes deleted conversation members and stale unread indicators, and keeps cross-process Outbox status current.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-08-27">
       <description>
         <p>Removes the 500-message ceiling, continues large initial imports through bounded background sessions, and keeps the Inbox stable while streamed mail updates arrive.</p>

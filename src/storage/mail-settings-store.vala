@@ -37,6 +37,11 @@ public class MailSettingsStore : Object {
         set { set_bool ("spellcheck-enabled", value); }
     }
 
+    public bool undo_send_enabled {
+        get { return get_bool ("undo-send-enabled", true); }
+        set { set_bool ("undo-send-enabled", value); }
+    }
+
     public int undo_send_seconds {
         get { return clamp_int ((int) get_double ("undo-send-seconds", 10), 5, 30); }
         set { set_double ("undo-send-seconds", clamp_int (value, 5, 30)); }

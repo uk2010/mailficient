@@ -162,6 +162,10 @@ public class MessageList : Gtk.Box {
 
     public void refresh () { reload (true, false, "", true); }
 
+    public bool showing_mailbox (string id) {
+        return mailbox_loaded && query == "" && mailbox_id == id;
+    }
+
     // Message views are intentionally not retained per mailbox. Keeping a
     // Gtk.ListView, selection model, and message pages for every favorite
     // makes memory and layout work grow each time the user visits another

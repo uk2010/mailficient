@@ -1,3 +1,21 @@
+# Mailficient 0.3.2
+
+Mailficient 0.3.2 makes sending dependable and keeps mail state honest across
+the composer, Outbox, conversations, and desktop notifications.
+
+Highlights:
+
+- Gives a Send click the first foreground SMTP attempt on an outgoing-only
+  connection lane isolated from large Inbox synchronization and cancellation
+- Makes Undo Send optional and presents it as a bottom-of-main-window action
+  after the composer closes, with no countdown left in the compose window
+- Distinguishes an active send from a genuinely uncertain SMTP result and
+  refreshes Outbox state even when the separate background worker completes it
+- Excludes Trash and Junk messages from normal Sent/Inbox conversations while
+  retaining surviving thread links, and scopes discard-folder conversations
+- Withdraws stale persistent new-mail notifications and removes active snoozes
+  from visible unread badges without losing authoritative uncached totals
+
 # Mailficient 0.3.1
 
 Mailficient 0.3.1 makes large initial mailbox imports complete and keeps the

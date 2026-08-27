@@ -8,10 +8,11 @@ public class DraftLifecycleService : Object {
         this.attachments = attachments;
     }
 
-    public void discard (Draft draft) throws MailError {
+    public void discard (Draft draft,
+                         string editor_owner = "") throws MailError {
         // The durable record is authoritative. Never remove files first: a
         // failed SQLite transaction must leave a completely reopenable draft.
-        cache.delete_draft (draft.id);
+        cache.delete_draft (draft.id, editor_owner);
         foreach (var attachment in draft.attachments) {
             try { attachments.remove_private_copy (attachment); }
             catch (Error error) {

@@ -61,6 +61,56 @@ private void test_sync_memory_bounds () {
     assert (failure is IOError.MESSAGE_TOO_LARGE);
 }
 
+private void test_account_session_identity_covers_settings () {
+    var account = AccountSettings.for_email ("Alex", "alex@example.net");
+    account.id = "identity-account";
+    account.incoming_host = "imap.example.net";
+    account.outgoing_host = "smtp.example.net";
+    string original = CamelMailEngine.account_session_identity (account);
+
+    // The captured string must remain a snapshot even though AccountSettings
+    // itself is mutable. Every field below can affect either the retained
+    // SMTP/IMAP services or the MIME identity built after connection.
+    account.display_name = "Alex Morgan";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.display_name = "Alex";
+    account.email = "alex.changed@example.net";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.email = "alex@example.net";
+    account.incoming_host = "imap.changed.example.net";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.incoming_host = "imap.example.net";
+    account.incoming_port = 1993;
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.incoming_port = 993;
+    account.incoming_encryption = EncryptionMode.STARTTLS;
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.incoming_encryption = EncryptionMode.TLS;
+    account.incoming_username = "incoming-alex";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.incoming_username = "alex@example.net";
+    account.outgoing_host = "smtp.changed.example.net";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.outgoing_host = "smtp.example.net";
+    account.outgoing_port = 587;
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.outgoing_port = 465;
+    account.outgoing_encryption = EncryptionMode.STARTTLS;
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.outgoing_encryption = EncryptionMode.TLS;
+    account.outgoing_username = "outgoing-alex";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.outgoing_username = "alex@example.net";
+    account.authentication = AuthenticationMode.GNOME_ONLINE_ACCOUNTS;
+    assert (CamelMailEngine.account_session_identity (account) != original);
+    account.authentication = AuthenticationMode.PASSWORD;
+    account.online_account_path = "/org/gnome/OnlineAccounts/Accounts/42";
+    assert (CamelMailEngine.account_session_identity (account) != original);
+
+    account.online_account_path = "";
+    assert (CamelMailEngine.account_session_identity (account) == original);
+}
+
 private void test_inbox_prefetch_is_ordered_bounded_and_unique () {
     var source = new Gee.ArrayList<Mailbox> ();
     var archive = new Mailbox ("a:archive", "Archive", "folder-symbolic",
@@ -1077,6 +1127,8 @@ int main (string[] args) {
     Test.add_func ("/camel/failed-attachment-decode-is-atomic", Mailficient.test_failed_attachment_decode_is_atomic);
     Test.add_func ("/camel/misreported-attachment-is-bounded", Mailficient.test_misreported_attachment_is_bounded);
     Test.add_func ("/camel/sync-memory-bounds", Mailficient.test_sync_memory_bounds);
+    Test.add_func ("/camel/account-session-identity-covers-settings",
+        Mailficient.test_account_session_identity_covers_settings);
     Test.add_func ("/camel/inbox-prefetch-is-ordered-bounded-and-unique",
         Mailficient.test_inbox_prefetch_is_ordered_bounded_and_unique);
     Test.add_func ("/camel/uid-traversal-uses-elapsed-time-slice",

@@ -72,6 +72,15 @@ private string temporary_root (string stem) {
     return path;
 }
 
+private void save_test_account (CacheDatabase cache, string account_id) throws Error {
+    var account = AccountSettings.for_email ("Draft Test",
+        account_id + "@example.net");
+    account.id = account_id;
+    account.incoming_host = "imap.example.net";
+    account.outgoing_host = "smtp.example.net";
+    cache.save_account (account);
+}
+
 private RemoteDraftSnapshot remote_snapshot (string account_id, string id, string uid,
                                               int64 revision, string body,
                                               bool managed = true,
@@ -93,6 +102,7 @@ private void import_snapshot (CacheDatabase cache, RemoteDraftSnapshot snapshot)
 private async void exercise_remote_upload_and_revision () throws Error {
     string root = temporary_root ("mailficient-draft-upload");
     var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+    save_test_account (cache, "draft-account");
     var engine = new DraftTestEngine ();
     var service = new DraftSyncService (cache, engine);
     var draft = new Draft ("draft-account");
@@ -129,6 +139,7 @@ private void test_remote_edits_uid_replacement_and_deletion () {
     try {
         var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
         string account_id = "reconcile-account";
+        save_test_account (cache, account_id);
         string edited_id = Uuid.string_random ();
         var initial = remote_snapshot (account_id, edited_id, "10", 7,
             "original plain", true, "<p><b>Original</b></p>");
@@ -642,6 +653,7 @@ private void test_discard_during_remote_upload_claim () {
         var cache = new CacheDatabase (path);
         var worker = new CacheDatabase (path);
         string account_id = "discard-upload-race-account";
+        save_test_account (cache, account_id);
         int64 lease_until = new DateTime.now_utc ().to_unix () + 300;
 
         // The provider append can finish after the user has closed and
@@ -753,6 +765,7 @@ private void test_reconcile_vs_local_edit_race () {
     try {
         var cache = new CacheDatabase (path);
         string account_id = "reconcile-race-account";
+        save_test_account (cache, account_id);
         var drafts_box = new Mailbox ("race-drafts", "Drafts", "document-edit-symbolic",
             MailboxRole.DRAFTS, 0, account_id, "Drafts");
 

@@ -164,13 +164,24 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         spellcheck.active = settings.spellcheck_enabled;
         spellcheck.notify["active"].connect (() => settings.spellcheck_enabled = spellcheck.active);
         safety.add (spellcheck);
-        var undo_send = new Adw.SpinRow.with_range (5, 30, 1);
-        undo_send.title = "Undo Send window";
-        undo_send.subtitle = "Seconds before a newly sent message can leave Outbox (5–30)";
-        undo_send.value = settings.undo_send_seconds; undo_send.numeric = true;
-        undo_send.notify["value"].connect (() =>
-            settings.undo_send_seconds = (int) undo_send.value);
-        safety.add (undo_send); page.add (safety);
+        var undo_send_enabled = new Adw.SwitchRow ();
+        undo_send_enabled.title = "Undo Send";
+        undo_send_enabled.subtitle = "Show an Undo Send action at the bottom of the main window";
+        undo_send_enabled.active = settings.undo_send_enabled;
+        safety.add (undo_send_enabled);
+        var undo_send_window = new Adw.SpinRow.with_range (5, 30, 1);
+        undo_send_window.title = "Undo Send window";
+        undo_send_window.subtitle = "How long the bottom action remains available (5–30 seconds)";
+        undo_send_window.value = settings.undo_send_seconds;
+        undo_send_window.numeric = true;
+        undo_send_window.sensitive = undo_send_enabled.active;
+        undo_send_window.notify["value"].connect (() =>
+            settings.undo_send_seconds = (int) undo_send_window.value);
+        undo_send_enabled.notify["active"].connect (() => {
+            settings.undo_send_enabled = undo_send_enabled.active;
+            undo_send_window.sensitive = undo_send_enabled.active;
+        });
+        safety.add (undo_send_window); page.add (safety);
 
         var group = new Adw.PreferencesGroup (); group.title = "Signature";
         group.description = "Choose a separate plain-text signature for each sending identity.";

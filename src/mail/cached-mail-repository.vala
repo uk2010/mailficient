@@ -305,7 +305,9 @@ public class CachedMailRepository : Object, MailRepository {
     private static Message outbox_message (OutboxItem item) {
         var draft = item.draft;
         string preview;
-        if (item.delivery_state == OutboxDeliveryState.SENDING)
+        if (item.is_actively_sending ())
+            preview = "Sending now…";
+        else if (item.delivery_state == OutboxDeliveryState.SENDING)
             preview = "Delivery status uncertain — this message will not resend automatically";
         else if (item.delivery_state == OutboxDeliveryState.ACCEPTED)
             preview = "Sent — waiting for local Outbox cleanup";

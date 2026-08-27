@@ -41,10 +41,9 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Release downloads
 
-The [v0.3.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.3.1)
+The [v0.3.2 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.3.2)
 provides the complete source archive, Debian packages for AMD64 and ARM64, RPM
-packages for x86_64 and aarch64, Flatpak bundles for both architectures, and
-SHA-256 checksums for every download.
+packages for x86_64 and aarch64, and SHA-256 checksums for every download.
 
 ## Flatpak package
 
@@ -52,7 +51,7 @@ Build the current Flatpak from the pinned source manifest, then install and run
 the resulting bundle with:
 
 ```sh
-flatpak install --user ./Mailficient-0.3.1-x86_64.flatpak
+flatpak install --user ./Mailficient-0.3.2-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -68,7 +67,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.3.1_arm64.snap
+sudo snap install --dangerous ./mailficient_0.3.2_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -95,7 +94,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.3.1-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.3.2-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 
@@ -137,7 +136,7 @@ Provider throttling is classified separately from ordinary connection failures. 
 
 SMTP result handling now distinguishes a server response from a lost transport. A definitive rejection, authentication failure, invalid local message, or pre-SMTP attachment failure stays editable in Outbox; only a timeout, cancellation, or dropped connection after SMTP ownership triggers the duplicate-safe “delivery uncertain” state. Permanent 5xx rejection is a separate non-automatic state. Camel's boolean submission result and its sent-copy result are both checked instead of assuming that a call returning without an exception means success.
 
-Sidebar badges are live unread counts, not total folder sizes. Demo counts are derived from the same message state shown in the list, and real-account counts are adjusted atomically when a message is marked read or unread—even while that server change is queued offline. Drafts and Outbox instead show their total local item counts; badge tooltips state which count is being shown.
+Sidebar badges are live unread counts, not total folder sizes. Demo counts are derived from the same message state shown in the list, and real-account counts are adjusted atomically when a message is marked read or unread—even while that server change is queued offline. Active snoozes are removed from the visible Inbox count without discarding authoritative totals for mail that has not downloaded yet. Persistent desktop new-mail notifications are journaled and withdrawn after the message is read, moved, snoozed, or deleted, so the desktop app icon cannot retain a stale unread indicator. Drafts and Outbox instead show their total local item counts; badge tooltips state which count is being shown.
 
 Synchronization preserves useful partial results. If one folder or MIME message fails while other folders succeed, Mailficient commits the successful mail, leaves the affected folder's older cache untouched, reports the affected folder in expandable technical details, and shows a retry action instead of claiming that the account is fully up to date. Authentication, TLS, offline, timeout, and throttling failures stop further folder attempts but still preserve any results already downloaded during that pass.
 
@@ -145,7 +144,7 @@ Discarding a draft is database-first and failure-safe: a failed SQLite removal l
 
 Before Mailficient gives a message to SMTP, it verifies that every attachment is still a regular file in private draft storage and still matches the size recorded when it was added. Missing or changed files leave the complete message safely queued in Outbox without entering the uncertain-delivery state. Outgoing MIME preparation is capped at 25 MB per attachment and 100 MB in total.
 
-The composer checks spelling with local desktop dictionaries and has an offline common-correction fallback. It also catches attachment wording when no file is present. Immediate sends wait behind a configurable 5–30 second durable Undo Send fence in Outbox; every foreground and background SMTP claim honors that deadline, and canceling a deferred resend restores any prior failure or uncertain-delivery state.
+The composer checks spelling with local desktop dictionaries and has an offline common-correction fallback. It also catches attachment wording when no file is present. Undo Send can be disabled. When enabled, the composer closes immediately and a bottom-of-main-window **Undo Send** action remains available for the configured 5–30 second durable Outbox fence; there is no composer countdown. When disabled, Send owns the first foreground SMTP attempt immediately. Outgoing delivery uses a connection lane isolated from Inbox synchronization, and the background worker remains the crash-safe fallback.
 
 The reader exposes conservative message-identity findings and bounded raw headers from its shield control. A locally designated Safe Sender hides the automatic inline sender warning and permits remote images, while the full assessment stays available from the shield and link/attachment/HTML protections remain active. Standards-based unsubscribe targets are restricted to HTTPS or a reviewable mailto draft, and Report Phishing confirms before using the provider Junk path and local sender block.
 

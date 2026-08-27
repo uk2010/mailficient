@@ -5,6 +5,7 @@ public class MailApplication : Adw.Application {
     private CacheDatabase? cache;
     private CredentialStore credentials;
     private MailEngine? mail_engine;
+    private MailEngine? outbound_mail_engine;
     private AttachmentService? attachment_service;
     private ReceivedAttachmentService? received_attachment_service;
     private CalendarIntegrationService? calendar_service;
@@ -94,6 +95,7 @@ public class MailApplication : Adw.Application {
                     throw new MailError.STORAGE ("Demo diagnostic: SQLite reported that mail.db is not a database");
                 string directory = LocalDataMigration.prepare (Environment.get_user_data_dir ());
                 cache = new CacheDatabase (Path.build_filename (directory, "mail.db"));
+                notifications.attach_cache (cache);
                 cache.remote_draft_work_queued.connect ((account_id) => {
                     try {
                         if (cache.find_account (account_id) != null)
@@ -153,6 +155,7 @@ public class MailApplication : Adw.Application {
                     }
                 } else cache.clear_demo_data ();
                 repository = new CachedMailRepository (cache, demo_repository, demo_mode);
+                repository.changed.connect (() => notifications.reconcile ());
 #if HAVE_CAMEL
                 // Camel's folder-summary SQLite schema is private to the EDS
                 // branch that created it. Native and bundled builds may use
@@ -162,10 +165,19 @@ public class MailApplication : Adw.Application {
                     Path.build_filename (directory, "camel-data"), CamelCacheNamespace.path_for (directory),
                     Path.build_filename (directory, "received-attachments"), online_accounts);
                 mail_engine = camel_engine;
-                account_provisioner = new AccountProvisioningService (cache, credentials,
-                    credential_cleanup, camel_engine);
+                // Sending owns a separate Camel session and disposable cache.
+                // Large bounded IMAP imports deliberately tear their session
+                // down between batches; sharing that session could remove an
+                // SMTP transport while a foreground Send was still active.
+                string outbound_directory = Path.build_filename (directory, "outbound");
+                outbound_mail_engine = new CamelMailEngine (credentials,
+                    Path.build_filename (outbound_directory, "camel-data"),
+                    CamelCacheNamespace.path_for (outbound_directory),
+                    Path.build_filename (outbound_directory, "received-attachments"),
+                    online_accounts);
 #endif
-                outbound_service = new OutboundService (cache, mail_engine, attachment_service);
+                outbound_service = new OutboundService (cache, outbound_mail_engine,
+                    attachment_service);
                 outbound_service.background_delivery_needed.connect ((account_id) => {
                     try {
                         if (cache.find_account (account_id) != null)
@@ -188,11 +200,35 @@ public class MailApplication : Adw.Application {
 #if HAVE_CAMEL
                 sync_service = new AccountSyncService (cache, mail_engine, outbound_service,
                     new JunkFilterService (cache), attachment_service);
+                account_provisioner = new AccountProvisioningService (cache,
+                    credentials, credential_cleanup, camel_engine,
+                    outbound_service, sync_service);
                 // AccountSyncService already bounds and aggregates arrivals
                 // across multi-session history checks. Listening only to the
                 // summary prevents duplicate per-message notifications.
-                sync_service.new_mail_summary.connect ((summary) =>
-                    notifications.notify_new_mail (summary));
+                sync_service.new_mail_summary.connect ((summary) => {
+                    notifications.notify_new_mail (summary);
+                    // A streamed arrival can be read, moved, or snoozed while
+                    // later sync passes are still completing. Publish first,
+                    // then reconcile the just-journaled ID against the final
+                    // durable state so that race cannot leave a stale icon.
+                    notifications.reconcile ();
+                });
+                // Reconcile after every durable streamed checkpoint as well as
+                // logical completion. This catches read, move, and deletion
+                // changes made by another mail client without waiting for the
+                // next local action.
+                sync_service.pass_completed.connect ((account_id) =>
+                    notifications.reconcile ());
+                sync_service.synchronized.connect ((account_id) =>
+                    notifications.reconcile ());
+                // A pass may commit its final IMAP snapshot and then fail or
+                // be cancelled in later mutation/vacation work. Reconcile the
+                // durable snapshot on every terminal edge, not only success.
+                sync_service.failed.connect ((account_id, error) =>
+                    notifications.reconcile ());
+                sync_service.cancelled.connect ((account_id) =>
+                    notifications.reconcile ());
 #endif
                 folder_service = new FolderService (cache, mail_engine, sync_service);
                 received_attachment_service = new ReceivedAttachmentService (cache,
@@ -295,7 +331,8 @@ public class MailApplication : Adw.Application {
     }
 
     private void reset_failed_initialization () {
-        cache = null; mail_engine = null; attachment_service = null;
+        cache = null; mail_engine = null; outbound_mail_engine = null;
+        attachment_service = null;
         received_attachment_service = null; draft_lifecycle = null; outbound_service = null;
         sync_service = null; folder_service = null; cache_maintenance = null;
         credential_cleanup = null; remote_content_policy = null; account_provisioner = null;

@@ -222,12 +222,18 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
         confirmation.default_response = "cancel"; confirmation.close_response = "cancel";
         confirmation.set_response_appearance ("remove", Adw.ResponseAppearance.DESTRUCTIVE);
         if ((yield confirmation.choose (this, null)) != "remove") return;
-        if (sync_service != null) sync_service.suppress_account (account.id);
+        OutboundAccountSessionLease? outbound_lease = null;
         try {
+            if (sync_service != null)
+                yield sync_service.quiesce_account (account.id);
+            if (account_provisioner != null)
+                outbound_lease = yield account_provisioner.acquire_outbound_account_lease (
+                    account.id);
             if (engine != null) {
                 try { yield engine.disconnect_account (account.id); }
                 catch (Error disconnect_error) { debug ("Account session did not disconnect cleanly: %s", disconnect_error.message); }
             }
+            if (outbound_lease != null) outbound_lease.ensure_valid ();
             cache.delete_account (account.id);
             status.visible = false; reload (); accounts_changed ();
             if (!(yield credential_cleanup.cleanup_account (account.id))) {
@@ -238,6 +244,8 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
         } catch (Error error) {
             if (sync_service != null) sync_service.resume_account (account.id);
             show_error (UserFacingError.from_error (error));
+        } finally {
+            if (outbound_lease != null) outbound_lease.release ();
         }
     }
 

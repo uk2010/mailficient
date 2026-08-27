@@ -8,13 +8,15 @@ public class OutboxStatusView : Gtk.Box {
         string description;
         string icon_name;
         if (item.can_undo ()) {
-            int64 remaining = int64.max (1,
-                item.undo_until - new DateTime.now_utc ().to_unix ());
-            title = "Undo Send available";
-            description = "This message is safe in Outbox and cannot leave for %s. Choose Undo to keep editing.".printf (
-                remaining == 1 ? "1 more second" : "%lld more seconds".printf (remaining));
+            title = "Waiting to send";
+            description = "This message is safely queued. Use Undo Send in the main-window notification to keep editing.";
             icon_name = "edit-undo-symbolic";
             add_css_class ("undo-send");
+        } else if (item.is_actively_sending ()) {
+            title = "Sending…";
+            description = "The message is being submitted to the mail server. Editing and deletion are paused.";
+            icon_name = "mail-send-symbolic";
+            add_css_class ("preparing");
         } else if (item.delivery_state == OutboxDeliveryState.SENDING) {
             title = "Delivery could not be confirmed";
             description = "This message may already have been delivered. Check Sent mail before sending another copy.";

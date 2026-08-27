@@ -1,4 +1,13 @@
 namespace Mailficient {
+// Optional narrow capability for a delivery-only engine. Generic test and
+// queue backends may implement only MailEngine; OutboundService then falls
+// back to connect_account(). Production Camel uses this path so a healthy SMTP
+// account is not blocked by an unrelated IMAP connection.
+public interface OutgoingMailEngine : Object {
+    public abstract async void connect_outgoing_account (
+        AccountSettings settings, Cancellable? cancellable = null) throws Error;
+}
+
 public interface MailEngine : Object {
     public signal void sync_batch_ready (MailSyncResult batch);
     public signal void live_mail_changed (string account_id);

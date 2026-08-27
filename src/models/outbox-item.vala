@@ -27,12 +27,19 @@ public class OutboxItem : Object {
     }
 
     public bool requires_resend_confirmation () {
-        return delivery_state == OutboxDeliveryState.SENDING;
+        return delivery_state == OutboxDeliveryState.SENDING &&
+            last_error.strip () != "";
+    }
+
+    public bool is_actively_sending () {
+        return delivery_state == OutboxDeliveryState.SENDING &&
+            last_error.strip () == "";
     }
 
     public bool can_attempt_delivery () {
         return delivery_state != OutboxDeliveryState.ACCEPTED &&
-            delivery_state != OutboxDeliveryState.PREPARING;
+            delivery_state != OutboxDeliveryState.PREPARING &&
+            !is_actively_sending ();
     }
 
     public bool can_undo (int64 now = 0) {

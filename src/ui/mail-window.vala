@@ -41,6 +41,10 @@ public class MailWindow : Adw.ApplicationWindow {
     private FolderService folder_service;
     private OnlineAccountService online_accounts;
     private Adw.ToastOverlay toast_overlay = new Adw.ToastOverlay ();
+    private Gee.HashMap<string, Adw.Toast> undo_send_toasts =
+        new Gee.HashMap<string, Adw.Toast> ();
+    private uint outbox_watch_source;
+    private string last_outbox_revision = "";
     private Gtk.Revealer sync_status_revealer = new Gtk.Revealer ();
     private Gtk.Label sync_status_label = new Gtk.Label ("");
     private Gtk.ProgressBar sync_progress_bar = new Gtk.ProgressBar ();
@@ -285,12 +289,19 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.message_activated.connect ((message) => {
             if (!is_local_draft (message.id)) return;
             try {
+                bool queued = message.id.has_prefix (CachedMailRepository.OUTBOX_PREFIX);
                 string draft_id = message.id.has_prefix (CachedMailRepository.DRAFT_PREFIX) ?
                     message.id.substring (CachedMailRepository.DRAFT_PREFIX.length) :
                     message.id.substring (CachedMailRepository.OUTBOX_PREFIX.length);
                 var saved = cache.load_draft (draft_id);
-                if (saved != null) open_compose (null, ComposeMode.NEW, saved,
-                    message.id.has_prefix (CachedMailRepository.OUTBOX_PREFIX));
+                if (saved != null && queued) {
+                    var item = cache.find_outbox_item (draft_id);
+                    if (item != null && item.can_undo ()) {
+                        show_undo_send (draft_id, saved.account_id, item.undo_until);
+                        return;
+                    }
+                }
+                if (saved != null) open_compose (null, ComposeMode.NEW, saved, queued);
             } catch (Error error) { show_operation_error (error); }
         });
         message_list.no_messages.connect (() => {
@@ -332,8 +343,17 @@ public class MailWindow : Adw.ApplicationWindow {
         task_view.toast_requested.connect ((message) =>
             toast_overlay.add_toast (new Adw.Toast (message)));
         task_view.operation_failed.connect ((error) => show_operation_error (error));
-        outbound_service.delivery_failed.connect ((draft_id, error) =>
-            toast_overlay.add_toast (new Adw.Toast ("Queued message not sent — %s".printf (error.suggestion))));
+        outbound_service.undo_send_available.connect ((draft_id, account_id, undo_until) =>
+            show_undo_send (draft_id, account_id, undo_until));
+        outbound_service.delivered.connect ((draft_id) => {
+            refresh_outbox_ui ();
+            toast_overlay.add_toast (new Adw.Toast ("Message sent"));
+        });
+        outbound_service.delivery_failed.connect ((draft_id, error) => {
+            refresh_outbox_ui ();
+            toast_overlay.add_toast (new Adw.Toast (
+                "Message not sent — %s".printf (error.suggestion)));
+        });
         outbound_service.sent_filing_failed.connect ((draft_id, detail) =>
             toast_overlay.add_toast (new Adw.Toast ("Message sent, but it could not be filed in Sent.")));
         var mailbox_pane = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
@@ -409,6 +429,7 @@ public class MailWindow : Adw.ApplicationWindow {
         mail_overlay.child = toolbar;
         toast_overlay.overflow = Gtk.Overflow.HIDDEN;
         toast_overlay.child = mail_overlay; content = toast_overlay;
+        start_outbox_watch ();
         restore_pane_widths_after_layout ();
         Idle.add (() => {
             select_preferred_mailbox ();
@@ -711,8 +732,56 @@ public class MailWindow : Adw.ApplicationWindow {
     public void prepare_for_shutdown () {
         if (preparing_for_shutdown) return;
         preparing_for_shutdown = true;
+        if (outbox_watch_source != 0) {
+            Source.remove (outbox_watch_source);
+            outbox_watch_source = 0;
+        }
         persist_layout ();
         reader.shutdown ();
+    }
+
+    private void start_outbox_watch () {
+        try { last_outbox_revision = cache.outbox_revision (); }
+        catch (Error error) {
+            warning ("Could not initialize Outbox monitoring: %s", error.message);
+        }
+        outbox_watch_source = Timeout.add_seconds (1, () => {
+            if (preparing_for_shutdown) {
+                outbox_watch_source = 0;
+                return Source.REMOVE;
+            }
+            try {
+                string revision = cache.outbox_revision ();
+                if (revision != last_outbox_revision) {
+                    refresh_outbox_ui (revision);
+                }
+            } catch (Error error) {
+                warning ("Could not refresh Outbox status: %s", error.message);
+            }
+            return Source.CONTINUE;
+        });
+    }
+
+    private void refresh_outbox_ui (string revision = "") {
+        if (revision != "") last_outbox_revision = revision;
+        else {
+            try { last_outbox_revision = cache.outbox_revision (); }
+            catch (Error error) {
+                warning ("Could not update the Outbox revision: %s", error.message);
+            }
+        }
+        sidebar.refresh_counts ();
+        if (message_list.showing_mailbox (
+                CachedMailRepository.LOCAL_OUTBOX_ID))
+            message_list.refresh_preserving_selection ();
+    }
+
+    private void refresh_compose_ui () {
+        refresh_outbox_ui ();
+        if (message_list.showing_mailbox (
+                CachedMailRepository.LOCAL_DRAFTS_ID) ||
+            message_list.showing_mailbox ("drafts"))
+            message_list.refresh_preserving_selection ();
     }
 
     private static bool is_local_draft (string id) {
@@ -2135,7 +2204,79 @@ public class MailWindow : Adw.ApplicationWindow {
         var compose = new ComposeWindow (this, cache, attachment_service,
             received_attachment_service, draft_lifecycle, outbound_service, settings,
             source, mode, saved, queued);
-        compose.draft_changed.connect (() => repository.reload ()); compose.present ();
+        compose.draft_changed.connect (refresh_compose_ui); compose.present ();
+    }
+
+    private void show_undo_send (string draft_id, string account_id, int64 undo_until) {
+        int64 remaining = undo_until - new DateTime.now_utc ().to_unix ();
+        if (remaining <= 0) {
+            outbound_service.outbox_changed (account_id);
+            return;
+        }
+        var existing = undo_send_toasts[draft_id];
+        if (existing != null) existing.dismiss ();
+        var toast = new Adw.Toast ("Sending message");
+        toast.button_label = "Undo Send";
+        toast.priority = Adw.ToastPriority.HIGH;
+        toast.timeout = (uint) int64.min (remaining, 30);
+        undo_send_toasts[draft_id] = toast;
+        uint deadline_source = 0;
+        deadline_source = Timeout.add_seconds ((uint) remaining, () => {
+            deadline_source = 0;
+            if (undo_send_toasts[draft_id] == toast) {
+                undo_send_toasts.unset (draft_id);
+                toast.dismiss ();
+            }
+            return Source.REMOVE;
+        });
+        ulong button_handler = 0;
+        ulong dismissed_handler = 0;
+        button_handler = toast.button_clicked.connect (() => {
+            if (deadline_source != 0) {
+                Source.remove (deadline_source); deadline_source = 0;
+            }
+            toast.dismiss ();
+            cancel_undo_send (draft_id, account_id);
+        });
+        dismissed_handler = toast.dismissed.connect (() => {
+            if (deadline_source != 0) {
+                Source.remove (deadline_source); deadline_source = 0;
+            }
+            if (undo_send_toasts[draft_id] == toast)
+                undo_send_toasts.unset (draft_id);
+            // Both closures capture the toast so they can update this exact
+            // queued action. Disconnect them at the terminal signal to break
+            // that otherwise self-retaining GObject signal cycle.
+            if (button_handler != 0) {
+                toast.disconnect (button_handler); button_handler = 0;
+            }
+            if (dismissed_handler != 0) {
+                ulong current_handler = dismissed_handler;
+                dismissed_handler = 0;
+                toast.disconnect (current_handler);
+            }
+        });
+        toast_overlay.add_toast (toast);
+    }
+
+    private void cancel_undo_send (string draft_id, string account_id) {
+        try {
+            if (!outbound_service.cancel_undo_send (draft_id, account_id)) {
+                outbound_service.outbox_changed (account_id);
+                refresh_outbox_ui ();
+                toast_overlay.add_toast (new Adw.Toast (
+                    "Undo Send is no longer available"));
+                return;
+            }
+            var saved = cache.load_draft (draft_id);
+            var restored = cache.find_outbox_item (draft_id);
+            refresh_compose_ui ();
+            toast_overlay.add_toast (new Adw.Toast ("Send canceled"));
+            if (saved != null)
+                open_compose (null, ComposeMode.NEW, saved, restored != null);
+        } catch (Error error) {
+            show_operation_error (error);
+        }
     }
 
     public void show_preferences (string page_name = "") {
@@ -2197,7 +2338,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.3.1"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.3.2"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

@@ -1,5 +1,18 @@
 using Mailficient;
 
+private class RecordingNotificationBackend : Object, NotificationBackend {
+    public Gee.ArrayList<string> sent = new Gee.ArrayList<string> ();
+    public Gee.ArrayList<string> withdrawn = new Gee.ArrayList<string> ();
+
+    public void send (string id, Notification notification) {
+        sent.add (id);
+    }
+
+    public void withdraw (string id) {
+        withdrawn.add (id);
+    }
+}
+
 private class TestContactSuggestionProvider : Object, ContactSuggestionProvider {
     public async Gee.List<Recipient> suggest (string query, uint limit,
                                               Cancellable? cancellable = null) throws Error {
@@ -54,13 +67,30 @@ private class TestAccountStore : Object, AccountStore {
 
 private class ProvisioningMailEngine : Object, MailEngine {
     public bool fail_candidate;
+    public bool stall_actual_connection;
     public Gee.ArrayList<string> connections = new Gee.ArrayList<string> ();
     public Gee.ArrayList<string> disconnections = new Gee.ArrayList<string> ();
+    private signal void actual_connection_released ();
+
+    public void release_actual_connection () {
+        stall_actual_connection = false;
+        actual_connection_released ();
+    }
+
     public async void connect_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         connections.add (settings.id + "@" + settings.incoming_host);
         if (fail_candidate && settings.id.has_prefix ("candidate-"))
             throw new MailError.CONNECTION ("Candidate server rejected the connection");
+        if (stall_actual_connection && !settings.id.has_prefix ("candidate-")) {
+            ulong handler_id = 0;
+            handler_id = actual_connection_released.connect (() => {
+                disconnect (handler_id);
+                connect_account.callback ();
+            });
+            yield;
+            if (cancellable != null) cancellable.set_error_if_cancelled ();
+        }
     }
     public async void connect_incoming_account (AccountSettings settings, Cancellable? cancellable = null) throws Error {
         yield connect_account (settings, cancellable);
@@ -166,6 +196,9 @@ private class RecordingMailEngine : Object, MailEngine {
     public bool rate_limit_send;
     public bool stall_connect;
     public bool stall_send;
+    public bool disconnect_while_synchronizing;
+    public CacheDatabase? send_observation_cache;
+    public bool saw_owned_sending_state;
     public Error? synchronize_failure;
     public int remote_attachment_calls;
     public int64 last_remote_attachment_maximum;
@@ -214,6 +247,8 @@ private class RecordingMailEngine : Object, MailEngine {
         yield connect_account (settings, cancellable);
     }
     public async void disconnect_account (string account_id, Cancellable? cancellable = null) throws Error {
+        if (active_synchronizations > 0 && account_id == snapshot.account_id)
+            disconnect_while_synchronizing = true;
         disconnect_calls++; lifecycle.add ("disconnect");
     }
     public async MailSyncResult synchronize (string account_id, Gee.Set<string>? cached_message_ids = null,
@@ -259,6 +294,11 @@ private class RecordingMailEngine : Object, MailEngine {
         send_calls++;
         last_sent_subject = draft.subject;
         last_sent_body = draft.body_text;
+        if (send_observation_cache != null) {
+            var observed = send_observation_cache.find_outbox_item (draft.id);
+            saw_owned_sending_state = observed != null &&
+                observed.is_actively_sending ();
+        }
         if (stall_send) {
             if (cancellable == null) {
                 yield;
@@ -348,6 +388,42 @@ private class RecordingMailEngine : Object, MailEngine {
     }
 }
 
+private class SyncAwareCredentialStore : Object, CredentialStore {
+    public Gee.HashMap<string, string> values = new Gee.HashMap<string, string> ();
+    public bool wrote_target_while_synchronizing;
+    private RecordingMailEngine engine;
+    private string target_account_id;
+
+    public SyncAwareCredentialStore (RecordingMailEngine engine,
+                                     string target_account_id) {
+        this.engine = engine;
+        this.target_account_id = target_account_id;
+    }
+
+    public async void store_password (string account_id, string protocol,
+                                      string password,
+                                      Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        if (account_id == target_account_id &&
+            engine.active_synchronizations > 0)
+            wrote_target_while_synchronizing = true;
+        values[account_id + ":" + protocol] = password;
+    }
+
+    public async string? lookup_password (string account_id, string protocol,
+                                          Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        return values[account_id + ":" + protocol];
+    }
+
+    public async void clear_account (string account_id,
+                                     Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        values.unset (account_id + ":imap");
+        values.unset (account_id + ":smtp");
+    }
+}
+
 private class SearchMailEngine : RecordingMailEngine, RemoteMailSearchProvider {
     public int messages_per_mailbox = 150;
     public int search_round;
@@ -431,6 +507,206 @@ private void test_new_mail_summary_is_bounded () {
     summary.merge (continuation);
     assert (summary.total == 13);
     assert (summary.samples.size == NewMailSummary.MAX_SAMPLE_MESSAGES);
+}
+
+private void test_new_mail_notifications_are_reconciled_durably () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-notifications-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "notification-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 3, account.id, "INBOX");
+        var archive = new Mailbox (account.id + ":archive", "Archive",
+            "package-x-generic-symbolic", MailboxRole.ARCHIVE, 0,
+            account.id, "Archive");
+        var initial = new MailSyncResult (account.id);
+        initial.mailboxes.add (inbox); initial.mailboxes.add (archive);
+        for (int index = 1; index <= 3; index++) {
+            initial.messages.add (new Message (
+                "%s:inbox:%d".printf (account.id, index), inbox.id,
+                "Sender", "sender@example.net", account.email,
+                "Persistent notification %d".printf (index), "", "Body", "Now",
+                true, false, false, 1, false, account.id, index.to_string ()));
+        }
+        cache.store_sync_result (initial);
+
+        var first_backend = new RecordingNotificationBackend ();
+        var first_service = new NotificationService.with_backend (first_backend);
+        first_service.attach_cache (cache);
+        foreach (var message in initial.messages)
+            first_service.notify_new_message (message);
+        assert (first_backend.sent.size == 3);
+        assert (cache.list_new_mail_notification_ids ().size == 3);
+
+        // A fresh service instance sees the same journal. Active unread Inbox
+        // notifications survive startup, while later read/move/deletion state
+        // causes their deterministic shell IDs to be withdrawn exactly once.
+        var reopened = new CacheDatabase (path);
+        var restarted_backend = new RecordingNotificationBackend ();
+        var restarted = new NotificationService.with_backend (restarted_backend);
+        restarted.attach_cache (reopened);
+        assert (restarted_backend.withdrawn.size == 0);
+        reopened.set_cached_read (initial.messages[0].id, true);
+        reopened.queue_message_transfer (initial.messages[1].id,
+            MailboxRole.ARCHIVE, false);
+        var removal = new MailSyncResult (account.id);
+        removal.mailboxes.add (new Mailbox (inbox.id, "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 0, account.id, "INBOX"));
+        removal.mailboxes.add (new Mailbox (archive.id, "Archive",
+            "package-x-generic-symbolic", MailboxRole.ARCHIVE, 1,
+            account.id, "Archive"));
+        removal.begin_remote_inventory (inbox.id);
+        removal.record_remote_uid (inbox.id, "1");
+        removal.begin_remote_inventory (archive.id);
+        removal.record_remote_uid (archive.id, "2");
+        reopened.store_sync_result (removal);
+        assert (reopened.find_cached_message (initial.messages[2].id) == null);
+        restarted.reconcile ();
+        foreach (var message in initial.messages)
+            assert (restarted_backend.withdrawn.contains ("message-" + message.id));
+        assert (reopened.list_new_mail_notification_ids ().size == 0);
+
+        // Overflow notifications are account-scoped. They remain while the
+        // adjusted authoritative Inbox total is nonzero, and are withdrawn
+        // after the final Inbox message becomes read.
+        assert (reopened.set_cached_read (initial.messages[0].id, false));
+        var overflow = new NewMailSummary (account.id, account.email);
+        for (int index = 0; index < 6; index++)
+            overflow.add (new Message ("overflow-%d".printf (index), inbox.id,
+                "Sender", "sender@example.net", account.email, "Overflow", "",
+                "Body", "Now", true, false, false, 1, false, account.id,
+                "overflow-%d".printf (index)));
+        restarted.notify_new_mail (overflow);
+        string summary_id = "new-mail-summary-" + account.id;
+        assert (restarted_backend.sent.contains (summary_id));
+        var summary_backend = new RecordingNotificationBackend ();
+        var summary_restart = new NotificationService.with_backend (summary_backend);
+        summary_restart.attach_cache (reopened);
+        assert (!summary_backend.withdrawn.contains (summary_id));
+        assert (reopened.set_cached_read (initial.messages[0].id, true));
+        summary_restart.reconcile ();
+        assert (summary_backend.withdrawn.contains (summary_id));
+        assert (reopened.list_new_mail_notification_ids ().size == 0);
+    } catch (Error error) {
+        GLib.error ("notification reconciliation test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_legacy_new_mail_notifications_are_adopted_once () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-legacy-notifications-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "legacy-notification-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 0, account.id, "INBOX");
+        var snapshot = new MailSyncResult (account.id); snapshot.mailboxes.add (inbox);
+        var read_message = new Message (account.id + ":inbox:1", inbox.id,
+            "Maya", "maya@example.net", account.email, "Already read", "",
+            "Body", "Earlier", false, false, false, 1, false, account.id, "1");
+        snapshot.messages.add (read_message); cache.store_sync_result (snapshot);
+        cache.checkpoint ();
+
+        // Recreate the only relevant difference from a pre-journal database:
+        // it has accounts and cached mail but no adoption marker or journal.
+        Sqlite.Database legacy;
+        assert (Sqlite.Database.open (path, out legacy) == Sqlite.OK);
+        string? detail = null;
+        assert (legacy.exec (
+            "DELETE FROM new_mail_notifications;" +
+            "DELETE FROM preferences WHERE key='notification-journal-v1';",
+            null, out detail) == Sqlite.OK);
+
+        var reopened = new CacheDatabase (path);
+        var adopted = reopened.list_new_mail_notification_ids ();
+        string message_notification = "message-" + read_message.id;
+        string summary_notification = "new-mail-summary-" + account.id;
+        assert (adopted.contains (message_notification));
+        assert (adopted.contains (summary_notification));
+        assert (adopted.size == 2);
+
+        var backend = new RecordingNotificationBackend ();
+        var notifications = new NotificationService.with_backend (backend);
+        notifications.attach_cache (reopened);
+        assert (backend.withdrawn.contains (message_notification));
+        assert (backend.withdrawn.contains (summary_notification));
+        assert (backend.withdrawn.size == 2);
+        assert (reopened.list_new_mail_notification_ids ().size == 0);
+
+        // The marker makes adoption a one-time upgrade action. A later launch
+        // must not recreate notifications that were already reconciled.
+        var launched_again = new CacheDatabase (path);
+        assert (launched_again.list_new_mail_notification_ids ().size == 0);
+    } catch (Error error) {
+        GLib.error ("legacy notification adoption test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_snoozed_unread_is_removed_from_inbox_badges () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-snoozed-badge-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var first = new MailSyncResult ("badge-a");
+        var first_inbox = new Mailbox ("badge-a:inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 250, "badge-a", "INBOX");
+        first.mailboxes.add (first_inbox);
+        var snoozed_unread = new Message ("badge-a:inbox:1", first_inbox.id,
+            "Maya", "maya@example.net", "Alex", "Snoozed unread", "", "Body",
+            "Now", true, false, false, 1, false, "badge-a", "1");
+        var snoozed_read = new Message ("badge-a:inbox:2", first_inbox.id,
+            "Maya", "maya@example.net", "Alex", "Snoozed read", "", "Body",
+            "Now", false, false, false, 1, false, "badge-a", "2");
+        first.messages.add (snoozed_unread); first.messages.add (snoozed_read);
+        first.messages.add (new Message ("badge-a:inbox:3", first_inbox.id,
+            "Maya", "maya@example.net", "Alex", "Visible unread", "", "Body",
+            "Now", true, false, false, 1, false, "badge-a", "3"));
+        cache.store_sync_result (first);
+        int64 tomorrow = new DateTime.now_utc ().add_days (1).to_unix ();
+        cache.snooze_message (snoozed_unread.id, tomorrow);
+        cache.snooze_message (snoozed_read.id, tomorrow);
+
+        var second = new MailSyncResult ("badge-b");
+        var second_inbox = new Mailbox ("badge-b:inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 7, "badge-b", "INBOX");
+        second.mailboxes.add (second_inbox);
+        var second_snooze = new Message ("badge-b:inbox:1", second_inbox.id,
+            "Noah", "noah@example.net", "Alex", "Another snooze", "", "Body",
+            "Now", true, false, false, 1, false, "badge-b", "1");
+        second.messages.add (second_snooze); cache.store_sync_result (second);
+        cache.snooze_message (second_snooze.id, tomorrow);
+
+        // 250 and 7 are authoritative provider totals. Only the two known,
+        // cached, unread snoozes are subtracted; the uncached remainder stays.
+        assert (cache.inbox_unread_count (first_inbox.id) == 249);
+        assert (cache.inbox_unread_count (second_inbox.id) == 6);
+        assert (cache.unified_unread_count () == 255);
+        bool saw_first = false; bool saw_second = false;
+        foreach (var mailbox in cache.list_cached_mailboxes ()) {
+            if (mailbox.id == first_inbox.id) {
+                saw_first = true; assert (mailbox.unread_count == 249);
+            } else if (mailbox.id == second_inbox.id) {
+                saw_second = true; assert (mailbox.unread_count == 6);
+            }
+        }
+        assert (saw_first && saw_second);
+        cache.unsnooze_message (snoozed_unread.id);
+        assert (cache.unified_unread_count () == 256);
+    } catch (Error error) {
+        GLib.error ("snoozed Inbox badge test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
 }
 
 private void test_live_mail_coordinator_debounces_and_cancels () {
@@ -1121,6 +1397,11 @@ private void test_draft_discard_is_database_first () {
         string source_path = Path.build_filename (root, "source.txt");
         assert (FileUtils.set_contents (source_path, "private draft attachment"));
         var cache = new CacheDatabase (database_path);
+        var account = AccountSettings.for_email ("Discard", "discard@example.net");
+        account.id = "discard-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
         var attachments = new AttachmentService (private_dir);
         Attachment? imported = null; Error? import_error = null; var loop = new MainLoop ();
         attachments.import_file.begin (File.new_for_path (source_path), null, (object, result) => {
@@ -1240,6 +1521,103 @@ private void test_conversation_builder () {
     assert (standalone.size == 1); assert (standalone[0].id == "same-sender");
     var reused_standalone = new ConversationBuilder ().build (candidates, reused_message_id);
     assert (reused_standalone.size == 1); assert (reused_standalone[0].id == "reused-id");
+}
+
+private void test_cached_conversation_excludes_discarded_messages () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-conversation-folders-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "conversation-folders";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var inbox = new Mailbox (account.id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 1, account.id, "INBOX");
+        var sent = new Mailbox (account.id + ":sent", "Sent",
+            "mail-sent-symbolic", MailboxRole.SENT, 2, account.id, "Sent");
+        var trash = new Mailbox (account.id + ":trash", "Trash",
+            "user-trash-symbolic", MailboxRole.TRASH, 0, account.id, "Trash");
+        var archive = new Mailbox (account.id + ":all", "All Mail",
+            "package-x-generic-symbolic", MailboxRole.ARCHIVE, 1,
+            account.id, "[Gmail]/All Mail");
+        var snapshot = new MailSyncResult (account.id);
+        snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (sent);
+        snapshot.mailboxes.add (trash); snapshot.mailboxes.add (archive);
+
+        var root = new Message (account.id + ":sent:1", sent.id, "Alex",
+            account.email, "Maya <maya@example.net>", "Project", "", "Root",
+            "Monday", false, false, false, 1, false, account.id, "1",
+            "<root@example.net>", "", "", 100);
+        var inbox_reply = new Message (account.id + ":inbox:2", inbox.id,
+            "Maya", "maya@example.net", account.email, "Re: Project", "",
+            "Reply", "Tuesday", false, false, false, 1, false, account.id,
+            "2", "<reply@example.net>", "<root@example.net>",
+            "<root@example.net>", 200);
+        // This reply only names the Inbox reply. Once that intermediate row is
+        // moved to Trash, it must keep the two Sent messages connected without
+        // appearing in the normal conversation itself.
+        var final_reply = new Message (account.id + ":sent:3", sent.id, "Alex",
+            account.email, "Maya <maya@example.net>", "Re: Project", "",
+            "Final", "Wednesday", false, false, false, 1, false, account.id,
+            "3", "<final@example.net>", "<reply@example.net>",
+            "<reply@example.net>", 300);
+        // Gmail can expose the same logical message in Sent and All Mail. The
+        // Archive copy must not duplicate the Sent row inside a conversation.
+        var archive_copy = new Message (account.id + ":all:101", archive.id,
+            "Alex", account.email, "Maya <maya@example.net>", "Project", "",
+            "Root", "Monday", false, false, false, 1, false, account.id,
+            "101", "<root@example.net>", "", "", 100);
+        snapshot.messages.add (root); snapshot.messages.add (inbox_reply);
+        snapshot.messages.add (final_reply); snapshot.messages.add (archive_copy);
+        cache.store_sync_result (snapshot);
+
+        var normal = cache.conversation_for (
+            cache.find_cached_message (final_reply.id));
+        assert (normal.size == 3);
+        bool saw_root = false; bool saw_reply = false; bool saw_final = false;
+        foreach (var message in normal) {
+            if (message.id == root.id) saw_root = true;
+            if (message.id == inbox_reply.id) saw_reply = true;
+            if (message.id == final_reply.id) saw_final = true;
+            assert (message.id != archive_copy.id);
+        }
+        assert (saw_root && saw_reply && saw_final);
+
+        cache.queue_message_transfer (inbox_reply.id, MailboxRole.TRASH, false);
+        var sent_context = cache.conversation_for (
+            cache.find_cached_message (final_reply.id));
+        assert (sent_context.size == 2);
+        saw_root = false; saw_final = false;
+        foreach (var message in sent_context) {
+            if (message.id == root.id) saw_root = true;
+            if (message.id == final_reply.id) saw_final = true;
+            assert (message.id != inbox_reply.id);
+            assert (message.id != archive_copy.id);
+        }
+        assert (saw_root && saw_final);
+
+        var trashed = cache.find_cached_message (inbox_reply.id);
+        assert (trashed != null && trashed.mailbox_id == trash.id);
+        var trash_context = cache.conversation_for (trashed);
+        assert (trash_context.size == 1);
+        assert (trash_context[0].id == inbox_reply.id);
+
+        cache.undo_queued_transfer (inbox_reply.id, inbox.id);
+        var restored = cache.conversation_for (
+            cache.find_cached_message (final_reply.id));
+        assert (restored.size == 3);
+        saw_reply = false;
+        foreach (var message in restored) {
+            if (message.id == inbox_reply.id) saw_reply = true;
+            assert (message.id != archive_copy.id);
+        }
+        assert (saw_reply);
+    } catch (Error error) {
+        GLib.error ("conversation folder filtering test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
 }
 
 private void test_account_validation () {
@@ -1489,6 +1867,11 @@ private void test_local_data_migration () {
         assert (FileUtils.set_contents (draft_path, "attachment"));
         assert (FileUtils.set_contents (received_path, "%PDF-1.4 migrated"));
         var legacy_cache = new CacheDatabase (Path.build_filename (legacy, "mail.db"));
+        var account = AccountSettings.for_email ("Legacy", "legacy@example.net");
+        account.id = "legacy-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        legacy_cache.save_account (account);
         var draft = new Draft ("legacy-account"); draft.to = "maya@example.net";
         draft.body_text = "Migrated draft";
         draft.add_attachment (new Attachment ("legacy-draft", draft_path,
@@ -1587,6 +1970,8 @@ private void test_settings_store () {
         settings.full_html_formatting = false;
         assert (settings.spellcheck_enabled);
         settings.spellcheck_enabled = false;
+        assert (settings.undo_send_enabled);
+        settings.undo_send_enabled = false;
         assert (settings.undo_send_seconds == 10);
         settings.undo_send_seconds = 24;
         assert (settings.appearance == "system");
@@ -1609,6 +1994,7 @@ private void test_settings_store () {
         assert (reopened.always_show_images);
         assert (!reopened.full_html_formatting);
         assert (!reopened.spellcheck_enabled);
+        assert (!reopened.undo_send_enabled);
         assert (reopened.undo_send_seconds == 24);
         assert (reopened.appearance == "dark");
         reopened.save_window_state (1920, 1080, true);
@@ -1764,7 +2150,13 @@ private void test_cache_maintenance () {
     try {
         assert (DirUtils.create_with_parents (managed, 0700) == 0);
         FileUtils.set_contents (kept, "keep"); FileUtils.set_contents (orphan, "remove"); FileUtils.set_contents (outside, "outside");
-        var cache = new CacheDatabase (database_path); var draft = new Draft ("account-1");
+        var cache = new CacheDatabase (database_path);
+        var account = AccountSettings.for_email ("Maintenance", "maintenance@example.net");
+        account.id = "account-1";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var draft = new Draft ("account-1");
         draft.add_attachment (new Attachment ("kept", kept, "kept.txt", 4, "text/plain"));
         draft.add_attachment (new Attachment ("missing", missing, "missing.txt", 7, "text/plain")); cache.save_draft (draft);
         var service = new CacheMaintenanceService (cache, { managed }); var result = service.run ();
@@ -1779,7 +2171,13 @@ private void test_cache_maintenance () {
 private void test_cache_drafts () {
     string path = Path.build_filename (Environment.get_tmp_dir (), "mailficient-test-%s.sqlite".printf (Uuid.string_random ()));
     try {
-        var cache = new CacheDatabase (path); var draft = new Draft ("account-1");
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Draft", "draft@example.net");
+        account.id = "account-1";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var draft = new Draft ("account-1");
         draft.to = "maya@example.net"; draft.subject = "Hello"; draft.body_text = "Safe after restart";
         draft.body_html = "<div><strong>Safe</strong> after restart</div>";
         draft.body_format = "[{\"tag\":\"mailficient-bold\",\"start\":0,\"end\":4}]";
@@ -1790,8 +2188,9 @@ private void test_cache_drafts () {
         cache.save_draft (draft); assert (!draft.dirty); assert (cache.draft_count () == 1);
         assert (cache.saved_draft_count () == 1); assert (cache.list_saved_drafts ().size == 1);
         var repository = new CachedMailRepository (cache, new DemoMailRepository (), true);
-        assert (repository.list_messages ("drafts").size == 1);
-        assert (repository.list_messages ("drafts")[0].id.has_prefix (CachedMailRepository.DRAFT_PREFIX));
+        assert (repository.list_messages (CachedMailRepository.LOCAL_DRAFTS_ID).size == 1);
+        assert (repository.list_messages (CachedMailRepository.LOCAL_DRAFTS_ID)[0].id.has_prefix (
+            CachedMailRepository.DRAFT_PREFIX));
         var loaded = cache.load_draft (draft.id); assert (loaded != null); assert (loaded.subject == "Hello");
         assert (loaded.body_text == "Safe after restart"); assert (loaded.attachments.size == 1);
         assert (loaded.body_html.contains ("<strong>Safe</strong>")); assert (loaded.body_format.contains ("mailficient-bold"));
@@ -1851,9 +2250,30 @@ private void test_undo_send_outbox_window () {
             new AttachmentService (Path.build_filename (root, "attachments")));
         var draft = new Draft ("demo-account"); draft.to = "maya@example.net";
         draft.body_text = "This exact version waits behind Undo Send";
+        int undo_signal_count = 0; string signaled_draft = "";
+        string signaled_account = ""; int64 signaled_deadline = 0;
+        bool signal_saw_durable_row = false;
+        service.undo_send_available.connect ((draft_id, account_id, undo_until) => {
+            undo_signal_count++; signaled_draft = draft_id;
+            signaled_account = account_id; signaled_deadline = undo_until;
+            try {
+                var durable = cache.find_outbox_item (draft_id);
+                signal_saw_durable_row = durable != null &&
+                    durable.undo_until == undo_until && durable.can_undo ();
+            } catch (Error error) {
+                signal_saw_durable_row = false;
+            }
+        });
         int64 before = new DateTime.now_utc ().to_unix ();
-        int64 deadline = service.defer_for_undo (draft, 1);
+        var successful_progress = new OutboundSendProgress ();
+        int64 deadline = service.defer_for_undo (draft, 1, false, "",
+            successful_progress);
         assert (deadline >= before + 5); assert (deadline <= before + 6);
+        assert (successful_progress.stage ==
+            OutboundSendStage.OUTBOX_PUBLISHED);
+        assert (undo_signal_count == 1); assert (signaled_draft == draft.id);
+        assert (signaled_account == draft.account_id);
+        assert (signaled_deadline == deadline); assert (signal_saw_durable_row);
         var item = cache.find_outbox_item (draft.id); assert (item != null);
         assert (item.can_undo (before)); assert (item.undo_until == deadline);
         assert (item.next_attempt_at == deadline);
@@ -1879,9 +2299,591 @@ private void test_undo_send_outbox_window () {
         assert (restored.attempts == prior_attempts);
         assert (restored.last_error == "SMTP reply was lost");
         assert (!service.cancel_undo_send (draft.id, draft.account_id));
+
+        // Preflight failures must be distinguishable from an absent row after
+        // SMTP. Otherwise ComposeWindow can disable the only in-memory copy as
+        // "Already Sent" even though no Draft or Outbox write was attempted.
+        var removed_account = new Draft ("removed-account");
+        removed_account.to = "maya@example.net";
+        removed_account.body_text = "Keep this in memory";
+        var account_progress = new OutboundSendProgress ();
+        Error? account_failure = null;
+        try {
+            service.defer_for_undo (removed_account, 10, false, "",
+                account_progress);
+        } catch (Error error) { account_failure = error; }
+        assert (account_failure is MailError.INVALID_ACCOUNT);
+        assert (account_progress.definitely_pre_publication ());
+        assert (!account_progress.outbox_was_or_may_have_been_published ());
+        assert (cache.find_outbox_item (removed_account.id) == null);
+        assert (cache.load_draft (removed_account.id) == null);
+
+        var missing_attachment = new Draft ("demo-account");
+        missing_attachment.to = "maya@example.net";
+        missing_attachment.body_text = "Do not lock this editor";
+        missing_attachment.add_attachment (new Attachment ("vanished",
+            Path.build_filename (root, "attachments", "vanished.txt"),
+            "vanished.txt", 12, "text/plain"));
+        var attachment_progress = new OutboundSendProgress ();
+        Error? attachment_failure = null;
+        try {
+            service.defer_for_undo (missing_attachment, 10, false, "",
+                attachment_progress);
+        } catch (Error error) { attachment_failure = error; }
+        assert (attachment_failure is MailError.ATTACHMENT);
+        assert (attachment_progress.definitely_pre_publication ());
+        assert (!attachment_progress.outbox_was_or_may_have_been_published ());
+        assert (cache.find_outbox_item (missing_attachment.id) == null);
+        assert (cache.load_draft (missing_attachment.id) == null);
     } catch (Error error) {
         GLib.error ("Undo Send test failed: %s", error.message);
     }
+}
+
+private void test_foreground_delivery_owns_first_attempt () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-foreground-send-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "foreground-send"; account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var engine = new RecordingMailEngine (account.id);
+        engine.send_observation_cache = cache;
+        var service = new OutboundService (cache, engine,
+            new AttachmentService (Path.build_filename (root, "attachments")));
+        int background_activations = 0;
+        service.background_delivery_needed.connect ((account_id) => {
+            assert (account_id == account.id); background_activations++;
+        });
+        var draft = new Draft (account.id); draft.to = "maya@example.net";
+        draft.subject = "One foreground attempt"; draft.body_text = "Send now";
+        var disposition = SendDisposition.QUEUED; Error? failure = null;
+        var loop = new MainLoop ();
+        service.deliver.begin (draft, null, (object, result) => {
+            try { disposition = service.deliver.end (result); }
+            catch (Error error) { failure = error; }
+            loop.quit ();
+        });
+        loop.run ();
+        assert (failure == null); assert (disposition == SendDisposition.SENT);
+        assert (engine.send_calls == 1); assert (engine.saw_owned_sending_state);
+        // A successful foreground Send must not wake a competing worker before
+        // it owns and completes the first attempt.
+        assert (background_activations == 0);
+        assert (cache.find_outbox_item (draft.id) == null);
+    } catch (Error error) {
+        GLib.error ("foreground delivery ownership test failed: %s", error.message);
+    }
+}
+
+private void test_waiting_foreground_draft_is_durable () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-waiting-send-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "waiting-send"; account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net"; cache.save_account (account);
+        var engine = new RecordingMailEngine (account.id); engine.stall_send = true;
+        var service = new OutboundService (cache, engine,
+            new AttachmentService (Path.build_filename (root, "attachments")), 5, 5);
+
+        var first = new Draft (account.id); first.to = "first@example.net";
+        first.subject = "First submission"; first.body_text = "Hold the SMTP lane";
+        var second = new Draft (account.id); second.to = "Maya <maya@example.net>";
+        second.cc = "Noah <noah@example.org>";
+        second.bcc = "audit@example.com"; second.subject = "Exact frozen copy";
+        second.body_text = "This body must survive while waiting";
+        second.body_html = "<p>This body must <strong>survive</strong> while waiting</p>";
+        second.body_format = "[{\"tag\":\"mailficient-bold\",\"start\":15,\"end\":22}]";
+        second.in_reply_to = "<parent@example.net>";
+        second.references = "<root@example.net> <parent@example.net>";
+        second.security_protocol = MessageSecurityProtocol.OPENPGP;
+        second.sign_message = true; second.security_identity = "openpgp-alex";
+        second.touch (); int64 frozen_revision = second.revision;
+
+        var first_cancel = new Cancellable (); var second_cancel = new Cancellable ();
+        Error? first_failure = null; Error? second_failure = null;
+        int completed = 0; bool timed_out = false; var loop = new MainLoop ();
+        service.deliver.begin (first, first_cancel, (object, result) => {
+            try { service.deliver.end (result); }
+            catch (Error error) { first_failure = error; }
+            completed++; if (completed == 2) loop.quit ();
+        });
+        // Async entry is dispatched by the main context. Wait until the first
+        // call reaches the test engine and therefore owns the account lane.
+        var first_started_loop = new MainLoop (); bool first_start_timed_out = false;
+        uint first_start_watchdog = Timeout.add_seconds (2, () => {
+            first_start_timed_out = true; first_started_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (engine.send_calls != 1) return Source.CONTINUE;
+            first_started_loop.quit (); return Source.REMOVE;
+        });
+        first_started_loop.run ();
+        if (!first_start_timed_out) Source.remove (first_start_watchdog);
+        assert (!first_start_timed_out); assert (engine.send_calls == 1);
+        var second_progress = new OutboundSendProgress ();
+        service.deliver_from_editor.begin (second, "", second_progress,
+            second_cancel, (object, result) => {
+            try { service.deliver_from_editor.end (result); }
+            catch (Error error) { second_failure = error; }
+            completed++; if (completed == 2) loop.quit ();
+        });
+
+        Draft? durable = null; var second_saved_loop = new MainLoop ();
+        bool second_save_timed_out = false;
+        uint second_save_watchdog = Timeout.add_seconds (2, () => {
+            second_save_timed_out = true; second_saved_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            try { durable = cache.load_draft (second.id); }
+            catch (Error error) {
+                second_save_timed_out = true; second_saved_loop.quit ();
+                return Source.REMOVE;
+            }
+            if (durable == null) return Source.CONTINUE;
+            second_saved_loop.quit (); return Source.REMOVE;
+        });
+        second_saved_loop.run ();
+        if (!second_save_timed_out) Source.remove (second_save_watchdog);
+        assert (!second_save_timed_out); assert (engine.send_calls == 1);
+
+        // deliver() must commit the exact frozen editor snapshot before its
+        // asynchronous wait for the first submission to release the lane.
+        assert (durable != null);
+        assert (durable.to == second.to); assert (durable.cc == second.cc);
+        assert (durable.bcc == second.bcc); assert (durable.subject == second.subject);
+        assert (durable.body_text == second.body_text);
+        assert (durable.body_html == second.body_html);
+        assert (durable.body_format == second.body_format);
+        assert (durable.in_reply_to == second.in_reply_to);
+        assert (durable.references == second.references);
+        assert (durable.security_protocol == MessageSecurityProtocol.OPENPGP);
+        assert (durable.sign_message); assert (durable.security_identity == "openpgp-alex");
+        assert (durable.revision == frozen_revision); assert (!second.dirty);
+        assert (cache.find_outbox_item (second.id) == null);
+
+        // Cancel the waiter first; it cannot finish until cancellation of the
+        // active SMTP operation releases the lane.
+        second_cancel.cancel (); first_cancel.cancel ();
+        uint watchdog = Timeout.add_seconds (5, () => {
+            timed_out = true; loop.quit (); return Source.REMOVE;
+        });
+        loop.run ();
+        if (!timed_out) Source.remove (watchdog);
+        assert (!timed_out); assert (completed == 2);
+        assert (first_failure is MailError.DELIVERY_UNCERTAIN ||
+            first_failure is IOError.CANCELLED);
+        assert (second_failure is IOError.CANCELLED);
+        assert (second_progress.stage == OutboundSendStage.DRAFT_PRESERVED);
+        var first_item = cache.find_outbox_item (first.id); assert (first_item != null);
+        assert (first_item.requires_resend_confirmation ());
+        assert (cache.find_outbox_item (second.id) == null);
+        durable = cache.load_draft (second.id); assert (durable != null);
+        assert (durable.body_text == second.body_text);
+
+        // A successful retry proves neither cancellation leaked lane ownership.
+        engine.stall_send = false; Error? retry_failure = null;
+        var retry_disposition = SendDisposition.QUEUED; var retry_loop = new MainLoop ();
+        service.deliver.begin (second, null, (object, result) => {
+            try { retry_disposition = service.deliver.end (result); }
+            catch (Error error) { retry_failure = error; }
+            retry_loop.quit ();
+        });
+        retry_loop.run ();
+        assert (retry_failure == null);
+        assert (retry_disposition == SendDisposition.SENT);
+        assert (engine.send_calls == 2);
+        assert (cache.find_outbox_item (second.id) == null);
+        assert (cache.load_draft (second.id) == null);
+    } catch (Error error) {
+        GLib.error ("waiting foreground draft test failed: %s", error.message);
+    }
+}
+
+private void test_competing_worker_completes_waiting_existing_queue () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-existing-queue-race-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        string database_path = Path.build_filename (root, "mail.sqlite");
+        string attachment_path = Path.build_filename (root, "attachments");
+        var main_cache = new CacheDatabase (database_path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "existing-queue-race";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        main_cache.save_account (account);
+        var main_engine = new RecordingMailEngine (account.id);
+        main_engine.stall_send = true;
+        var main_service = new OutboundService (main_cache, main_engine,
+            new AttachmentService (attachment_path), 5, 5);
+
+        var blocker = new Draft (account.id); blocker.to = "first@example.net";
+        blocker.subject = "Lane blocker"; blocker.body_text = "Hold this account lane";
+        var blocker_cancel = new Cancellable (); Error? blocker_failure = null;
+        Error? target_failure = null; var target_result = SendDisposition.QUEUED;
+        int main_completions = 0; var completion_loop = new MainLoop ();
+        main_service.deliver.begin (blocker, blocker_cancel, (object, result) => {
+            try { main_service.deliver.end (result); }
+            catch (Error error) { blocker_failure = error; }
+            main_completions++; if (main_completions == 2) completion_loop.quit ();
+        });
+
+        var blocker_started_loop = new MainLoop (); bool blocker_start_timeout = false;
+        uint blocker_watchdog = Timeout.add_seconds (2, () => {
+            blocker_start_timeout = true; blocker_started_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (main_engine.send_calls != 1) return Source.CONTINUE;
+            blocker_started_loop.quit (); return Source.REMOVE;
+        });
+        blocker_started_loop.run ();
+        if (!blocker_start_timeout) Source.remove (blocker_watchdog);
+        assert (!blocker_start_timeout); assert (main_engine.send_calls == 1);
+
+        // This is an existing due Outbox retry, not a new composer send. Edit
+        // its frozen copy before invoking foreground delivery so the poll below
+        // also proves that call reached its lane wait before the worker races it.
+        var target = new Draft (account.id); target.to = "maya@example.net";
+        target.subject = "Existing queued target";
+        target.body_text = "Initial queued copy";
+        main_cache.queue_for_sending (target);
+        target.body_text = "Exact foreground retry copy"; target.touch ();
+        main_service.deliver.begin (target, null, (object, result) => {
+            try { target_result = main_service.deliver.end (result); }
+            catch (Error error) { target_failure = error; }
+            main_completions++; if (main_completions == 2) completion_loop.quit ();
+        });
+
+        var target_waiting_loop = new MainLoop (); bool target_wait_timeout = false;
+        uint target_watchdog = Timeout.add_seconds (2, () => {
+            target_wait_timeout = true; target_waiting_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            try {
+                var frozen = main_cache.load_draft (target.id);
+                if (frozen == null || frozen.body_text != target.body_text)
+                    return Source.CONTINUE;
+            } catch (Error error) {
+                target_wait_timeout = true; target_waiting_loop.quit ();
+                return Source.REMOVE;
+            }
+            target_waiting_loop.quit (); return Source.REMOVE;
+        });
+        target_waiting_loop.run ();
+        if (!target_wait_timeout) Source.remove (target_watchdog);
+        assert (!target_wait_timeout); assert (main_completions == 0);
+        assert (main_engine.send_calls == 1);
+        assert (main_cache.find_outbox_item (target.id) != null);
+
+        // A separate cache connection models the resident sender process. Its
+        // service owns an independent in-memory lane and may claim the already
+        // due target while the foreground service is blocked locally.
+        var worker_cache = new CacheDatabase (database_path);
+        var worker_engine = new RecordingMailEngine (account.id);
+        var worker_service = new OutboundService (worker_cache, worker_engine,
+            new AttachmentService (attachment_path), 5, 5);
+        Error? worker_failure = null; var worker_loop = new MainLoop ();
+        worker_service.retry_pending.begin (account.id, true, null, (object, result) => {
+            try { worker_service.retry_pending.end (result); }
+            catch (Error error) { worker_failure = error; }
+            worker_loop.quit ();
+        });
+        worker_loop.run ();
+        assert (worker_failure == null); assert (worker_engine.send_calls == 1);
+        assert (worker_engine.last_sent_subject == target.subject);
+        assert (worker_engine.last_sent_body == target.body_text);
+        assert (worker_cache.find_outbox_item (target.id) == null);
+        assert (worker_cache.load_draft (target.id) == null);
+        assert (main_cache.find_outbox_item (target.id) == null);
+        assert (main_cache.load_draft (target.id) == null);
+        assert (main_completions == 0);
+
+        // Releasing the local lane lets foreground delivery observe the
+        // competing completion. It must report SENT from that durable absence,
+        // without rebuilding the row or transmitting a second target copy.
+        blocker_cancel.cancel (); bool completion_timeout = false;
+        uint completion_watchdog = Timeout.add_seconds (5, () => {
+            completion_timeout = true; completion_loop.quit ();
+            return Source.REMOVE;
+        });
+        completion_loop.run ();
+        if (!completion_timeout) Source.remove (completion_watchdog);
+        assert (!completion_timeout); assert (main_completions == 2);
+        assert (blocker_failure != null); assert (target_failure == null);
+        assert (target_result == SendDisposition.SENT);
+        assert (main_engine.send_calls == 1);
+        assert (main_engine.last_sent_subject == blocker.subject);
+        assert (worker_engine.send_calls == 1);
+        assert (main_cache.find_outbox_item (target.id) == null);
+        assert (main_cache.load_draft (target.id) == null);
+        var blocker_item = main_cache.find_outbox_item (blocker.id);
+        assert (blocker_item != null && blocker_item.requires_resend_confirmation ());
+    } catch (Error error) {
+        GLib.error ("existing queued cross-process race test failed: %s", error.message);
+    }
+}
+
+private void test_stale_send_owner_cannot_mutate_new_attempt () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-send-generation-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Generation", "generation@example.net");
+        account.id = "generation-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var draft = new Draft ("generation-account");
+        draft.to = "maya@example.net"; draft.body_text = "One logical delivery";
+        cache.queue_for_sending (draft);
+        int64 now = new DateTime.now_utc ().to_unix ();
+        string old_owner = "expired-smtp-owner";
+        assert (cache.claim_queued_send (draft.id, old_owner, now - 1, false));
+        cache.mark_send_started (draft.id, old_owner, now - 1);
+
+        // Recover the abandoned active attempt, then explicitly authorize a
+        // resend and give that newer attempt a distinct owner generation.
+        cache.recover_expired_outbox_claims ();
+        var abandoned = cache.find_outbox_item (draft.id); assert (abandoned != null);
+        assert (abandoned.requires_resend_confirmation ());
+        cache.queue_for_sending (draft, 0, true);
+        string new_owner = "new-smtp-owner";
+        assert (cache.claim_queued_send (draft.id, new_owner, now + 120, false));
+        cache.mark_send_started (draft.id, new_owner, now + 120);
+        var newer = cache.find_outbox_item (draft.id); assert (newer != null);
+        assert (newer.is_actively_sending ());
+        string newer_revision = cache.outbox_revision ();
+
+        // Late callbacks from the expired SMTP operation are compare-and-swap
+        // misses. None may back off, reject, mark uncertain, accept, or enable
+        // cleanup of the newer active row.
+        assert (!cache.record_send_failure (draft.id,
+            "Late failure from expired attempt", old_owner));
+        assert (!cache.record_send_uncertain (draft.id,
+            "Late uncertainty from expired attempt", old_owner));
+        assert (!cache.record_send_rejection (draft.id,
+            "550 late rejection from expired attempt", old_owner));
+        assert (!cache.mark_send_accepted (draft.id, old_owner));
+        assert (cache.outbox_revision () == newer_revision);
+        newer = cache.find_outbox_item (draft.id); assert (newer != null);
+        assert (newer.is_actively_sending ()); assert (newer.last_error == "");
+        assert (cache.load_draft (draft.id) != null);
+
+        // Only the current generation can publish acceptance and authorize
+        // final cleanup of the durable draft and Outbox row.
+        assert (cache.mark_send_accepted (draft.id, new_owner));
+        var accepted = cache.find_outbox_item (draft.id); assert (accepted != null);
+        assert (accepted.delivery_state == OutboxDeliveryState.ACCEPTED);
+        cache.complete_send (draft.id);
+        assert (cache.find_outbox_item (draft.id) == null);
+        assert (cache.load_draft (draft.id) == null);
+    } catch (Error error) {
+        GLib.error ("send attempt generation test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_outbound_account_fence_blocks_other_process () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-outbound-fence-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var maintainer = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "fenced-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        maintainer.save_account (account);
+        var draft = new Draft (account.id);
+        draft.to = "maya@example.net";
+        draft.subject = "Do not claim across settings maintenance";
+        draft.body_text = "One coherent account version";
+        maintainer.queue_for_sending (draft);
+
+        // This second SQLite connection models BackgroundSendRunner. Fence
+        // ownership and the delivery claim are both durable/CAS operations,
+        // not assumptions shared through one OutboundService instance.
+        var worker = new CacheDatabase (path);
+        int64 now = new DateTime.now_utc ().to_unix ();
+        assert (maintainer.acquire_outbound_account_fence (
+            account.id, "settings-owner", now + 60));
+        assert (!worker.acquire_outbound_account_fence (
+            account.id, "competing-owner", now + 60));
+        assert (!worker.renew_outbound_account_fence (
+            account.id, "competing-owner", now + 120));
+        assert (!worker.claim_queued_send (
+            draft.id, "background-worker", now + 120, false));
+
+        // A stale/wrong owner cannot clear the boundary either.
+        worker.release_outbound_account_fence (
+            account.id, "competing-owner");
+        assert (!worker.claim_queued_send (
+            draft.id, "background-worker", now + 120, false));
+        assert (maintainer.renew_outbound_account_fence (
+            account.id, "settings-owner", now + 120));
+
+        maintainer.release_outbound_account_fence (
+            account.id, "settings-owner");
+        assert (worker.claim_queued_send (
+            draft.id, "background-worker", now + 120, false));
+    } catch (Error error) {
+        GLib.error ("cross-process outbound account fence test failed: %s",
+            error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_outbox_editor_ownership_is_durable () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-outbox-editor-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var owner_cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Alex", "alex@example.net");
+        account.id = "editor-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        owner_cache.save_account (account);
+        var draft = new Draft (account.id);
+        draft.to = "maya@example.net";
+        draft.subject = "One editor at a time";
+        draft.body_text = "Original body";
+        owner_cache.queue_for_sending (draft);
+
+        var other_cache = new CacheDatabase (path);
+        string first_owner = "composer-a";
+        string second_owner = "composer-b";
+        int64 now = new DateTime.now_utc ().to_unix ();
+        assert (owner_cache.acquire_outbox_editor (
+            draft.id, first_owner, now + 120));
+        assert (!other_cache.acquire_outbox_editor (
+            draft.id, second_owner, now + 120));
+
+        var blocked = other_cache.load_draft (draft.id); assert (blocked != null);
+        blocked.body_text = "Must not cross the editor lease"; blocked.touch ();
+        bool save_blocked = false;
+        try { other_cache.save_draft (blocked); }
+        catch (MailError error) {
+            save_blocked = true; assert (error is MailError.SEND_FAILED);
+        }
+        assert (save_blocked);
+        bool queue_blocked = false;
+        try { other_cache.queue_for_sending (blocked, now + 3600); }
+        catch (MailError error) {
+            queue_blocked = true; assert (error is MailError.SEND_FAILED);
+        }
+        assert (queue_blocked);
+        bool delete_blocked = false;
+        try { other_cache.delete_draft (draft.id); }
+        catch (MailError error) {
+            delete_blocked = true; assert (error is MailError.SEND_FAILED);
+        }
+        assert (delete_blocked);
+        assert (!other_cache.claim_queued_send (
+            draft.id, "foreign-sender", now + 120, false));
+        assert (other_cache.load_draft (draft.id).body_text == "Original body");
+        assert (other_cache.find_outbox_item (draft.id).next_attempt_at == 0);
+
+        var owner_draft = owner_cache.load_draft (draft.id);
+        assert (owner_draft != null);
+        owner_draft.body_text = "Saved by the durable owner";
+        owner_draft.touch ();
+        owner_cache.save_draft (owner_draft, first_owner);
+        assert (other_cache.load_draft (draft.id).body_text ==
+            owner_draft.body_text);
+
+        owner_cache.release_outbox_editor (draft.id, first_owner);
+        assert (other_cache.acquire_outbox_editor (
+            draft.id, second_owner, now + 120));
+        other_cache.release_outbox_editor (draft.id, second_owner);
+
+        int64 short_expiry = new DateTime.now_utc ().to_unix () + 1;
+        assert (owner_cache.acquire_outbox_editor (
+            draft.id, first_owner, short_expiry));
+        while (new DateTime.now_utc ().to_unix () < short_expiry)
+            Thread.usleep (10 * 1000);
+        int64 send_until = new DateTime.now_utc ().to_unix () + 120;
+        assert (other_cache.acquire_outbox_editor (
+            draft.id, second_owner, send_until));
+
+        other_cache.queue_for_sending (owner_draft, 0, false, second_owner);
+        assert (owner_cache.claim_queued_send (draft.id, "smtp-owner",
+            send_until, false, second_owner));
+        var claimed = other_cache.find_outbox_item (draft.id); assert (claimed != null);
+        assert (claimed.delivery_state == OutboxDeliveryState.PREPARING);
+        owner_cache.mark_send_started (draft.id, "smtp-owner", send_until);
+        assert (owner_cache.mark_send_accepted (draft.id, "smtp-owner"));
+        owner_cache.complete_send (draft.id);
+        assert (other_cache.find_outbox_item (draft.id) == null);
+        assert (other_cache.load_draft (draft.id) == null);
+    } catch (Error error) {
+        GLib.error ("durable Outbox editor ownership test failed: %s",
+            error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_outbox_revision_and_active_send_status () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-outbox-revision-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Revision", "revision@example.net");
+        account.id = "revision-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
+        var draft = new Draft ("revision-account");
+        draft.to = "maya@example.net"; draft.body_text = "Track every state";
+        string empty_revision = cache.outbox_revision ();
+        cache.queue_for_sending (draft);
+        cache.record_send_failure (draft.id, "Previous temporary failure");
+        string queued_revision = cache.outbox_revision ();
+        assert (queued_revision != empty_revision);
+        assert (cache.find_outbox_item (draft.id).last_error != "");
+
+        int64 now = new DateTime.now_utc ().to_unix ();
+        assert (cache.claim_queued_send (draft.id, "revision-worker",
+            now + 120, false));
+        string preparing_revision = cache.outbox_revision ();
+        assert (preparing_revision != queued_revision);
+        cache.mark_send_started (draft.id, "revision-worker", now + 120);
+        string sending_revision = cache.outbox_revision ();
+        assert (sending_revision != preparing_revision);
+        int64? active_recovery = cache.next_outbox_attempt (draft.account_id);
+        assert (active_recovery != null && active_recovery == now + 120);
+        var active = cache.find_outbox_item (draft.id); assert (active != null);
+        assert (active.delivery_state == OutboxDeliveryState.SENDING);
+        assert (active.last_error == "");
+        assert (active.is_actively_sending ());
+        assert (!active.requires_resend_confirmation ());
+        assert (!active.can_attempt_delivery ());
+
+        cache.record_send_uncertain (draft.id, "SMTP response was lost");
+        string uncertain_revision = cache.outbox_revision ();
+        assert (uncertain_revision != sending_revision);
+        assert (cache.next_outbox_attempt (draft.account_id) == null);
+        var uncertain = cache.find_outbox_item (draft.id); assert (uncertain != null);
+        assert (!uncertain.is_actively_sending ());
+        assert (uncertain.requires_resend_confirmation ());
+        assert (uncertain.can_attempt_delivery ());
+
+        cache.complete_send (draft.id);
+        string removed_revision = cache.outbox_revision ();
+        assert (removed_revision != uncertain_revision);
+        assert (removed_revision == empty_revision);
+    } catch (Error error) {
+        GLib.error ("Outbox revision test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
 }
 
 private void test_scheduled_delivery_timer () {
@@ -1942,12 +2944,18 @@ private void test_outbound_deadlines () {
         engine.stall_connect = false; engine.stall_send = true; failure = null;
         var send_draft = new Draft (account.id); send_draft.to = "maya@example.net";
         send_draft.body_text = "SMTP must stop";
-        service.deliver.begin (send_draft, null, (object, result) => {
-            try { service.deliver.end (result); } catch (Error error) { failure = error; }
+        var uncertain_progress = new OutboundSendProgress ();
+        service.deliver_from_editor.begin (send_draft, "",
+            uncertain_progress, null, (object, result) => {
+            try { service.deliver_from_editor.end (result); }
+            catch (Error error) { failure = error; }
             loop.quit ();
         });
         loop.run ();
         assert (failure is MailError.DELIVERY_UNCERTAIN);
+        assert (uncertain_progress.outbox_was_or_may_have_been_published ());
+        assert (uncertain_progress.stage ==
+            OutboundSendStage.SMTP_ACCEPTANCE_POSSIBLE);
         var send_item = cache.find_outbox_item (send_draft.id); assert (send_item != null);
         assert (send_item.delivery_state == OutboxDeliveryState.SENDING);
         assert (send_item.requires_resend_confirmation ());
@@ -2121,12 +3129,21 @@ private void test_definitive_send_rejection_is_retryable () {
         var draft = new Draft (account.id); draft.to = "missing@example.net";
         draft.body_text = "Keep this editable";
         Error? failure = null; var loop = new MainLoop ();
-        service.deliver.begin (draft, null, (object, result) => {
-            try { service.deliver.end (result); } catch (Error error) { failure = error; }
+        var rejection_progress = new OutboundSendProgress ();
+        service.deliver_from_editor.begin (draft, "", rejection_progress,
+            null, (object, result) => {
+            try { service.deliver_from_editor.end (result); }
+            catch (Error error) { failure = error; }
             loop.quit ();
         });
         loop.run ();
         assert (failure is MailError.SEND_REJECTED);
+        // This attempt was rejected, but the already-published Outbox row can
+        // still be acted on elsewhere before the composer inspects it.
+        assert (rejection_progress.outbox_was_or_may_have_been_published ());
+        assert (!rejection_progress.smtp_may_have_accepted ());
+        assert (rejection_progress.stage ==
+            OutboundSendStage.SMTP_NOT_ACCEPTED);
         var queued = cache.find_outbox_item (draft.id); assert (queued != null);
         assert (queued.delivery_state == OutboxDeliveryState.REJECTED);
         assert (queued.attempts == 1); assert (!queued.requires_resend_confirmation ());
@@ -2144,6 +3161,11 @@ private void test_outbox_queue_is_atomic () {
         "mailficient-atomic-outbox-%s.sqlite".printf (Uuid.string_random ())) ;
     try {
         var cache = new CacheDatabase (path);
+        var account = AccountSettings.for_email ("Atomic", "atomic@example.net");
+        account.id = "atomic-account";
+        account.incoming_host = "imap.example.net";
+        account.outgoing_host = "smtp.example.net";
+        cache.save_account (account);
         var existing = new Draft ("atomic-account"); existing.to = "maya@example.net";
         existing.body_text = "Previously saved version"; cache.save_draft (existing);
         existing.body_text = "Edited version for Outbox"; existing.touch (); assert (existing.dirty);
@@ -4035,6 +5057,266 @@ private void test_account_provisioning_transaction () {
     if (failure != null) GLib.error ("account provisioning transaction test failed: %s", failure.message);
 }
 
+private void test_account_provisioning_holds_outbound_lane () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-account-lane-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var existing = provisioning_account (
+            "account-password-edit", "imap.example.test");
+        cache.save_account (existing);
+        var credentials = new MemoryCredentialStore ();
+        credentials.values[existing.id + ":imap"] = "old-imap-password";
+        credentials.values[existing.id + ":smtp"] = "old-smtp-password";
+        var cleanup = new CredentialCleanupService (cache, credentials);
+
+        var outbound_engine = new RecordingMailEngine (existing.id);
+        outbound_engine.stall_send = true;
+        var outbound = new OutboundService (cache, outbound_engine,
+            new AttachmentService (Path.build_filename (root, "attachments")),
+            5, 5);
+        var active = new Draft (existing.id);
+        active.to = "first@example.net";
+        active.subject = "Active old-settings send";
+        active.body_text = "Hold the outbound account lane";
+        var active_cancel = new Cancellable ();
+        Error? active_failure = null;
+        bool active_completed = false;
+        outbound.deliver.begin (active, active_cancel, (object, result) => {
+            try { outbound.deliver.end (result); }
+            catch (Error error) { active_failure = error; }
+            active_completed = true;
+        });
+
+        var active_loop = new MainLoop (); bool active_timeout = false;
+        uint active_watchdog = Timeout.add_seconds (2, () => {
+            active_timeout = true; active_loop.quit (); return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (outbound_engine.send_calls != 1) return Source.CONTINUE;
+            active_loop.quit (); return Source.REMOVE;
+        });
+        active_loop.run ();
+        if (!active_timeout) Source.remove (active_watchdog);
+        assert (!active_timeout); assert (outbound_engine.send_calls == 1);
+
+        // Change only passwords. There is intentionally no settings identity
+        // difference which could substitute for unconditional invalidation.
+        var replacement = provisioning_account (
+            existing.id, existing.incoming_host);
+        var account_store = new TestAccountStore ();
+        var main_engine = new ProvisioningMailEngine ();
+        main_engine.stall_actual_connection = true;
+        var provisioner = new AccountProvisioningService (account_store,
+            credentials, cleanup, main_engine, outbound);
+        Error? provision_failure = null;
+        bool provision_completed = false;
+        provisioner.provision.begin (replacement, "new-imap-password",
+            "new-smtp-password", existing, null, (object, result) => {
+                try { provisioner.provision.end (result); }
+                catch (Error error) { provision_failure = error; }
+                provision_completed = true;
+            });
+
+        var candidate_loop = new MainLoop (); bool candidate_timeout = false;
+        uint candidate_watchdog = Timeout.add_seconds (2, () => {
+            candidate_timeout = true; candidate_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (main_engine.connections.size != 1 ||
+                main_engine.disconnections.size != 1)
+                return Source.CONTINUE;
+            candidate_loop.quit (); return Source.REMOVE;
+        });
+        candidate_loop.run ();
+        if (!candidate_timeout) Source.remove (candidate_watchdog);
+        assert (!candidate_timeout);
+        assert (!provision_completed); assert (account_store.saved == null);
+        assert (outbound_engine.disconnect_calls == 0);
+        // Candidate validation uses an isolated credential ID. The real
+        // password cannot change while an old-settings send owns the lane.
+        assert (credentials.values[existing.id + ":imap"] ==
+            "old-imap-password");
+        assert (credentials.values[existing.id + ":smtp"] ==
+            "old-smtp-password");
+
+        active_cancel.cancel ();
+        var replacement_loop = new MainLoop (); bool replacement_timeout = false;
+        uint replacement_watchdog = Timeout.add_seconds (3, () => {
+            replacement_timeout = true; replacement_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (outbound_engine.disconnect_calls != 1 ||
+                main_engine.connections.size != 2)
+                return Source.CONTINUE;
+            replacement_loop.quit (); return Source.REMOVE;
+        });
+        replacement_loop.run ();
+        if (!replacement_timeout) Source.remove (replacement_watchdog);
+        assert (!replacement_timeout);
+        assert (credentials.values[existing.id + ":imap"] ==
+            "new-imap-password");
+        assert (credentials.values[existing.id + ":smtp"] ==
+            "new-smtp-password");
+        assert (!provision_completed); assert (account_store.saved == null);
+
+        // Even after the old session has been disconnected, the scoped lease
+        // must keep a new local send from entering the transient interval
+        // between credential replacement and the account settings commit.
+        outbound_engine.stall_send = false;
+        var waiting = new Draft (existing.id);
+        waiting.to = "second@example.net";
+        waiting.subject = "Wait for account commit";
+        waiting.body_text = "Use one coherent account version";
+        Error? waiting_failure = null;
+        var waiting_result = SendDisposition.QUEUED;
+        bool waiting_completed = false;
+        outbound.deliver.begin (waiting, null, (object, result) => {
+            try { waiting_result = outbound.deliver.end (result); }
+            catch (Error error) { waiting_failure = error; }
+            waiting_completed = true;
+        });
+        var observation_loop = new MainLoop ();
+        Timeout.add (50, () => {
+            observation_loop.quit (); return Source.REMOVE;
+        });
+        observation_loop.run ();
+        assert (!waiting_completed);
+        assert (outbound_engine.connect_calls == 1);
+        assert (outbound_engine.send_calls == 1);
+        assert (cache.load_draft (waiting.id) != null);
+        assert (cache.find_outbox_item (waiting.id) == null);
+
+        main_engine.release_actual_connection ();
+        var completion_loop = new MainLoop (); bool completion_timeout = false;
+        uint completion_watchdog = Timeout.add_seconds (5, () => {
+            completion_timeout = true; completion_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (!active_completed || !provision_completed ||
+                !waiting_completed)
+                return Source.CONTINUE;
+            completion_loop.quit (); return Source.REMOVE;
+        });
+        completion_loop.run ();
+        if (!completion_timeout) Source.remove (completion_watchdog);
+        assert (!completion_timeout);
+        assert (active_failure != null);
+        assert (provision_failure == null); assert (account_store.saved == replacement);
+        assert (waiting_failure == null);
+        assert (waiting_result == SendDisposition.SENT);
+        assert (outbound_engine.connect_calls == 2);
+        assert (outbound_engine.send_calls == 2);
+        assert (outbound_engine.disconnect_calls == 1);
+    } catch (Error error) {
+        GLib.error ("account provisioning outbound lane test failed: %s",
+            error.message);
+    }
+}
+
+private void test_account_provisioning_quiesces_main_sync () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-account-quiesce-%s".printf (Uuid.string_random ())) ;
+    try {
+        assert (DirUtils.create_with_parents (root, 0700) == 0);
+        var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+        var existing = provisioning_account (
+            "account-sync-edit", "imap.example.test");
+        cache.save_account (existing);
+        var attachments = new AttachmentService (
+            Path.build_filename (root, "attachments"));
+        var main_engine = new RecordingMailEngine (existing.id);
+        main_engine.delay_synchronization = true;
+        var outbound_engine = new RecordingMailEngine (existing.id);
+        var outbound = new OutboundService (cache, outbound_engine,
+            attachments, 5, 5);
+        var sync = new AccountSyncService (cache, main_engine, outbound,
+            new JunkFilterService (cache), attachments);
+        var credentials = new SyncAwareCredentialStore (
+            main_engine, existing.id);
+        credentials.values[existing.id + ":imap"] = "old-imap-password";
+        credentials.values[existing.id + ":smtp"] = "old-smtp-password";
+        var cleanup = new CredentialCleanupService (cache, credentials);
+        var account_store = new TestAccountStore ();
+        var provisioner = new AccountProvisioningService (account_store,
+            credentials, cleanup, main_engine, outbound, sync);
+
+        bool sync_completed = false;
+        sync.sync_account.begin (existing, null, (object, result) => {
+            sync.sync_account.end (result);
+            sync_completed = true;
+        });
+        var active_loop = new MainLoop (); bool active_timeout = false;
+        uint active_watchdog = Timeout.add_seconds (2, () => {
+            active_timeout = true; active_loop.quit (); return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (main_engine.active_synchronizations != 1)
+                return Source.CONTINUE;
+            active_loop.quit (); return Source.REMOVE;
+        });
+        active_loop.run ();
+        if (!active_timeout) Source.remove (active_watchdog);
+        assert (!active_timeout);
+
+        var replacement = provisioning_account (
+            existing.id, existing.incoming_host);
+        bool provision_completed = false;
+        Error? provision_failure = null;
+        provisioner.provision.begin (replacement, "new-imap-password",
+            "new-smtp-password", existing, null, (object, result) => {
+                try { provisioner.provision.end (result); }
+                catch (Error error) { provision_failure = error; }
+                provision_completed = true;
+            });
+        var completion_loop = new MainLoop (); bool completion_timeout = false;
+        uint completion_watchdog = Timeout.add_seconds (5, () => {
+            completion_timeout = true; completion_loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (1, () => {
+            if (!sync_completed || !provision_completed)
+                return Source.CONTINUE;
+            completion_loop.quit (); return Source.REMOVE;
+        });
+        completion_loop.run ();
+        if (!completion_timeout) Source.remove (completion_watchdog);
+        assert (!completion_timeout); assert (provision_failure == null);
+        assert (main_engine.active_synchronizations == 0);
+        assert (!main_engine.disconnect_while_synchronizing);
+        assert (!credentials.wrote_target_while_synchronizing);
+        assert (account_store.saved == replacement);
+        assert (credentials.values[existing.id + ":imap"] ==
+            "new-imap-password");
+        assert (credentials.values[existing.id + ":smtp"] ==
+            "new-smtp-password");
+
+        // Provisioning resumes the coordinator after its finally block; a new
+        // explicit check must therefore be admitted normally.
+        main_engine.delay_synchronization = false;
+        bool resumed_completed = false;
+        var resumed_loop = new MainLoop ();
+        sync.sync_account.begin (replacement, null, (object, result) => {
+            sync.sync_account.end (result);
+            resumed_completed = true; resumed_loop.quit ();
+        });
+        uint resumed_watchdog = Timeout.add_seconds (3, () => {
+            resumed_loop.quit (); return Source.REMOVE;
+        });
+        resumed_loop.run ();
+        if (resumed_completed) Source.remove (resumed_watchdog);
+        assert (resumed_completed);
+        assert (main_engine.synchronize_calls == 2);
+    } catch (Error error) {
+        GLib.error ("account provisioning sync quiesce test failed: %s",
+            error.message);
+    }
+}
+
 private void test_toolbar_layout () {
     var layout = ToolbarLayout.parse (
         "sidebar,refresh,invalid,sidebar,flex,space,flex,archive");
@@ -4532,17 +5814,27 @@ int main (string[] args) {
     Test.add_func ("/attachments/remote-download", test_remote_attachment_download);
     Test.add_func ("/models/initials", test_message_initials);
     Test.add_func ("/models/new-mail-summary-is-bounded", test_new_mail_summary_is_bounded);
+    Test.add_func ("/notifications/new-mail-is-reconciled-durably",
+        test_new_mail_notifications_are_reconciled_durably);
+    Test.add_func ("/notifications/legacy-new-mail-is-adopted-once",
+        test_legacy_new_mail_notifications_are_adopted_once);
     Test.add_func ("/models/toolbar-layout", test_toolbar_layout);
     Test.add_func ("/tasks/views-recurrence-and-email-flags", test_task_views_recurrence_and_email_flags);
     Test.add_func ("/tasks/reminder-delivery-is-durable", test_task_reminder_delivery_is_durable);
     Test.add_func ("/mail/sorting", test_message_sorting);
     Test.add_func ("/mail/conversation", test_conversation_builder);
+    Test.add_func ("/mail/conversation-excludes-discarded-messages",
+        test_cached_conversation_excludes_discarded_messages);
     Test.add_func ("/account/validation", test_account_validation);
     Test.add_func ("/account/mobileconfig-import", test_mobileconfig_import);
     Test.add_func ("/account/mobileconfig-signed-fixture", test_signed_mobileconfig_fixture);
     Test.add_func ("/account/online-account-mapping-and-storage", test_online_account_mapping_and_storage);
     Test.add_func ("/account/online-account-security-requirements", test_online_account_security_requirements);
     Test.add_func ("/account/provisioning-transaction", test_account_provisioning_transaction);
+    Test.add_func ("/account/provisioning-holds-outbound-lane",
+        test_account_provisioning_holds_outbound_lane);
+    Test.add_func ("/account/provisioning-quiesces-main-sync",
+        test_account_provisioning_quiesces_main_sync);
     Test.add_func ("/mail/folder-validation", test_folder_validation);
     Test.add_func ("/mail/recipients", test_recipients);
     Test.add_func ("/mail/reply-all-recipients", test_reply_all_recipients);
@@ -4565,6 +5857,20 @@ int main (string[] args) {
     Test.add_func ("/storage/drafts", test_cache_drafts);
     Test.add_func ("/outbound/queue-and-retry", test_outbound_queue);
     Test.add_func ("/outbound/undo-send-window", test_undo_send_outbox_window);
+    Test.add_func ("/outbound/foreground-owns-first-attempt",
+        test_foreground_delivery_owns_first_attempt);
+    Test.add_func ("/outbound/waiting-foreground-draft-is-durable",
+        test_waiting_foreground_draft_is_durable);
+    Test.add_func ("/outbound/competing-worker-completes-waiting-existing-queue",
+        test_competing_worker_completes_waiting_existing_queue);
+    Test.add_func ("/outbound/stale-owner-cannot-mutate-new-attempt",
+        test_stale_send_owner_cannot_mutate_new_attempt);
+    Test.add_func ("/outbound/account-fence-blocks-other-process",
+        test_outbound_account_fence_blocks_other_process);
+    Test.add_func ("/outbound/editor-ownership-is-durable",
+        test_outbox_editor_ownership_is_durable);
+    Test.add_func ("/outbound/revision-and-active-status",
+        test_outbox_revision_and_active_send_status);
     Test.add_func ("/outbound/scheduled-delivery-timer", test_scheduled_delivery_timer);
     Test.add_func ("/outbound/deadlines", test_outbound_deadlines);
     Test.add_func ("/outbound/attachment-preflight", test_attachment_send_preflight);
@@ -4617,6 +5923,8 @@ int main (string[] args) {
         test_server_search_scope_bound_and_cache);
     Test.add_func ("/mail/smart-mailboxes-and-planner", test_smart_mailboxes_and_planner);
     Test.add_func ("/mail/scheduling-snooze-and-templates", test_scheduling_snooze_and_templates);
+    Test.add_func ("/mail/snoozed-unread-is-removed-from-inbox-badges",
+        test_snoozed_unread_is_removed_from_inbox_badges);
     Test.add_func ("/mail/vacation-responder", test_vacation_responder);
     Test.add_func ("/mail/export-eml-and-pdf", test_message_export);
     Test.add_func ("/storage/chained-move-remaps-server-identity", test_chained_move_remaps_server_identity);
