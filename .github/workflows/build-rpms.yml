@@ -43,6 +43,22 @@ jobs:
             "flatpak-build-${{ matrix.arch }}" \
             packaging/com.local.Mailficient.Devel.json
 
+      - name: Verify application dependency closure
+        run: |
+          flatpak build --readonly "flatpak-build-${{ matrix.arch }}" \
+            sh -eu -c '
+              for elf_file in \
+                /app/bin/mailficient \
+                /app/bin/mailficient-addressbook-probe \
+                /app/lib/evolution-data-server/camel-providers/libcamelimapx.so \
+                /app/lib/evolution-data-server/camel-providers/libcamelsmtp.so; do
+                test -e "$elf_file"
+                if ldd "$elf_file" | grep -F "not found"; then
+                  exit 1
+                fi
+              done
+            '
+
       - name: Build RPM package
         env:
           MAILFICIENT_FLATPAK_APP_TREE: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files

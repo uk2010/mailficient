@@ -20,13 +20,16 @@ After creating a bundle with the steps below, verify and install it from its
 output directory:
 
 ```sh
-sha256sum -c Mailficient-0.2.9-x86_64.flatpak.sha256
-flatpak install --user ./Mailficient-0.2.9-x86_64.flatpak
+sha256sum -c Mailficient-0.3.0-x86_64.flatpak.sha256
+flatpak install --user ./Mailficient-0.3.0-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
 Bundles can be built natively for x86-64 or ARM64. The matching runtime is
-downloaded from Flathub when it is not already installed.
+downloaded from Flathub when it is not already installed. Mailficient's pinned
+libical and Evolution Data Server/Camel dependencies are built into the
+application; GTK, Libadwaita, WebKitGTK, and their platform dependencies come
+from the declared GNOME 49 runtime and are resolved automatically by Flatpak.
 
 ## Build from source
 
@@ -68,12 +71,12 @@ flatpak-builder --force-clean \
 flatpak build-bundle \
   --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
   flatpak-repo \
-  Mailficient-0.2.9-x86_64.flatpak \
+  Mailficient-0.3.0-x86_64.flatpak \
   com.local.Mailficient \
   master
 
-sha256sum Mailficient-0.2.9-x86_64.flatpak \
-  > Mailficient-0.2.9-x86_64.flatpak.sha256
+sha256sum Mailficient-0.3.0-x86_64.flatpak \
+  > Mailficient-0.3.0-x86_64.flatpak.sha256
 ```
 
 Build output, repositories, bundles, and local mail data are excluded from

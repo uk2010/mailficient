@@ -144,6 +144,9 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Thu Aug 27 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.3.0-1
+- Move sender safety lists into a separate searchable management window.
+
 * Wed Aug 26 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.2.9-1
 - Improve mail-check speed, task navigation, draft cleanup, HTML rendering,
   folder state updates, message selection, and interface polish.

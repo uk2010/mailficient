@@ -1,3 +1,15 @@
+# Mailficient 0.3.0
+
+Mailficient 0.3.0 keeps sender-safety management compact and easy to navigate.
+
+Highlights:
+
+- Replaces the long Safe Senders, Blocked Senders, and remote-image lists in
+  Preferences with concise summaries and live entry counts
+- Opens those lists in a separate searchable Sender Lists window
+- Keeps removal controls and blocked-sender rule management available without
+  overcrowding the main Safety preferences page
+
 # Mailficient 0.2.9
 
 Mailficient 0.2.9 is a stability, responsiveness, and interface-polish release

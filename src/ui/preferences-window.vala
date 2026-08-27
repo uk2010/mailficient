@@ -16,15 +16,9 @@ public class PreferencesWindow : Adw.PreferencesDialog {
     private Gtk.TextView signature_editor = new Gtk.TextView ();
     private bool loading;
     private string current_identity = "";
-    private Adw.ComboRow junk_kind_row;
-    private Adw.EntryRow junk_pattern_row;
-    private Adw.PreferencesGroup junk_rules_group;
-    private Adw.ActionRow junk_error_row;
-    private Gee.ArrayList<Adw.ActionRow> junk_rule_rows = new Gee.ArrayList<Adw.ActionRow> ();
-    private Adw.PreferencesGroup trusted_senders_group;
-    private Gee.ArrayList<Adw.ActionRow> trusted_sender_rows = new Gee.ArrayList<Adw.ActionRow> ();
-    private Adw.PreferencesGroup safe_senders_group;
-    private Gee.ArrayList<Adw.ActionRow> safe_sender_rows = new Gee.ArrayList<Adw.ActionRow> ();
+    private Adw.ActionRow safe_senders_row;
+    private Adw.ActionRow blocked_senders_row;
+    private Adw.ActionRow remote_image_senders_row;
     private Adw.PreferencesGroup rules_group;
     private Gee.ArrayList<Adw.ActionRow> rule_rows = new Gee.ArrayList<Adw.ActionRow> ();
     private Adw.PreferencesGroup quick_steps_group;
@@ -62,9 +56,10 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         if (requested_page == "" || requested_page == "0")
             requested_page = settings.preferences_page;
         Gtk.Widget? requested_focus = null;
+        string requested_sender_page = "";
         switch (requested_page) {
         case "junk":
-            requested_page = "privacy"; requested_focus = junk_pattern_row; break;
+            requested_page = "privacy"; requested_sender_page = "blocked"; break;
         case "smart-mailboxes":
             requested_page = "rules"; requested_focus = smart_name_row; break;
         case "vacation":
@@ -80,6 +75,13 @@ public class PreferencesWindow : Adw.PreferencesDialog {
             Idle.add (() => {
                 if (focus_target.get_root () != null)
                     focus_target.grab_focus ();
+                return Source.REMOVE;
+            });
+        }
+        if (requested_sender_page != "") {
+            string sender_page = requested_sender_page;
+            Idle.add (() => {
+                open_sender_lists (sender_page);
                 return Source.REMOVE;
             });
         }
@@ -215,125 +217,65 @@ public class PreferencesWindow : Adw.PreferencesDialog {
         scripts.subtitle = "Remain disabled even when full HTML formatting is enabled";
         scripts.add_prefix (new Gtk.Image.from_icon_name ("channel-secure-symbolic")); group.add (scripts);
         page.add (group);
-        trusted_senders_group = new Adw.PreferencesGroup (); trusted_senders_group.title = "Trusted Senders";
-        trusted_senders_group.description = "Remote images load automatically for senders listed here. Safe Senders are trusted for images automatically too.";
-        page.add (trusted_senders_group); reload_trusted_senders ();
-        safe_senders_group = new Adw.PreferencesGroup (); safe_senders_group.title = "Safe Senders";
-        safe_senders_group.description = "Safe Senders load remote images automatically and hide automatic sender warnings. Full findings remain available from Security Details.";
-        page.add (safe_senders_group); reload_safe_senders ();
-        add_junk_settings (page);
+        add_sender_list_settings (page);
         return page;
     }
 
-    private void reload_trusted_senders () {
-        foreach (var row in trusted_sender_rows) trusted_senders_group.remove (row);
-        trusted_sender_rows.clear ();
+    private void add_sender_list_settings (Adw.PreferencesPage page) {
+        var lists = new Adw.PreferencesGroup ();
+        lists.title = "Sender Lists";
+        lists.description = "Manage sender exceptions in a separate window so this page stays easy to scan.";
+        safe_senders_row = sender_list_row ("Safe Senders", "security-medium-symbolic", "safe");
+        blocked_senders_row = sender_list_row ("Blocked Senders", "mail-mark-junk-symbolic", "blocked");
+        remote_image_senders_row = sender_list_row ("Remote Image Senders", "image-x-generic-symbolic", "remote-images");
+        lists.add (safe_senders_row);
+        lists.add (blocked_senders_row);
+        lists.add (remote_image_senders_row);
+        page.add (lists);
+        reload_sender_list_summaries ();
+    }
+
+    private Adw.ActionRow sender_list_row (string title, string icon_name, string page_name) {
+        var row = new Adw.ActionRow ();
+        row.title = title;
+        row.add_prefix (new Gtk.Image.from_icon_name (icon_name));
+        var arrow = new Gtk.Image.from_icon_name ("go-next-symbolic");
+        arrow.valign = Gtk.Align.CENTER;
+        row.add_suffix (arrow);
+        row.activatable = true;
+        row.activated.connect (() => open_sender_lists (page_name));
+        return row;
+    }
+
+    private void open_sender_lists (string page_name) {
+        var dialog = new SenderListsDialog (cache, remote_content_policy, page_name);
+        dialog.lists_changed.connect (reload_sender_list_summaries);
+        dialog.sender_safety_changed.connect (() => sender_safety_changed ());
+        dialog.present (this);
+    }
+
+    private void reload_sender_list_summaries () {
         try {
-            var senders = remote_content_policy.trusted_senders ();
-            if (senders.size == 0) {
-                var empty = new Adw.ActionRow (); empty.title = "No trusted senders";
-                empty.subtitle = "Remote images remain blocked by default";
-                empty.add_prefix (new Gtk.Image.from_icon_name ("network-offline-symbolic"));
-                trusted_senders_group.add (empty); trusted_sender_rows.add (empty); return;
-            }
-            foreach (var address in senders) {
-                var row = new Adw.ActionRow (); row.title = address;
-                row.subtitle = "Remote images allowed";
-                var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
-                remove.valign = Gtk.Align.CENTER; remove.tooltip_text = "Stop trusting this sender";
-                Accessibility.label (remove, "Stop loading remote images from " + address);
-                remove.clicked.connect (() => {
-                    try {
-                        remote_content_policy.forget_sender (address);
-                        reload_trusted_senders (); sender_safety_changed ();
-                    }
-                    catch (Error error) { warning ("Could not remove trusted sender: %s", error.message); }
-                });
-                row.add_suffix (remove); trusted_senders_group.add (row); trusted_sender_rows.add (row);
-            }
+            int count = cache.list_safe_senders ().size;
+            safe_senders_row.subtitle = count == 0 ? "No senders" :
+                count == 1 ? "1 sender" : "%d senders".printf (count);
         } catch (Error error) {
-            var failed = new Adw.ActionRow (); failed.title = "Trusted senders unavailable";
-            failed.subtitle = error.message; trusted_senders_group.add (failed); trusted_sender_rows.add (failed);
+            safe_senders_row.subtitle = "List unavailable";
         }
-    }
-
-    private void reload_safe_senders () {
-        foreach (var row in safe_sender_rows) safe_senders_group.remove (row);
-        safe_sender_rows.clear ();
         try {
-            var senders = cache.list_safe_senders ();
-            if (senders.size == 0) {
-                var empty = new Adw.ActionRow (); empty.title = "No Safe Senders";
-                empty.subtitle = "Add a sender from the message security details";
-                empty.add_prefix (new Gtk.Image.from_icon_name ("security-medium-symbolic"));
-                safe_senders_group.add (empty); safe_sender_rows.add (empty); return;
-            }
-            foreach (var address in senders) {
-                var row = new Adw.ActionRow (); row.title = address;
-                row.subtitle = "Remote images load automatically; warnings remain in Security Details";
-                var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
-                remove.valign = Gtk.Align.CENTER; remove.tooltip_text = "Remove from Safe Senders";
-                Accessibility.label (remove, "Remove " + address + " from Safe Senders");
-                remove.clicked.connect (() => {
-                    try {
-                        cache.set_safe_sender (address, false);
-                        reload_safe_senders (); sender_safety_changed ();
-                    }
-                    catch (Error error) { warning ("Could not remove Safe Sender: %s", error.message); }
-                });
-                row.add_suffix (remove); safe_senders_group.add (row); safe_sender_rows.add (row);
-            }
+            int count = cache.list_junk_rules ().size;
+            blocked_senders_row.subtitle = count == 0 ? "No sender or domain rules" :
+                count == 1 ? "1 sender or domain rule" : "%d sender or domain rules".printf (count);
         } catch (Error error) {
-            var failed = new Adw.ActionRow (); failed.title = "Safe Senders unavailable";
-            failed.subtitle = error.message; safe_senders_group.add (failed); safe_sender_rows.add (failed);
+            blocked_senders_row.subtitle = "List unavailable";
         }
-    }
-
-    private void add_junk_settings (Adw.PreferencesPage page) {
-        var add_group = new Adw.PreferencesGroup (); add_group.title = "Block a Sender";
-        add_group.description = "New Inbox messages matching these addresses or domains are marked as junk on the server and moved to Junk.";
-        var kinds = new Gtk.StringList (null); kinds.append ("Email address"); kinds.append ("Domain");
-        junk_kind_row = new Adw.ComboRow (); junk_kind_row.title = "Match"; junk_kind_row.model = kinds;
-        add_group.add (junk_kind_row);
-        junk_pattern_row = new Adw.EntryRow (); junk_pattern_row.title = "Address or domain";
-        junk_pattern_row.show_apply_button = true; junk_pattern_row.apply.connect (add_junk_rule);
-        add_group.add (junk_pattern_row);
-        junk_error_row = new Adw.ActionRow (); junk_error_row.add_prefix (new Gtk.Image.from_icon_name ("dialog-warning-symbolic"));
-        junk_error_row.visible = false; junk_error_row.add_css_class ("error"); add_group.add (junk_error_row);
-        page.add (add_group);
-        junk_rules_group = new Adw.PreferencesGroup (); junk_rules_group.title = "Blocked Senders";
-        junk_rules_group.description = "Rules are stored locally. Removing a rule does not restore mail already classified as junk.";
-        page.add (junk_rules_group); reload_junk_rules ();
-    }
-
-    private void add_junk_rule () {
         try {
-            var kind = junk_kind_row.selected == 1 ? JunkRuleKind.DOMAIN : JunkRuleKind.ADDRESS;
-            cache.add_junk_rule (kind, junk_pattern_row.text);
-            junk_pattern_row.text = ""; junk_error_row.visible = false; reload_junk_rules ();
+            int count = remote_content_policy.trusted_senders ().size;
+            remote_image_senders_row.subtitle = count == 0 ? "No senders" :
+                count == 1 ? "1 sender" : "%d senders".printf (count);
         } catch (Error error) {
-            junk_error_row.title = error.message; junk_error_row.visible = true;
+            remote_image_senders_row.subtitle = "List unavailable";
         }
-    }
-
-    private void reload_junk_rules () {
-        foreach (var row in junk_rule_rows) junk_rules_group.remove (row);
-        junk_rule_rows.clear ();
-        try {
-            foreach (var rule in cache.list_junk_rules ()) {
-                var row = new Adw.ActionRow (); row.title = rule.kind == JunkRuleKind.DOMAIN ?
-                    "@" + rule.pattern : rule.pattern;
-                row.subtitle = rule.kind == JunkRuleKind.DOMAIN ? "Entire domain" : "Email address";
-                var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
-                remove.valign = Gtk.Align.CENTER; remove.tooltip_text = "Remove junk rule";
-                Accessibility.label (remove, "Remove junk rule for " + rule.pattern);
-                remove.clicked.connect (() => {
-                    try { cache.remove_junk_rule (rule.id); reload_junk_rules (); }
-                    catch (Error error) { junk_error_row.title = error.message; junk_error_row.visible = true; }
-                });
-                row.add_suffix (remove); junk_rules_group.add (row); junk_rule_rows.add (row);
-            }
-        } catch (Error error) { junk_error_row.title = error.message; junk_error_row.visible = true; }
     }
 
     private Adw.PreferencesPage build_rules_page () {

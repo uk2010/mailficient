@@ -118,6 +118,7 @@ sources = files(
   'ui/account-settings-page.vala',
   'ui/online-account-dialog.vala',
   'ui/preferences-window.vala',
+  'ui/sender-lists-dialog.vala',
   'ui/rule-editor-dialog.vala',
   'ui/shortcuts-dialog.vala',
   'ui/recipient-completion-controller.vala',

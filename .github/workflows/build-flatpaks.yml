@@ -1,4 +1,4 @@
-name: Build Debian packages
+name: Build Flatpak bundles
 
 on:
   workflow_dispatch:
@@ -7,39 +7,38 @@ permissions:
   contents: read
 
 jobs:
-  deb:
-    name: Debian (${{ matrix.arch }})
+  flatpak:
+    name: Flatpak (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - arch: x86_64
             runner: ubuntu-24.04
-            flatpak_arch: x86_64
-          - arch: arm64
+          - arch: aarch64
             runner: ubuntu-24.04-arm
-            flatpak_arch: aarch64
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: Install Flatpak build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder dpkg-dev
+          sudo apt-get install -y flatpak flatpak-builder
 
       - name: Install GNOME 49 SDK and runtime
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --assumeyes flathub \
+          flatpak install --user --assumeyes --arch=${{ matrix.arch }} flathub \
             org.gnome.Platform//49 org.gnome.Sdk//49
 
-      - name: Build Camel-enabled application tree
+      - name: Build and test application
         run: |
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
-            --arch=${{ matrix.flatpak_arch }} \
+            --arch=${{ matrix.arch }} \
+            --repo="flatpak-repo-${{ matrix.arch }}" \
             "flatpak-build-${{ matrix.arch }}" \
             packaging/com.local.Mailficient.Devel.json
 
@@ -59,19 +58,29 @@ jobs:
               done
             '
 
-      - name: Build Debian package
-        env:
-          MAILFICIENT_FLATPAK_APP_TREE: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files
-          MAILFICIENT_NATIVE_BINARY: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files/bin/mailficient
-          MAILFICIENT_PROBE_BINARY: ${{ github.workspace }}/flatpak-build-${{ matrix.arch }}/files/bin/mailficient-addressbook-probe
-          MAILFICIENT_DEB_ARCHITECTURE: ${{ matrix.arch }}
-        run: tools/build-deb.sh
+      - name: Create Flatpak bundle and checksum
+        id: bundle
+        shell: bash
+        run: |
+          version=$(grep -o "version: '[0-9][^']*'" meson.build |
+            head -n 1 |
+            cut -d "'" -f 2)
+          bundle="Mailficient-${version}-${{ matrix.arch }}.flatpak"
+          flatpak build-bundle \
+            --arch=${{ matrix.arch }} \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            "flatpak-repo-${{ matrix.arch }}" \
+            "$bundle" \
+            com.local.Mailficient \
+            master
+          sha256sum "$bundle" > "$bundle.sha256"
+          printf 'bundle=%s\n' "$bundle" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Debian package
+      - name: Upload Flatpak bundle
         uses: actions/upload-artifact@v4
         with:
-          name: mailficient-${{ matrix.arch }}-deb
+          name: mailficient-${{ matrix.arch }}-flatpak
           path: |
-            dist/mailficient_*_${{ matrix.arch }}.deb
-            dist/mailficient_*_${{ matrix.arch }}.deb.sha256
+            ${{ steps.bundle.outputs.bundle }}
+            ${{ steps.bundle.outputs.bundle }}.sha256
           if-no-files-found: error
