@@ -371,6 +371,7 @@ public class MessageList : Gtk.Box {
     private void reload (bool notify_selection = true, bool preserve_selection = false,
                          string preferred_id = "", bool force_reload = false) {
         int64 started = DebugTrace.mark ();
+        bool had_attached_rows = list.model != null && list.model.get_n_items () > 0;
         DebugTrace.log ("message-list", "reload begin mailbox=%s query=%s notify=%s preserve=%s preferred=%s".printf (
             mailbox_id, query, notify_selection.to_string (), preserve_selection.to_string (), preferred_id));
         // A bulk selection owns the selection model; preserving the reader's
@@ -408,8 +409,9 @@ public class MessageList : Gtk.Box {
         // Keep one ListView and replace only its selection model. Recreating
         // the view for every mailbox leaves factories and row state for each
         // visited favorite alive until GTK finishes tearing down the old
-        // hierarchy.
-        list.model = null;
+        // hierarchy. Leave the previous model attached while the replacement
+        // is prepared below: configure_selection() installs it on the next
+        // idle turn, and detaching here would paint an empty Inbox meanwhile.
         list_stack.set_visible_child (list);
         mailbox_loaded = true;
         mailbox_title.label = query == "" ? mailbox_name : "Search Results";
@@ -419,6 +421,9 @@ public class MessageList : Gtk.Box {
         suppress_selection = !notify_selection || local_queue || preserve_id != "";
         configure_selection (notify_selection && !local_queue && preserve_id == "", preserve_id,
             notify_selection && !local_queue && preserve_id == "");
+        if (Environment.get_variable ("MAILFICIENT_QA") == "1" &&
+            had_attached_rows && list.model == null)
+            critical ("Message list detached its nonempty model during refresh");
         if (total > 0) {
             content_stack.visible_child_name = "messages";
         } else {
@@ -448,7 +453,9 @@ public class MessageList : Gtk.Box {
             if (!select_multiple.active && selected.size == 1)
                 message_selected (selected[0]);
         });
-        list.model = null;
+        // Keep the currently painted rows until next_selection is ready to be
+        // installed. Assigning the replacement directly in the idle callback
+        // makes the model change atomic from the frame clock's perspective.
         Idle.add (() => {
             if (model != next_model || selection != next_selection) return Source.REMOVE;
             list.model = next_selection;

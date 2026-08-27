@@ -62,6 +62,7 @@ sources = files(
   'services/outbound-service.vala',
   'services/sync-state.vala',
   'services/startup-sync-gate.vala',
+  'services/streamed-pass-refresh-gate.vala',
   'services/account-sync-service.vala',
   'services/live-mail-coordinator.vala',
   'services/folder-service.vala',

@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Thu Aug 27 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.3.1-1
+- Remove the 500-message ceiling and stabilize Inbox refreshes during large
+  initial synchronization.
+
 * Thu Aug 27 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.3.0-1
 - Move sender safety lists into a separate searchable management window.
 

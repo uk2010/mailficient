@@ -11,9 +11,10 @@ public class MessageExportService : Object {
                              File destination) throws Error {
         var stream = destination.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null);
         int total = repository.message_count (mailbox.id);
-        for (int offset = 0; offset < total; offset += CacheDatabase.MESSAGE_LIST_LIMIT) {
+        for (int offset = 0; offset < total;
+             offset += CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE) {
             var messages = repository.list_messages (
-                mailbox.id, "", CacheDatabase.MESSAGE_LIST_LIMIT, offset);
+                mailbox.id, "", CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE, offset);
             if (messages.size == 0) break;
             foreach (var summary in messages) {
                 var message = repository.find_message (summary.id) ?? summary;

@@ -21,7 +21,8 @@ public class MailRuleService : Object {
         int inspected = 0; int applied = 0; int offset = 0;
         var query = new SearchQuery (); query.account = rule.account_id == "" ? null : rule.account_id;
         while (inspected < maximum_messages) {
-            int batch_size = int.min (CacheDatabase.MESSAGE_LIST_LIMIT, maximum_messages - inspected);
+            int batch_size = int.min (CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE,
+                maximum_messages - inspected);
             var summaries = cache.search_messages (query, batch_size, offset);
             if (summaries.size == 0) break;
             foreach (var summary in summaries) {

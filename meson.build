@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.3.0', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.3.1', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 cc = meson.get_compiler('c')
 
@@ -82,6 +82,7 @@ core_support_sources = files(
   'src/services/mail-engine.vala',
   'src/services/sync-state.vala',
   'src/services/startup-sync-gate.vala',
+  'src/services/streamed-pass-refresh-gate.vala',
   'src/services/account-sync-service.vala',
   'src/services/live-mail-coordinator.vala',
   'src/services/folder-service.vala',
@@ -209,41 +210,13 @@ if camel_test_dep.found()
     'tests/test-greenmail.vala',
     'src/services/camel-cache-namespace.vala',
     'src/services/camel-mail-engine.vala',
-    'src/services/remote-mail-search-provider.vala',
-    'src/services/search-query.vala',
-    'src/services/server-search-expression.vala',
     'src/services/camel-live-mail-watch.vala',
     'src/services/received-attachment-store.vala',
-    'src/services/attachment-service.vala',
-    'src/services/mail-engine.vala',
-    'src/services/sync-state.vala',
-    'src/security/credential-store.vala',
-    'src/security/attachment-safety.vala',
-    'src/mail/mail-error.vala',
-    'src/mail/recipient-parser.vala',
-    'src/models/account-settings.vala',
-    'src/models/online-mail-account.vala',
-    'src/models/oauth-access-token.vala',
-    'src/models/draft.vala',
-    'src/models/attachment.vala',
-    'src/models/mail-sync-result.vala',
-    'src/models/remote-draft-location.vala',
-    'src/models/remote-draft-snapshot.vala',
-    'src/models/pending-draft-deletion.vala',
-    'src/models/remote-message-state.vala',
-    'src/models/mailbox.vala',
-    'src/models/message.vala',
-    'src/models/message-security-assessment.vala',
-    'src/models/mail-label.vala',
-    'src/models/send-result.vala',
-    'src/models/pending-mutation.vala',
-    'src/services/online-account-service.vala',
-    'src/services/draft-fingerprint.vala',
-    'src/security/html-sanitizer.vala',
-    'src/security/message-security-service.vala',
-  )
+  ) + core_support_sources
   greenmail_tests = executable('greenmail-tests', greenmail_test_sources,
-    dependencies: [gee, gio, xml, camel_test_dep, edataserver_test_dep],
+    include_directories: include_directories('src'),
+    dependencies: [gee, gio, sqlite, xml, crypto, cairo, pangocairo,
+                   camel_test_dep, edataserver_test_dep],
     vala_args: ['--target-glib=2.76'] + camel_vala_args)
   test('camel-draft-cap', greenmail_tests,
     args: ['-p', '/camel/draft-uid-cap-converges'])

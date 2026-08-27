@@ -14,7 +14,8 @@ public class MailSearchService : Object {
 
     public bool server_search_available { get { return remote_provider != null && engine != null; } }
 
-    public Gee.List<Message> search (string input, int limit = CacheDatabase.MESSAGE_LIST_LIMIT,
+    public Gee.List<Message> search (string input,
+                                     int limit = CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE,
                                      int offset = 0, bool unread_only = false,
                                      MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
         var query = SearchQuery.parse (input);

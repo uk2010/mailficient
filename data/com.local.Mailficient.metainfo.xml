@@ -11,6 +11,11 @@
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
+    <release version="0.3.1" date="2026-08-27">
+      <description>
+        <p>Removes the 500-message ceiling, continues large initial imports through bounded background sessions, and keeps the Inbox stable while streamed mail updates arrive.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-08-27">
       <description>
         <p>Moves Safe Senders, Blocked Senders, and remote-image sender management into a separate searchable window with compact summaries in Safety preferences.</p>

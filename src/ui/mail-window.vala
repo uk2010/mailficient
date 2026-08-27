@@ -110,6 +110,12 @@ public class MailWindow : Adw.ApplicationWindow {
     private string pending_folder_replacement_remote = "";
     private bool local_removal_refresh_pending;
     private uint repository_refresh_source;
+    // Only the first durable message batch in a backend pass needs to wake the
+    // coalesced UI refresh. The pass edge below publishes the final cache state
+    // before a history continuation starts, avoiding a full list rebuild for
+    // every five-message Camel batch while retaining first-batch visibility.
+    private StreamedPassRefreshGate streamed_pass_refresh =
+        new StreamedPassRefreshGate ();
     private string last_selected_mailbox_id = "";
     private string preserve_unread_selection_id = "";
     private Gtk.Button? toggle_read_button;
@@ -454,14 +460,22 @@ public class MailWindow : Adw.ApplicationWindow {
             // Camel commits streamed message batches before the account-wide
             // pass finishes. Surface those durable rows immediately instead of
             // making Inbox wait for every other folder, Drafts maintenance,
-            // vacation rules, and the final mutation flush. repository.changed
-            // already feeds the 250 ms coalescer above, so a large backfill
-            // still produces at most one bounded UI rebuild per interval.
+            // vacation rules, and the final mutation flush. Wake once for the
+            // first batch and once at the pass checkpoint below; the normal
+            // repository coalescer can merge those when a pass is short.
             sync_service.mail_available.connect ((account_id) => {
+                if (!streamed_pass_refresh.begin_batch (account_id)) return;
                 message_list.invalidate_cached_views ();
                 repository.reload ();
             });
             sync_service.pass_completed.connect ((account_id) => {
+                // Surface every durable row from this bounded pass. If its
+                // first-batch refresh is still queued, repository.changed()
+                // coalesces this checkpoint into that same pending rebuild.
+                if (streamed_pass_refresh.finish_pass (account_id)) {
+                    message_list.invalidate_cached_views ();
+                    repository.reload ();
+                }
                 sidebar.refresh_counts ();
             });
             // The streamed callback above handles row visibility. Keep this
@@ -475,6 +489,7 @@ public class MailWindow : Adw.ApplicationWindow {
                     finish_sync_progress ("Mail is up to date");
             });
             sync_service.mail_check_completed.connect ((account_id, messages_downloaded) => {
+                streamed_pass_refresh.finish_pass (account_id);
                 message_list.invalidate_cached_views ();
                 // A streamed batch already queued a coalesced refresh. Its
                 // delayed cache read sees the final snapshot as well, so a
@@ -491,12 +506,19 @@ public class MailWindow : Adw.ApplicationWindow {
                 sidebar.refresh_counts ();
             });
             sync_service.failed.connect ((account_id, error) => {
+                // A failed pass can still have committed useful batches after
+                // the first streamed refresh. Publish that partial checkpoint.
+                if (streamed_pass_refresh.finish_pass (account_id)) {
+                    message_list.invalidate_cached_views ();
+                    repository.reload ();
+                }
                 if (complete_account_sync (account_id))
                     finish_sync_progress (error.title);
                 if (selected_message == null) reader.show_error (error);
                 toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (error.title, error.suggestion)));
             });
             sync_service.cancelled.connect ((account_id) => {
+                streamed_pass_refresh.finish_pass (account_id);
                 message_list.invalidate_cached_views ();
                 repository.reload ();
                 if (complete_account_sync (account_id))
@@ -2175,7 +2197,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.3.0"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.3.1"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

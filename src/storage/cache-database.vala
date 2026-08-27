@@ -1,6 +1,9 @@
 namespace Mailficient {
 public class CacheDatabase : Object, AccountStore {
-    public const int MESSAGE_LIST_LIMIT = 500;
+    // A default query page, not a mailbox or synchronization ceiling. Callers
+    // that deliberately request a larger page are honored; interactive views
+    // use much smaller VirtualMessageModel pages.
+    public const int DEFAULT_MESSAGE_PAGE_SIZE = 500;
     public const int MAX_CONVERSATION_MESSAGES = 100;
     public const int BUSY_TIMEOUT_MILLISECONDS = 5000;
     // Sent-draft tombstones only bridge overlapping provider snapshots. User
@@ -3066,7 +3069,7 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public Gee.ArrayList<Message> list_cached_messages (string mailbox_id,
-                                                        int limit = MESSAGE_LIST_LIMIT,
+                                                        int limit = DEFAULT_MESSAGE_PAGE_SIZE,
                                                         int offset = 0,
                                                         bool unread_only = false,
                                                         MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
@@ -3079,7 +3082,7 @@ public class CacheDatabase : Object, AccountStore {
         if (unread_only) predicate += " AND m.unread=1";
         string grouping = is_grouped_smart_mailbox (mailbox_id) ?
             " GROUP BY m.account_id,COALESCE(NULLIF(m.internet_message_id,''),m.id)" : "";
-        int bounded_limit = int.max (1, int.min (MESSAGE_LIST_LIMIT + 1, limit));
+        int bounded_limit = int.max (0, limit);
         int bounded_offset = int.max (0, offset);
         string sql = "SELECT %s FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE %s%s ORDER BY %s LIMIT %d OFFSET %d".printf (
             columns, predicate, grouping, message_order (sort_mode), bounded_limit, bounded_offset);
@@ -4077,13 +4080,13 @@ public class CacheDatabase : Object, AccountStore {
     }
 
     public Gee.List<Message> search_messages (SearchQuery query,
-                                              int limit = MESSAGE_LIST_LIMIT,
+                                              int limit = DEFAULT_MESSAGE_PAGE_SIZE,
                                               int offset = 0,
                                               MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
         var sql = new StringBuilder ("SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
         var values = new Gee.ArrayList<string> ();
         append_search_predicates (sql, query, values);
-        int bounded_limit = int.max (1, int.min (MESSAGE_LIST_LIMIT + 1, limit));
+        int bounded_limit = int.max (0, limit);
         int bounded_offset = int.max (0, offset);
         sql.append_printf (" ORDER BY %s LIMIT %d OFFSET %d", message_order (sort_mode), bounded_limit, bounded_offset);
         Sqlite.Statement statement;

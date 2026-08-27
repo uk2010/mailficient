@@ -5,12 +5,21 @@ private const string GREENMAIL_ACCOUNT_ID = "greenmail-e2e";
 private const string GREENMAIL_EXTERNAL_ACCOUNT_ID = "greenmail-e2e-external";
 private const string GREENMAIL_ADDRESS = "qa@example.com";
 private const string GREENMAIL_PASSWORD = "mailficient-e2e";
+private const string GREENMAIL_LARGE_ACCOUNT_ID = "greenmail-large-inbox";
+private const string GREENMAIL_LARGE_ADDRESS = "large@example.com";
+// GreenMail's filesystem preloader creates this isolated user with the email
+// address as both login and password; no desktop credential service is used.
+private const string GREENMAIL_LARGE_PASSWORD = GREENMAIL_LARGE_ADDRESS;
+private const int GREENMAIL_LARGE_MESSAGE_COUNT = 751;
 
 private class GreenMailCredentialStore : Object, CredentialStore {
     private string fixture_account_id;
+    private string fixture_password;
 
-    public GreenMailCredentialStore (string fixture_account_id = GREENMAIL_ACCOUNT_ID) {
+    public GreenMailCredentialStore (string fixture_account_id = GREENMAIL_ACCOUNT_ID,
+                                     string fixture_password = GREENMAIL_PASSWORD) {
         this.fixture_account_id = fixture_account_id;
+        this.fixture_password = fixture_password;
     }
 
     public async void store_password (string account_id, string protocol, string password,
@@ -23,7 +32,7 @@ private class GreenMailCredentialStore : Object, CredentialStore {
         if (cancellable != null) cancellable.set_error_if_cancelled ();
         if (account_id != fixture_account_id ||
             (protocol != "imap" && protocol != "smtp")) return null;
-        return GREENMAIL_PASSWORD;
+        return fixture_password;
     }
 
     public async void clear_account (string account_id,
@@ -143,17 +152,18 @@ private uint fixture_port (string variable) throws MailError {
 }
 
 private AccountSettings greenmail_account (string account_id, uint imaps_port,
-                                            uint smtps_port) {
-    var account = AccountSettings.for_email ("Mailficient QA", GREENMAIL_ADDRESS);
+                                            uint smtps_port,
+                                            string address = GREENMAIL_ADDRESS) {
+    var account = AccountSettings.for_email ("Mailficient QA", address);
     account.id = account_id;
     account.incoming_host = "127.0.0.1";
     account.incoming_port = imaps_port;
     account.incoming_encryption = EncryptionMode.TLS;
-    account.incoming_username = GREENMAIL_ADDRESS;
+    account.incoming_username = address;
     account.outgoing_host = "127.0.0.1";
     account.outgoing_port = smtps_port;
     account.outgoing_encryption = EncryptionMode.TLS;
-    account.outgoing_username = GREENMAIL_ADDRESS;
+    account.outgoing_username = address;
     account.authentication = AuthenticationMode.PASSWORD;
     return account;
 }
@@ -404,6 +414,142 @@ private void test_greenmail_end_to_end () {
         GLib.error ("GreenMail provider qualification failed: %s", failure.message);
 }
 
+private async void exercise_greenmail_large_initial_import () throws Error {
+    uint imaps_port = fixture_port ("MAILFICIENT_TEST_GREENMAIL_IMAPS_PORT");
+    uint smtps_port = fixture_port ("MAILFICIENT_TEST_GREENMAIL_SMTPS_PORT");
+    string root = DirUtils.make_tmp ("mailficient-greenmail-large-XXXXXX");
+    string data_dir = Path.build_filename (root, "camel-data");
+    string camel_cache_dir = Path.build_filename (root, "camel-cache");
+    string received_dir = Path.build_filename (root, "received");
+    var engine = new CamelMailEngine (new GreenMailCredentialStore (
+        GREENMAIL_LARGE_ACCOUNT_ID, GREENMAIL_LARGE_PASSWORD), data_dir,
+        camel_cache_dir, received_dir);
+    engine.replace_session_for_testing (new GreenMailSession (
+        data_dir, camel_cache_dir, imaps_port, smtps_port,
+        GREENMAIL_LARGE_ACCOUNT_ID));
+
+    var cache = new CacheDatabase (Path.build_filename (root, "mail.sqlite"));
+    var account = greenmail_account (GREENMAIL_LARGE_ACCOUNT_ID, imaps_port,
+        smtps_port, GREENMAIL_LARGE_ADDRESS);
+    cache.save_account (account);
+    var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
+    var outbound = new OutboundService (cache, engine, attachments);
+    var service = new AccountSyncService (cache, engine, outbound,
+        new JunkFilterService (cache), attachments);
+
+    int completions = 0;
+    int continuations = 0;
+    int failures = 0;
+    int message_notifications = 0;
+    int summary_notifications = 0;
+    int logical_downloads = 0;
+    bool saw_deep_continuation = false;
+    bool waiting = true;
+    bool timed_out = false;
+    var cancellable = new Cancellable ();
+    service.synchronized.connect ((account_id) => {
+        if (account_id != account.id) return;
+        completions++;
+    });
+    service.pass_completed.connect ((account_id) => {
+        if (account_id == account.id) continuations++;
+    });
+    service.failed.connect ((account_id, error) => {
+        if (account_id == account.id) failures++;
+    });
+    service.new_message.connect ((message) => {
+        if (message.account_id == account.id) message_notifications++;
+    });
+    service.new_mail_summary.connect ((summary) => {
+        if (summary.account_id == account.id) summary_notifications++;
+    });
+    service.mail_check_completed.connect ((account_id, messages_downloaded) => {
+        if (account_id != account.id) return;
+        logical_downloads = messages_downloaded;
+        if (waiting) {
+            waiting = false;
+            // Let sync_account() finish its account-scoped bookkeeping after
+            // this terminal signal before the test tears down the service.
+            Idle.add (() => {
+                exercise_greenmail_large_initial_import.callback ();
+                return Source.REMOVE;
+            });
+        }
+    });
+    service.progress_changed.connect ((account_id, fraction, detail) => {
+        if (account_id == account.id &&
+            detail == "Downloaded 750 of 751 messages — continuing in background")
+            saw_deep_continuation = true;
+    });
+
+    uint timeout_source = 0;
+    timeout_source = Timeout.add_seconds (180, () => {
+        timeout_source = 0;
+        timed_out = true;
+        cancellable.cancel ();
+        if (waiting) {
+            waiting = false;
+            exercise_greenmail_large_initial_import.callback ();
+        }
+        return Source.REMOVE;
+    });
+    try {
+        Test.message ("importing 751 preloaded Inbox messages through AccountSyncService");
+        service.sync_account.begin (account, cancellable);
+        yield;
+        if (timeout_source != 0) {
+            Source.remove (timeout_source);
+            timeout_source = 0;
+        }
+        assert (!timed_out);
+        assert (failures == 0);
+        assert (completions == 1);
+        assert (continuations == 3);
+        assert (logical_downloads == GREENMAIL_LARGE_MESSAGE_COUNT);
+        assert (saw_deep_continuation);
+        assert (cache.cached_message_count (account.id) == GREENMAIL_LARGE_MESSAGE_COUNT);
+        assert (message_notifications == 0);
+        assert (summary_notifications == 0);
+
+        Mailbox? inbox = null;
+        foreach (var mailbox in cache.list_cached_mailboxes ()) {
+            if (mailbox.account_id == account.id && mailbox.role == MailboxRole.INBOX) {
+                inbox = mailbox;
+                break;
+            }
+        }
+        assert (inbox != null);
+        var first_page = cache.list_cached_messages (inbox.id);
+        var after_default_page = cache.list_cached_messages (inbox.id, 500, 500);
+        var deep_page = cache.list_cached_messages (inbox.id, 1, 700);
+        assert (first_page.size == CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE);
+        assert (after_default_page.size == GREENMAIL_LARGE_MESSAGE_COUNT - 500);
+        assert (deep_page.size == 1);
+        var deep_message = cache.find_cached_message (deep_page[0].id);
+        assert (deep_message != null);
+        assert (deep_message.subject.has_prefix ("GreenMail large inbox "));
+        assert (deep_message.body.contains ("GreenMail large inbox body "));
+    } finally {
+        if (timeout_source != 0) Source.remove (timeout_source);
+        service.cancel ();
+        try { yield engine.disconnect_account (account.id, null); }
+        catch (Error ignored) { }
+    }
+}
+
+private void test_greenmail_large_initial_import () {
+    Error? failure = null;
+    var loop = new MainLoop ();
+    exercise_greenmail_large_initial_import.begin ((object, result) => {
+        try { exercise_greenmail_large_initial_import.end (result); }
+        catch (Error error) { failure = error; }
+        loop.quit ();
+    });
+    loop.run ();
+    if (failure != null)
+        GLib.error ("GreenMail large Inbox qualification failed: %s", failure.message);
+}
+
 private void test_draft_uid_cap_converges () {
     const int draft_count = 501;
     var all_uids = new Gee.ArrayList<string> ();
@@ -450,6 +596,8 @@ int main (string[] args) {
         Log.set_always_fatal (LogLevelFlags.LEVEL_ERROR | LogLevelFlags.LEVEL_CRITICAL);
         Test.add_func ("/camel/integration/greenmail-end-to-end",
             Mailficient.test_greenmail_end_to_end);
+        Test.add_func ("/camel/integration/greenmail-large-initial-import",
+            Mailficient.test_greenmail_large_initial_import);
     }
     return Test.run ();
 }

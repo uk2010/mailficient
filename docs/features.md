@@ -2,7 +2,7 @@
 
 ## Browsing and bulk actions
 
-Mailboxes and search results load 100 lightweight summaries at a time. Use **Older** and **Newer** below the message list; opening one message loads only that message's body and attachments. This keeps browsing bounded even when an account contains tens of thousands of messages.
+Mailboxes and search results expose their complete logical result set and load lightweight summaries transparently in small pages as you scroll. Only a few pages remain in memory, and opening one message loads only that message's body and attachments. Initial synchronization likewise continues through bounded background sessions until all discovered history is cached; 250 messages is a per-session memory boundary, not an account limit. This keeps browsing bounded without hiding mail when an account contains tens of thousands of messages.
 
 The message list follows normal desktop selection behavior: hold **Shift** while clicking to select a contiguous range, hold **Ctrl** to add or remove individual messages, use **Ctrl+A** to select every message in the current view, and press **Escape** to clear the selection. **J/K** navigate messages, while **E**, **I**, **R**, **F**, and **S** provide quick archive, read-state, reply, forward, and snooze actions.
 

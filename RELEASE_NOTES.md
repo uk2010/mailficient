@@ -1,3 +1,19 @@
+# Mailficient 0.3.1
+
+Mailficient 0.3.1 makes large initial mailbox imports complete and keeps the
+Inbox stable while new mail is arriving.
+
+Highlights:
+
+- Removes the 500-message mailbox ceiling and exposes the complete logical
+  result set through bounded, transparent pages
+- Continues initial synchronization through as many bounded background
+  sessions as necessary for mailboxes containing thousands of messages
+- Coalesces streamed synchronization updates so the Inbox no longer repeatedly
+  disappears and repopulates while mail is downloaded
+- Adds regression coverage for pagination beyond 500 messages and a real IMAP
+  initial import containing 751 messages
+
 # Mailficient 0.3.0
 
 Mailficient 0.3.0 keeps sender-safety management compact and easy to navigate.

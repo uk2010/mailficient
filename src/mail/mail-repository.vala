@@ -3,7 +3,8 @@ public interface MailRepository : Object {
     public signal void changed ();
     public abstract Gee.List<Mailbox> list_mailboxes ();
     public abstract Gee.List<Message> list_messages (string mailbox_id, string query = "",
-                                                     int limit = 500, int offset = 0,
+                                                     int limit = CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE,
+                                                     int offset = 0,
                                                      bool unread_only = false,
                                                      MessageSortMode sort_mode = MessageSortMode.NEWEST);
     public abstract int message_count (string mailbox_id, string query = "",

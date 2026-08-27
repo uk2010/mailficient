@@ -99,7 +99,8 @@ public class CachedMailRepository : Object, MailRepository {
     }
 
     public Gee.List<Message> list_messages (string mailbox_id, string query = "",
-                                            int limit = 500, int offset = 0,
+                                            int limit = CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE,
+                                            int offset = 0,
                                             bool unread_only = false,
                                             MessageSortMode sort_mode = MessageSortMode.NEWEST) {
         if (mailbox_id == LOCAL_DRAFTS_ID || (is_demo_mode () && mailbox_id == "drafts")) return draft_messages ();

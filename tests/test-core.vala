@@ -1706,6 +1706,34 @@ private void test_startup_sync_gate () {
     assert (offline.should_sync_for_network_change (true));
 }
 
+private void test_streamed_pass_refresh_gate () {
+    var gate = new StreamedPassRefreshGate ();
+    int refreshes = 0;
+
+    // Fifty five-message callbacks in one bounded backend pass still request
+    // one early paint and one final pass checkpoint.
+    for (int batch = 0; batch < 50; batch++)
+        if (gate.begin_batch ("account")) refreshes++;
+    assert (gate.is_active ("account"));
+    if (gate.finish_pass ("account")) refreshes++;
+    assert (refreshes == 2);
+    assert (!gate.is_active ("account"));
+
+    // A history continuation starts a fresh pass and gets the same two edges.
+    for (int batch = 0; batch < 50; batch++)
+        if (gate.begin_batch ("account")) refreshes++;
+    if (gate.finish_pass ("account")) refreshes++;
+    assert (refreshes == 4);
+    assert (!gate.is_active ("account"));
+
+    // Terminal signals are idempotent after completion, and another account
+    // remains independently eligible for its first-batch refresh.
+    assert (!gate.finish_pass ("account"));
+    assert (gate.begin_batch ("other-account"));
+    assert (gate.finish_pass ("other-account"));
+    assert (!gate.is_active ("other-account"));
+}
+
 private void test_signature_service () {
     string path = Path.build_filename (Environment.get_tmp_dir (), "mailficient-signature-%s.sqlite".printf (Uuid.string_random ()));
     try {
@@ -2289,6 +2317,7 @@ private void test_synchronized_cache_repository () {
 }
 
 private void test_cached_message_pagination () {
+    const int message_total = 1230;
     string path = Path.build_filename (Environment.get_tmp_dir (),
         "mailficient-pages-%s.sqlite".printf (Uuid.string_random ())) ;
     try {
@@ -2299,7 +2328,7 @@ private void test_cached_message_pagination () {
         var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
             MailboxRole.INBOX, 0, account.id, "INBOX");
         var snapshot = new MailSyncResult (account.id); snapshot.mailboxes.add (inbox);
-        for (int index = 0; index < 230; index++) {
+        for (int index = 0; index < message_total; index++) {
             string uid = index.to_string ();
             snapshot.messages.add (new Message (account.id + ":inbox:" + uid, inbox.id,
                 "Paged Sender", "sender@example.net", account.email,
@@ -2310,13 +2339,19 @@ private void test_cached_message_pagination () {
 
         var first = cache.list_cached_messages ("unified-inbox", 100, 0);
         var second = cache.list_cached_messages ("unified-inbox", 100, 100);
-        var third = cache.list_cached_messages ("unified-inbox", 100, 200);
-        assert (cache.count_cached_messages ("unified-inbox") == 230);
-        assert (cache.count_cached_messages ("unified-inbox", true) == 115);
-        assert (first.size == 100); assert (second.size == 100); assert (third.size == 30);
-        assert (first[0].remote_uid == "229"); assert (second[0].remote_uid == "129");
-        assert (third[0].remote_uid == "29"); assert (first[0].body == "");
-        assert (first[99].id != second[0].id); assert (second[99].id != third[0].id);
+        var beyond_default_window = cache.list_cached_messages ("unified-inbox", 100, 600);
+        var last = cache.list_cached_messages ("unified-inbox", 100, 1200);
+        var explicit_large_page = cache.list_cached_messages ("unified-inbox", 700, 0);
+        assert (cache.count_cached_messages ("unified-inbox") == message_total);
+        assert (cache.count_cached_messages ("unified-inbox", true) == message_total / 2);
+        assert (first.size == 100); assert (second.size == 100);
+        assert (beyond_default_window.size == 100); assert (last.size == 30);
+        assert (explicit_large_page.size == 700);
+        assert (first[0].remote_uid == "1229"); assert (second[0].remote_uid == "1129");
+        assert (beyond_default_window[0].remote_uid == "629");
+        assert (last[0].remote_uid == "29"); assert (first[0].body == "");
+        assert (first[99].id != second[0].id);
+        assert (beyond_default_window[99].id != last[0].id);
         var oldest = cache.list_cached_messages ("unified-inbox", 100, 0, false,
             MessageSortMode.OLDEST);
         assert (oldest[0].remote_uid == "0");
@@ -2325,11 +2360,34 @@ private void test_cached_message_pagination () {
 
         var query = SearchQuery.parse ("Paged");
         var search_first = cache.search_messages (query, 100, 0);
-        var search_third = cache.search_messages (query, 100, 200);
-        assert (cache.count_search_messages (query) == 230);
-        query.unread = true; assert (cache.count_search_messages (query) == 115);
-        assert (search_first.size == 100); assert (search_third.size == 30);
-        assert (search_first[0].remote_uid == "229"); assert (search_third[0].remote_uid == "29");
+        var search_beyond_default_window = cache.search_messages (query, 100, 600);
+        var search_last = cache.search_messages (query, 100, 1200);
+        assert (cache.count_search_messages (query) == message_total);
+        query.unread = true;
+        assert (cache.count_search_messages (query) == message_total / 2);
+        assert (search_first.size == 100);
+        assert (search_beyond_default_window.size == 100); assert (search_last.size == 30);
+        assert (search_first[0].remote_uid == "1229");
+        assert (search_beyond_default_window[0].remote_uid == "629");
+        assert (search_last[0].remote_uid == "29");
+
+        // The repository exposes the complete logical count while each model
+        // request remains a small database page. Crossing position 500 must
+        // not imply either a storage ceiling or an in-memory 1,230-row list.
+        var repository = new CachedMailRepository (cache, new DemoMailRepository ());
+        var model = new VirtualMessageModel (
+            repository.message_count ("unified-inbox"), (limit, offset) => {
+                return repository.list_messages (
+                    "unified-inbox", "", limit, offset);
+            });
+        assert (model.get_n_items () == message_total);
+        var top = model.get_item (0) as Message;
+        var after_500 = model.get_item (600) as Message;
+        var tail = model.get_item (1200) as Message;
+        assert (top != null && top.remote_uid == "1229");
+        assert (after_500 != null && after_500.remote_uid == "629");
+        assert (tail != null && tail.remote_uid == "29");
+        assert (model.cached_page_count <= VirtualMessageModel.MAX_CACHED_PAGES);
     } catch (Error error) { GLib.error ("cached pagination test failed: %s", error.message); }
     FileUtils.unlink (path);
 }
@@ -2868,7 +2926,7 @@ private void test_long_running_streamed_sync_is_bounded () {
         assert (engine.disconnect_calls == 0);
         assert (engine.maximum_active_synchronizations == 1);
         var cached_summaries = cache.list_cached_messages (inbox.id);
-        assert (cached_summaries.size == CacheDatabase.MESSAGE_LIST_LIMIT);
+        assert (cached_summaries.size == CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE);
         foreach (var summary in cached_summaries) {
             assert (summary.body == ""); assert (summary.body_html == "");
             assert (summary.attachments.size == 0);
@@ -2879,6 +2937,9 @@ private void test_long_running_streamed_sync_is_bounded () {
 }
 
 private void test_automatic_history_backfill () {
+    const int history_total = 1251;
+    const int session_size = 250;
+    int pass_count = 6;
     string root = Path.build_filename (Environment.get_tmp_dir (),
         "mailficient-auto-backfill-%s".printf (Uuid.string_random ())) ;
     try {
@@ -2888,7 +2949,7 @@ private void test_automatic_history_backfill () {
         account.id = "backfill-account"; account.incoming_host = "imap.example.net";
         account.outgoing_host = "smtp.example.net"; cache.save_account (account);
         var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
-            MailboxRole.INBOX, 502, account.id, "INBOX");
+            MailboxRole.INBOX, history_total + 1, account.id, "INBOX");
         var initial = new MailSyncResult (account.id); initial.mailboxes.add (inbox);
         initial.messages.add (new Message (account.id + ":inbox:seed", inbox.id, "Seed",
             "seed@example.net", account.email, "Seed", "", "Seed", "Earlier", false,
@@ -2898,16 +2959,16 @@ private void test_automatic_history_backfill () {
         var engine = new RecordingMailEngine (account.id);
         engine.publish_connection_progress = true;
         int sequence = 0;
-        for (int pass = 0; pass < 3; pass++) {
+        for (int pass = 0; pass < pass_count; pass++) {
             var snapshot = new MailSyncResult (account.id); snapshot.mailboxes.add (inbox);
-            int pass_size = pass < 2 ? 250 : 1;
-            snapshot.messages_to_download = 501 - sequence;
+            int pass_size = int.min (session_size, history_total - sequence);
+            snapshot.messages_to_download = history_total - sequence;
             for (int item = 0; item < pass_size; item++, sequence++)
                 snapshot.messages.add (new Message ("%s:inbox:%d".printf (account.id, sequence),
                     inbox.id, "History", "history@example.net", account.email,
                     "History %d".printf (sequence), "", "Body", "Earlier", true, false,
                     false, 1, false, account.id, sequence.to_string ()));
-            snapshot.more_messages_available = pass < 2;
+            snapshot.more_messages_available = sequence < history_total;
             engine.queued_snapshots.add (snapshot);
         }
         var attachments = new AttachmentService (Path.build_filename (root, "attachments"));
@@ -2917,7 +2978,7 @@ private void test_automatic_history_backfill () {
         int summaries = 0; int summarized_messages = 0;
         int mail_checks = 0; int logical_downloads = 0;
         bool saw_initial_total = false; bool saw_background_total = false;
-        bool saw_second_background_total = false;
+        bool saw_beyond_500_total = false; bool saw_deep_background_total = false;
         bool progress_went_backwards = false; bool progress_completed_early = false;
         double previous_progress = 0; int full_progress_events = 0;
         service.synchronized.connect ((id) => completed++);
@@ -2940,15 +3001,18 @@ private void test_automatic_history_backfill () {
             previous_progress = fraction;
             if (fraction >= 1) {
                 full_progress_events++;
-                if (engine.synchronize_calls < 3) progress_completed_early = true;
+                if (engine.synchronize_calls < pass_count) progress_completed_early = true;
             }
             if ((int) (fraction * 100 + 0.5) >= 100 &&
-                engine.synchronize_calls < 3)
+                engine.synchronize_calls < pass_count)
                 progress_completed_early = true;
-            if (detail == "Downloaded 0 of 501 messages") saw_initial_total = true;
-            if (detail == "Downloaded 250 of 501 messages — continuing in background") saw_background_total = true;
-            if (detail == "Downloaded 500 of 501 messages — continuing in background")
-                saw_second_background_total = true;
+            if (detail == "Downloaded 0 of 1251 messages") saw_initial_total = true;
+            if (detail == "Downloaded 250 of 1251 messages — continuing in background")
+                saw_background_total = true;
+            if (detail == "Downloaded 750 of 1251 messages — continuing in background")
+                saw_beyond_500_total = true;
+            if (detail == "Downloaded 1250 of 1251 messages — continuing in background")
+                saw_deep_background_total = true;
         });
         var loop = new MainLoop ();
         service.sync_account.begin (account, null, (object, result) => {
@@ -2965,22 +3029,26 @@ private void test_automatic_history_backfill () {
         if (!timed_out) Source.remove (timeout_source);
         assert (!timed_out); assert (failures == 0);
         assert (completed == 1); assert (mail_checks == 1);
-        assert (logical_downloads == 501); assert (checkpoints == 2);
-        assert (engine.synchronize_calls == 3); assert (engine.disconnect_calls == 2);
-        assert (cache.cached_message_count (account.id) == 502);
+        assert (logical_downloads == history_total); assert (checkpoints == pass_count - 1);
+        assert (engine.synchronize_calls == pass_count);
+        assert (engine.disconnect_calls == pass_count - 1);
+        assert (cache.cached_message_count (account.id) == history_total + 1);
         assert (saw_initial_total); assert (saw_background_total);
-        assert (saw_second_background_total);
+        assert (saw_beyond_500_total); assert (saw_deep_background_total);
         assert (!progress_went_backwards); assert (!progress_completed_early);
         assert (full_progress_events == 1); assert (previous_progress == 1);
-        assert (engine.lifecycle.size == 8);
-        assert (engine.lifecycle[0] == "connect"); assert (engine.lifecycle[1] == "synchronize");
-        assert (engine.lifecycle[2] == "disconnect"); assert (engine.lifecycle[3] == "connect");
-        assert (engine.lifecycle[4] == "synchronize"); assert (engine.lifecycle[5] == "disconnect");
-        assert (engine.lifecycle[6] == "connect"); assert (engine.lifecycle[7] == "synchronize");
-        // The three fresh backend sessions form one logical mail check. Publish
-        // one bounded notification only after all 501 arrivals are durable.
+        assert (engine.lifecycle.size == pass_count * 3 - 1);
+        int lifecycle_index = 0;
+        for (int pass = 0; pass < pass_count; pass++) {
+            assert (engine.lifecycle[lifecycle_index++] == "connect");
+            assert (engine.lifecycle[lifecycle_index++] == "synchronize");
+            if (pass + 1 < pass_count)
+                assert (engine.lifecycle[lifecycle_index++] == "disconnect");
+        }
+        // Six fresh backend sessions form one logical mail check. Publish one
+        // bounded notification only after all 1,251 arrivals are durable.
         assert (notifications == NewMailSummary.MAX_SAMPLE_MESSAGES);
-        assert (summaries == 1); assert (summarized_messages == 501);
+        assert (summaries == 1); assert (summarized_messages == history_total);
     } catch (Error error) { GLib.error ("automatic backfill test failed: %s", error.message); }
 }
 
@@ -4487,6 +4555,7 @@ int main (string[] args) {
     Test.add_func ("/draft/state", test_draft_state);
     Test.add_func ("/storage/settings", test_settings_store);
     Test.add_func ("/sync/startup-network-gate", test_startup_sync_gate);
+    Test.add_func ("/sync/streamed-pass-refresh-gate", test_streamed_pass_refresh_gate);
     Test.add_func ("/sync/live-mail-coordinator", test_live_mail_coordinator_debounces_and_cancels);
     Test.add_func ("/sync/live-arrival-triggers-one-sync", test_live_arrival_triggers_one_sync);
     Test.add_func ("/sync/live-arrival-during-sync-is-not-lost",
