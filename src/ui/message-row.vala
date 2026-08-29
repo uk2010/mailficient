@@ -1,5 +1,6 @@
 namespace Mailficient {
 public class MessageRow : Gtk.Box {
+    public const string DRAG_PAYLOAD_PREFIX = "mailficient-message-ids:\n";
     public signal void reopen_requested (Message message);
     public Message message { get; construct; }
     private weak Gtk.SelectionModel? context_selection;
@@ -31,6 +32,7 @@ public class MessageRow : Gtk.Box {
         accessible_role = Gtk.AccessibleRole.LIST_ITEM;
 
         var outer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        outer.add_css_class ("message-row-shell");
         outer.valign = Gtk.Align.CENTER;
         if (multiple && context_selection != null) {
             var selector = new Gtk.CheckButton ();
@@ -83,6 +85,8 @@ public class MessageRow : Gtk.Box {
         avatar.can_target = false;
         avatar.add_css_class ("sender-avatar");
         avatar.add_css_class ("circular");
+        avatar.add_css_class ("avatar-tone-%u".printf (
+            str_hash (message.sender_address) % 6));
         avatar_overlay.child = avatar;
         unread_dot = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         unread_dot.add_css_class ("unread-indicator-dot");
@@ -96,6 +100,7 @@ public class MessageRow : Gtk.Box {
         content.hexpand = true;
         content.add_css_class ("message-row-content");
         var top = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+        top.add_css_class ("message-sender-line");
         var sender = new Gtk.Label (message.sender_name);
         sender.xalign = 0; sender.hexpand = true;
         sender.ellipsize = Pango.EllipsizeMode.END;
@@ -109,6 +114,7 @@ public class MessageRow : Gtk.Box {
         top.append (time);
         content.append (top);
         var subject_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 5);
+        subject_box.add_css_class ("message-subject-line");
         string subject_text = message.subject.strip () == "" ? "(No Subject)" : message.subject;
         var subject = new Gtk.Label (subject_text);
         subject.xalign = 0; subject.hexpand = true;
@@ -130,12 +136,24 @@ public class MessageRow : Gtk.Box {
         tooltip_text = "%s — %s".printf (message.sender_name, message.subject);
         update_accessible_label ();
 
-        var menu = new Menu (); menu.append ("Reply", "win.reply"); menu.append ("Reply All", "win.reply-all");
-        menu.append ("Forward", "win.forward"); menu.append ("Archive", "win.archive");
-        menu.append ("Move or Copy…", "win.show-move");
+        var menu = new Menu ();
+        var replies = new Menu ();
+        replies.append ("Reply", "win.reply");
+        replies.append ("Reply All", "win.reply-all");
+        replies.append ("Forward", "win.forward");
+        menu.append_section (null, replies);
+
+        var filing = new Menu ();
+        filing.append ("Archive", "win.archive");
+        filing.append ("Delete", "win.trash");
+        filing.append ("Junk or Not Junk", "win.junk");
+        filing.append ("Move or Copy…", "win.show-move");
+        menu.append_section (null, filing);
+
+        var state = new Menu ();
         read_menu_item = new MenuItem (message.unread ? "Mark as Read" : "Mark as Unread", "win.toggle-read");
-        menu.append_item (read_menu_item);
-        menu.append ("Flag or Unflag", "win.flag");
+        state.append_item (read_menu_item);
+        state.append ("Flag or Unflag", "win.flag");
         var flag_colors = new Menu ();
         flag_colors.append ("Orange", "win.set-flag-color::orange");
         flag_colors.append ("Red", "win.set-flag-color::red");
@@ -145,10 +163,20 @@ public class MessageRow : Gtk.Box {
         flag_colors.append ("Green", "win.set-flag-color::green");
         flag_colors.append ("Gray", "win.set-flag-color::gray");
         flag_colors.append ("Clear Flag", "win.clear-flag");
-        menu.append_submenu ("Flag Color", flag_colors);
-        menu.append ("Labels…", "win.labels");
-        menu.append ("Snooze…", "win.snooze");
-        menu.append ("Export Message…", "win.export-message"); menu.append ("Print…", "win.print-message");
+        state.append_submenu ("Flag Color", flag_colors);
+        state.append ("Labels…", "win.labels");
+        state.append ("Snooze…", "win.snooze");
+        menu.append_section (null, state);
+
+        var automation = new Menu ();
+        automation.append ("Create Rule from Sender…", "win.create-rule-from-message");
+        automation.append ("Apply Rules", "win.apply-rules");
+        menu.append_section (null, automation);
+
+        var output = new Menu ();
+        output.append ("Export Message…", "win.export-message");
+        output.append ("Print…", "win.print-message");
+        menu.append_section (null, output);
         var popover = new Gtk.PopoverMenu.from_model (menu); popover.set_parent (this); popover.has_arrow = false;
         var context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
         weak Gtk.SelectionModel? row_selection = context_selection;
@@ -168,6 +196,39 @@ public class MessageRow : Gtk.Box {
             popover.pointing_to = { (int) x, (int) y, 1, 1 }; popover.popup ();
         });
         add_controller (context_click);
+
+        var drag_source = new Gtk.DragSource ();
+        drag_source.actions = Gdk.DragAction.MOVE | Gdk.DragAction.COPY;
+        drag_source.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        drag_source.prepare.connect ((x, y) => {
+            uint row_position = weak_row == null ? Gtk.INVALID_LIST_POSITION :
+                weak_row.current_position ();
+            if (row_position != Gtk.INVALID_LIST_POSITION && row_selection != null &&
+                !row_selection.is_selected (row_position))
+                row_selection.select_item (row_position, true);
+
+            var payload = new StringBuilder (DRAG_PAYLOAD_PREFIX);
+            int included = 0;
+            if (row_selection != null) {
+                var selected = row_selection.get_selection ();
+                Gtk.BitsetIter iterator = Gtk.BitsetIter ();
+                uint position;
+                if (iterator.init_first (selected, out position)) {
+                    do {
+                        var selected_message = row_selection.get_item (position) as Message;
+                        if (selected_message == null) continue;
+                        if (included++ > 0) payload.append_c ('\n');
+                        payload.append (selected_message.id);
+                    } while (iterator.next (out position));
+                }
+            }
+            if (included == 0) payload.append (message.id);
+            Value value = Value (typeof (string));
+            value.set_string (payload.str);
+            return new Gdk.ContentProvider.for_value (value);
+        });
+        add_controller (drag_source);
+
         var primary_click = new Gtk.GestureClick (); primary_click.button = Gdk.BUTTON_PRIMARY;
         primary_click.released.connect ((count, x, y) => {
             // Gtk does not emit selection-changed when the already-selected

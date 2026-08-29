@@ -14,7 +14,11 @@ public class MessageSecurityAssessment : Object {
     public Gee.ArrayList<string> findings { get; private set; default = new Gee.ArrayList<string> (); }
     public bool should_show_inline_warning {
         get {
-            return !sender_is_safe && level >= MessageThreatLevel.CAUTION;
+            // A Safe Sender preference can quiet lower-confidence identity
+            // differences, but it must never hide a confirmed authentication
+            // failure from the message reader.
+            return level >= MessageThreatLevel.DANGER ||
+                (!sender_is_safe && level >= MessageThreatLevel.CAUTION);
         }
     }
 

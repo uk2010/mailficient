@@ -17,8 +17,13 @@ public class VacationResponderService : Object {
             if (!message.unread || !inboxes.contains (message.mailbox_id) || sender == account.email.down () ||
                 sender.contains ("no-reply") || sender.contains ("noreply") || cache.vacation_replied_to (snapshot.account_id, sender)) continue;
             var draft = new Draft (snapshot.account_id); draft.to = sender;
-            draft.subject = settings.subject.strip () == "" ?
-                (message.subject.has_prefix ("Re:") ? message.subject : "Re: " + message.subject) : settings.subject;
+            string configured_subject = settings.subject.strip ();
+            if (configured_subject != "")
+                draft.subject = settings.subject;
+            else if (message.subject.has_prefix ("Re:"))
+                draft.subject = message.subject;
+            else
+                draft.subject = "Re: " + message.subject;
             draft.body_text = settings.body;
             yield outbound.deliver (draft, cancellable);
             cache.record_vacation_reply (snapshot.account_id, sender); sent++;

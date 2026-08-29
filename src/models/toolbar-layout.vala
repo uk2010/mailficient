@@ -1,7 +1,13 @@
 namespace Mailficient {
 public class ToolbarLayout : Object {
-    public const string DEFAULT_LAYOUT =
+    public const string LEGACY_DEFAULT_LAYOUT =
         "sidebar,compose,flex,flex,flex,flex,flex,flex,refresh,flex:0,reply-group,flex:0,mail-actions,flex:0,move,flex:0,flag,flex,search,sort";
+    public const string DEFAULT_LAYOUT =
+        "sidebar,compose,refresh,flex,mail-actions,reply,move,flex,search,sort";
+
+    public static bool is_legacy_default (string serialized) {
+        return serialize (parse (serialized)) == serialize (parse (LEGACY_DEFAULT_LAYOUT));
+    }
 
     public static Gee.ArrayList<string> parse (string serialized) {
         var result = new Gee.ArrayList<string> ();
@@ -163,7 +169,7 @@ public class ToolbarLayout : Object {
             "reply-group", "archive", "trash", "junk", "mail-actions",
             "reply", "reply-all", "forward", "flag", "move",
             "compose", "refresh", "print", "toggle-read", "labels",
-            "snooze", "search", "sort", "sidebar", "space", "flex:0"
+            "snooze", "search", "sort", "sidebar", "space", "flex"
         };
     }
 }

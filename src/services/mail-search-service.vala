@@ -17,16 +17,65 @@ public class MailSearchService : Object {
     public Gee.List<Message> search (string input,
                                      int limit = CacheDatabase.DEFAULT_MESSAGE_PAGE_SIZE,
                                      int offset = 0, bool unread_only = false,
-                                     MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
-        var query = SearchQuery.parse (input);
+                                     MessageSortMode sort_mode = MessageSortMode.NEWEST,
+                                     MailSearchScope scope = MailSearchScope.ALL_MAIL,
+                                     string current_mailbox_id = "") throws MailError {
+        var query = scoped_query (input, scope, current_mailbox_id);
         if (unread_only) query.unread = true;
-        return cache.search_messages (query, limit, offset, sort_mode);
+        string mailbox_scope; string account_scope;
+        resolve_local_scope (scope, current_mailbox_id, out mailbox_scope, out account_scope);
+        return cache.search_messages (query, limit, offset, sort_mode,
+            mailbox_scope, account_scope);
     }
 
-    public int count (string input, bool unread_only = false) throws MailError {
-        var query = SearchQuery.parse (input);
+    public int count (string input, bool unread_only = false,
+                      MailSearchScope scope = MailSearchScope.ALL_MAIL,
+                      string current_mailbox_id = "") throws MailError {
+        var query = scoped_query (input, scope, current_mailbox_id);
         if (unread_only) query.unread = true;
-        return cache.count_search_messages (query);
+        string mailbox_scope; string account_scope;
+        resolve_local_scope (scope, current_mailbox_id, out mailbox_scope, out account_scope);
+        return cache.count_search_messages (query, mailbox_scope, account_scope);
+    }
+
+    private SearchQuery scoped_query (string input, MailSearchScope scope,
+                                      string current_mailbox_id) throws MailError {
+        if (scope == MailSearchScope.CURRENT_FOLDER &&
+            current_mailbox_id.has_prefix (CachedMailRepository.SMART_MAILBOX_PREFIX)) {
+            try {
+                int64 id = int64.parse (current_mailbox_id.substring (
+                    CachedMailRepository.SMART_MAILBOX_PREFIX.length));
+                var smart = cache.find_smart_mailbox (id);
+                if (smart != null)
+                    return SearchQuery.parse (smart.query + " " + input);
+            } catch (Error error) {
+                throw new MailError.INVALID_MESSAGE ("This Smart Mailbox is unavailable");
+            }
+        }
+        return SearchQuery.parse (input);
+    }
+
+    private void resolve_local_scope (MailSearchScope scope, string current_mailbox_id,
+                                      out string mailbox_scope,
+                                      out string account_scope) throws MailError {
+        mailbox_scope = ""; account_scope = "";
+        if (scope == MailSearchScope.ALL_MAIL) return;
+        if (scope == MailSearchScope.CURRENT_FOLDER) {
+            // A Smart Mailbox contributes its saved query above rather than a
+            // physical mailbox id. Every other unified or physical mailbox is
+            // constrained with the same predicate used by its normal list.
+            if (!current_mailbox_id.has_prefix (CachedMailRepository.SMART_MAILBOX_PREFIX))
+                mailbox_scope = current_mailbox_id;
+            return;
+        }
+        foreach (var mailbox in cache.list_cached_mailboxes ()) {
+            if (mailbox.id != current_mailbox_id) continue;
+            account_scope = mailbox.account_id;
+            break;
+        }
+        if (account_scope == "")
+            throw new MailError.INVALID_MESSAGE (
+                "Choose a mailbox inside the account you want to search");
     }
 
     public async int fetch_from_server (string input, MailSearchScope scope,
@@ -72,7 +121,8 @@ public class MailSearchService : Object {
             throw new MailError.INVALID_MESSAGE (
                 "Choose a folder from the account you want to search");
         foreach (var mailbox in all) {
-            if (scope == MailSearchScope.CURRENT_FOLDER && mailbox.id != current_mailbox_id) continue;
+            if (scope == MailSearchScope.CURRENT_FOLDER &&
+                !mailbox_matches_scope (mailbox, current_mailbox_id)) continue;
             if (scope == MailSearchScope.CURRENT_ACCOUNT && active_account != "" && mailbox.account_id != active_account) continue;
             if (query.account != null && !account_matches (mailbox.account_id, query.account)) continue;
             if (query.mailbox != null && mailbox.id.down () != query.mailbox.down () &&
@@ -80,6 +130,18 @@ public class MailSearchService : Object {
             result.add (mailbox);
         }
         return result;
+    }
+
+    private static bool mailbox_matches_scope (Mailbox mailbox, string current_mailbox_id) {
+        if (mailbox.id == current_mailbox_id) return true;
+        switch (current_mailbox_id) {
+        case "unified-inbox": return mailbox.role == MailboxRole.INBOX;
+        case "unified-sent": return mailbox.role == MailboxRole.SENT;
+        case "unified-archive": return mailbox.role == MailboxRole.ARCHIVE;
+        case "unified-junk": return mailbox.role == MailboxRole.JUNK;
+        case "unified-trash": return mailbox.role == MailboxRole.TRASH;
+        default: return false;
+        }
     }
 
     private bool account_matches (string account_id, string requested) throws MailError {

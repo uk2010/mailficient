@@ -140,6 +140,7 @@ public class ComposeWindow : Adw.Window {
         }
         var toolbar = new Adw.ToolbarView ();
         var header = new Adw.HeaderBar ();
+        header.add_css_class ("compose-header-bar");
         var title_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
         var title_label = new Gtk.Label ("");
         title_label.add_css_class ("heading");
@@ -149,7 +150,10 @@ public class ComposeWindow : Adw.Window {
         draft_status_label.visible = false;
         title_box.append (title_label); title_box.append (draft_status_label);
         header.title_widget = title_box;
-        cancel_button = new Gtk.Button.with_label ("Cancel"); cancel_button.clicked.connect (request_close); header.pack_start (cancel_button);
+        cancel_button = new Gtk.Button.with_label ("Cancel");
+        cancel_button.add_css_class ("flat");
+        cancel_button.add_css_class ("compose-cancel-button");
+        cancel_button.clicked.connect (request_close); header.pack_start (cancel_button);
         if (queued_item != null && queued_item.delivery_state != OutboxDeliveryState.ACCEPTED &&
             queued_item.delivery_state != OutboxDeliveryState.PREPARING) {
             delete_queued_button = new Gtk.Button.with_label ("Delete");
@@ -161,10 +165,13 @@ public class ComposeWindow : Adw.Window {
         }
         send_button = new Gtk.Button.with_label ("Send");
         send_button.add_css_class ("suggested-action");
+        send_button.add_css_class ("compose-send-button");
         send_button.tooltip_text = "Send message (Ctrl+Enter)";
         Accessibility.label (send_button, "Send message");
         send_button.clicked.connect (() => send_message.begin ()); header.pack_end (send_button);
         send_later_button = new Gtk.Button.with_label ("Send Later…");
+        send_later_button.add_css_class ("flat");
+        send_later_button.add_css_class ("compose-send-later-button");
         send_later_button.tooltip_text = "Choose a date and time to send";
         Accessibility.label (send_later_button, "Choose a date and time to send this message");
         send_later_button.clicked.connect (() => schedule_send.begin ()); header.pack_end (send_later_button);
@@ -217,7 +224,19 @@ public class ComposeWindow : Adw.Window {
         });
         body.add_controller (body_key_controller);
         var scroller = new Gtk.ScrolledWindow (); scroller.add_css_class ("compose-editor-scroller");
-        scroller.set_child (body); scroller.vexpand = true; root.append (scroller);
+        scroller.set_child (body); scroller.vexpand = true;
+        var editor = new Gtk.Overlay ();
+        editor.vexpand = true;
+        editor.set_child (scroller);
+        var body_placeholder = new Gtk.Label ("Write your message…");
+        body_placeholder.halign = Gtk.Align.START;
+        body_placeholder.valign = Gtk.Align.START;
+        body_placeholder.can_target = false;
+        body_placeholder.add_css_class ("compose-body-placeholder");
+        editor.add_overlay (body_placeholder);
+        body.buffer.changed.connect (() =>
+            body_placeholder.visible = body.buffer.text.strip () == "");
+        root.append (editor);
         forward_status.set_margin_start (14); forward_status.set_margin_end (14);
         forward_status.set_margin_top (8); forward_status.set_margin_bottom (2);
         forward_status.append (forward_spinner); forward_status.append (forward_status_label);
@@ -229,6 +248,7 @@ public class ComposeWindow : Adw.Window {
         bottom_actions.set_margin_start (12); bottom_actions.set_margin_end (12); bottom_actions.set_margin_top (8); bottom_actions.set_margin_bottom (10);
         var content_group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         content_group.add_css_class ("linked");
+        content_group.add_css_class ("compose-content-actions");
         attach_button = new Gtk.Button.from_icon_name ("mail-attachment-symbolic"); attach_button.tooltip_text = "Attach files"; Accessibility.label (attach_button, "Attach files"); attach_button.clicked.connect (() => choose_attachments.begin ()); content_group.append (attach_button);
         var image_button = new Gtk.Button.from_icon_name ("insert-image-symbolic"); image_button.tooltip_text = "Insert image";
         Accessibility.label (image_button, "Insert inline image"); image_button.clicked.connect (() => choose_inline_image.begin ()); content_group.append (image_button);
@@ -236,6 +256,7 @@ public class ComposeWindow : Adw.Window {
 
         var format_group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         format_group.add_css_class ("linked");
+        format_group.add_css_class ("compose-format-actions");
         bold_button = format_toggle_button ("format-text-bold-symbolic", "Bold", RichTextBuffer.BOLD);
         italic_button = format_toggle_button ("format-text-italic-symbolic", "Italic", RichTextBuffer.ITALIC);
         underline_button = format_toggle_button ("format-text-underline-symbolic", "Underline", RichTextBuffer.UNDERLINE);
@@ -248,12 +269,14 @@ public class ComposeWindow : Adw.Window {
         flexible_space.hexpand = true; bottom_actions.append (flexible_space);
         var utility_group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         utility_group.add_css_class ("linked");
+        utility_group.add_css_class ("compose-utility-actions");
         spellcheck_button = new Gtk.Button.from_icon_name ("tools-check-spelling-symbolic");
         spellcheck_button.tooltip_text = "Check spelling";
         Accessibility.label (spellcheck_button, "Check spelling");
         spellcheck_button.clicked.connect (() => show_spelling_dialog.begin ());
         utility_group.append (spellcheck_button);
         security_button = new Gtk.Button.from_icon_name ("channel-insecure-symbolic");
+        security_button.add_css_class ("compose-security-button");
         Accessibility.label (security_button, "Message signing and encryption");
         security_button.clicked.connect (() => configure_security.begin ()); utility_group.append (security_button);
         utility_group.append (build_compose_overflow_button ());
@@ -390,9 +413,13 @@ public class ComposeWindow : Adw.Window {
                 body.buffer.get_iter_at_offset (out end, issue.end_offset);
                 body.buffer.apply_tag (spelling_tag, start, end);
             }
-            string status = spelling_issues.size == 0 ? "No spelling issues found" :
-                (spelling_issues.size == 1 ? "1 possible spelling issue" :
-                    "%d possible spelling issues".printf (spelling_issues.size));
+            string status;
+            if (spelling_issues.size == 0)
+                status = "No spelling issues found";
+            else if (spelling_issues.size == 1)
+                status = "1 possible spelling issue";
+            else
+                status = "%d possible spelling issues".printf (spelling_issues.size);
             spellcheck_button.tooltip_text = status;
             Accessibility.label (spellcheck_button, status + ". Check spelling");
         } catch (Error error) {
@@ -805,9 +832,14 @@ public class ComposeWindow : Adw.Window {
         encrypt.active = draft.encrypt_message;
         var identity = new Adw.EntryRow (); identity.title = "Key or certificate identity (optional)";
         identity.text = draft.security_identity;
-        var group = new Adw.PreferencesGroup (); group.add (protocol); group.add (sign); group.add (encrypt); group.add (identity);
+        var group = new Adw.PreferencesGroup ();
+        group.add_css_class ("compose-security-options");
+        group.add (protocol); group.add (sign); group.add (encrypt); group.add (identity);
         var dialog = new Adw.AlertDialog ("Message Security",
             "OpenPGP uses the system GnuPG keyring. S/MIME uses the Evolution Data Server certificate store. Leave the identity empty to use the sending address.");
+        dialog.add_css_class ("compose-security-dialog");
+        if (Adw.StyleManager.get_default ().dark)
+            dialog.add_css_class ("compose-security-dark");
         dialog.extra_child = group; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("apply", "Apply");
         dialog.default_response = "apply"; dialog.close_response = "cancel";
         if ((yield dialog.choose (this, null)) != "apply") return;
@@ -827,9 +859,11 @@ public class ComposeWindow : Adw.Window {
 
     private void update_security_button () {
         if (!draft.sign_message && !draft.encrypt_message) {
-            security_button.icon_name = "channel-insecure-symbolic";
+            security_button.icon_name = "security-medium-symbolic";
+            security_button.remove_css_class ("security-enabled");
             security_button.tooltip_text = "Message security: off"; return;
         }
+        security_button.add_css_class ("security-enabled");
         security_button.icon_name = draft.encrypt_message ? "channel-secure-symbolic" : "security-high-symbolic";
         string protocol = draft.security_protocol == MessageSecurityProtocol.OPENPGP ? "OpenPGP" : "S/MIME";
         if (draft.sign_message && draft.encrypt_message) security_button.tooltip_text = "%s signed and encrypted".printf (protocol);
@@ -963,18 +997,23 @@ public class ComposeWindow : Adw.Window {
     private void configure_recipient_entry (Gtk.Entry entry, string placeholder,
                                             bool required) {
         entry.placeholder_text = placeholder;
+        bool edited = false;
         string guidance = required ?
             "Enter at least one email address. Separate multiple recipients with commas." :
             "Separate multiple email addresses with commas.";
         entry.tooltip_text = guidance;
         Accessibility.description (entry, guidance);
         entry.changed.connect (() => {
+            edited = true;
             entry.remove_css_class ("error");
             entry.tooltip_text = guidance;
             Accessibility.description (entry, guidance);
         });
         entry.notify["has-focus"].connect (() => {
-            if (!entry.has_focus) validate_recipient_entry (entry, required, guidance);
+            // Do not greet a new message with a red error state merely because
+            // GTK moved initial focus. Send performs the required final check.
+            if (!entry.has_focus && (!required || edited || entry.text.strip () != ""))
+                validate_recipient_entry (entry, required, guidance);
         });
     }
 
@@ -1791,7 +1830,7 @@ public class ComposeWindow : Adw.Window {
             close ();
             return;
         }
-        var dialog = new Adw.AlertDialog ("Save this draft?", "You can reopen saved drafts from the Drafts mailbox.");
+        var dialog = new Adw.AlertDialog ("Save this draft?", "You can reopen saved drafts from the Drafts folder.");
         dialog.add_response ("cancel", "Keep Editing"); dialog.add_response ("discard", "Discard"); dialog.add_response ("save", "Save Draft");
         dialog.close_response = "cancel"; dialog.default_response = "save";
         dialog.set_response_appearance ("discard", Adw.ResponseAppearance.DESTRUCTIVE);

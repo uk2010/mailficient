@@ -11,7 +11,13 @@ public enum MailRuleField {
     BCC,
     ATTACHMENT_NAME,
     MESSAGE_SIZE,
-    MAILBOX
+    MAILBOX,
+    REPLY_TO,
+    DATE_RECEIVED,
+    LABEL,
+    SECURITY_STATUS,
+    MAILING_LIST,
+    RAW_HEADERS
 }
 
 public enum MailRuleOperator {
@@ -21,7 +27,9 @@ public enum MailRuleOperator {
     STARTS_WITH,
     ENDS_WITH,
     GREATER_THAN,
-    LESS_THAN
+    LESS_THAN,
+    AFTER,
+    BEFORE
 }
 
 public enum MailRuleMatchMode { ALL, ANY }
@@ -35,7 +43,11 @@ public enum MailRuleAction {
     MARK_UNREAD,
     UNFLAG,
     MOVE,
-    COPY
+    COPY,
+    SET_FLAG_COLOR,
+    MARK_JUNK,
+    MARK_NOT_JUNK,
+    REMOVE_LABEL
 }
 
 public class MailRuleCondition : Object {
@@ -65,6 +77,17 @@ public class MailRuleCondition : Object {
             default: return message.message_size == expected;
             }
         }
+        if (field == MailRuleField.DATE_RECEIVED) {
+            var expected = parse_date (pattern);
+            if (expected == null || message.date_unix <= 0) return false;
+            int64 start = expected.to_unix ();
+            int64 end = expected.add_days (1).to_unix ();
+            switch (operator) {
+            case MailRuleOperator.BEFORE: return message.date_unix < start;
+            case MailRuleOperator.AFTER: return message.date_unix >= end;
+            default: return message.date_unix >= start && message.date_unix < end;
+            }
+        }
 
         string haystack;
         switch (field) {
@@ -74,6 +97,20 @@ public class MailRuleCondition : Object {
         case MailRuleField.SUBJECT: haystack = message.subject; break;
         case MailRuleField.BODY: haystack = message.body + " " + message.preview; break;
         case MailRuleField.MAILBOX: haystack = message.mailbox_id; break;
+        case MailRuleField.REPLY_TO: haystack = message.reply_to; break;
+        case MailRuleField.LABEL:
+            var labels = new StringBuilder ();
+            foreach (var label in message.labels) labels.append (label.name + " ");
+            haystack = labels.str;
+            break;
+        case MailRuleField.SECURITY_STATUS:
+            haystack = message.security_status + " " + message.authentication_results;
+            break;
+        case MailRuleField.MAILING_LIST:
+            haystack = message.list_unsubscribe + " " + message.list_unsubscribe_post +
+                " " + message.raw_headers;
+            break;
+        case MailRuleField.RAW_HEADERS: haystack = message.raw_headers; break;
         case MailRuleField.ATTACHMENT_NAME:
             var names = new StringBuilder ();
             foreach (var attachment in message.attachments) names.append (attachment.name + " ");
@@ -126,6 +163,13 @@ public class MailRuleCondition : Object {
         if (bytes > int64.MAX) return null;
         return (int64) bytes;
     }
+
+    private static DateTime? parse_date (string value) {
+        string clean = value.strip ();
+        if (!Regex.match_simple ("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", clean)) return null;
+        return new DateTime.from_iso8601 (
+            clean + "T00:00:00", new TimeZone.local ());
+    }
 }
 
 public class MailRuleOperation : Object {
@@ -170,8 +214,9 @@ public class MailRule : Object {
         conditions.clear (); exceptions.clear (); operations.clear ();
     }
 
-    public bool matches (Message message) {
-        if (!enabled || (account_id != "" && account_id != message.account_id) || conditions.size == 0)
+    public bool matches (Message message, bool ignore_enabled = false) {
+        if ((!enabled && !ignore_enabled) ||
+            (account_id != "" && account_id != message.account_id) || conditions.size == 0)
             return false;
         bool condition_match = match_mode == MailRuleMatchMode.ALL;
         foreach (var condition in conditions) {

@@ -24,6 +24,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private TaskService task_service;
     private TaskView task_view;
     private Gtk.SearchEntry search = new Gtk.SearchEntry ();
+    private Gtk.MenuButton search_scope_button = new Gtk.MenuButton ();
     private Gtk.SearchEntry task_search = new Gtk.SearchEntry ();
     private CacheDatabase cache;
     private AttachmentService attachment_service;
@@ -49,6 +50,10 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Label sync_status_label = new Gtk.Label ("");
     private Gtk.ProgressBar sync_progress_bar = new Gtk.ProgressBar ();
     private Gtk.Button sync_cancel_button = new Gtk.Button.from_icon_name ("window-close-symbolic");
+    private Gtk.Box sync_recovery_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+    private Gtk.Button sync_retry_button = new Gtk.Button.with_label ("Retry");
+    private Gtk.Button sync_settings_button = new Gtk.Button.with_label ("Account Settings");
+    private string failed_sync_account_id = "";
     private bool sync_cancel_requested;
     private Gee.HashSet<string> active_sync_accounts = new Gee.HashSet<string> ();
     private Gee.HashMap<string, double?> account_sync_fractions = new Gee.HashMap<string, double?> ();
@@ -100,10 +105,13 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Box? message_pane;
     private Gtk.Button mailbox_toggle = new Gtk.Button.from_icon_name ("sidebar-show-symbolic");
     private Gtk.Button message_back = new Gtk.Button.from_icon_name ("go-previous-symbolic");
-    private double mailbox_pane_width = 240;
-    private double message_pane_width = 380;
+    private double mailbox_pane_width = 238;
+    private double message_pane_width = 340;
     private double resize_start_width;
     private double resize_start_pointer_x;
+    private bool mailbox_resize_active;
+    private bool restoring_pane_widths = true;
+    private bool pane_restore_scheduled;
     private bool qa_layout;
     private MailboxSidebar sidebar;
     private bool applying_message_state;
@@ -112,6 +120,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private string pending_folder_replacement_account = "";
     private string pending_folder_replacement_name = "";
     private string pending_folder_replacement_remote = "";
+    private string pending_initial_inbox_account_id = "";
     private bool local_removal_refresh_pending;
     private uint repository_refresh_source;
     // Only the first durable message batch in a backend pass needs to wake the
@@ -125,6 +134,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Button? toggle_read_button;
     private MenuItem? more_toggle_read_item;
     private Menu quick_steps_menu = new Menu ();
+    private weak RulesWindow? rules_window;
     private MailSearchScope search_scope = MailSearchScope.CURRENT_FOLDER;
     private Cancellable? server_search_cancellable;
 
@@ -143,6 +153,13 @@ public class MailWindow : Adw.ApplicationWindow {
                 Environment.get_variable ("MAILFICIENT_QA_NARROW") == "1" ? 760 : settings.window_width, true),
             default_height: startup_dimension (
                 Environment.get_variable ("MAILFICIENT_QA") == "1" ? 820 : settings.window_height, false));
+        add_css_class ("mail-window");
+        var style_manager = Adw.StyleManager.get_default ();
+        if (style_manager.dark) add_css_class ("mail-dark");
+        style_manager.notify["dark"].connect (() => {
+            if (style_manager.dark) add_css_class ("mail-dark");
+            else remove_css_class ("mail-dark");
+        });
         // Keep the full three-column workspace on a normal desktop, while
         // still allowing a useful list-then-reader layout on smaller screens.
         set_size_request (680, 520);
@@ -159,6 +176,11 @@ public class MailWindow : Adw.ApplicationWindow {
         reader = new ReadingPane (received_attachment_service, remote_content_policy,
             calendar_service, cache);
         reader.add_account_requested.connect (() => show_accounts ());
+        reader.retry_requested.connect (() => {
+            if (failed_sync_account_id != "") retry_failed_sync ();
+            else synchronize.begin ();
+        });
+        reader.account_settings_requested.connect (() => show_preferences ("accounts"));
         this.outbound_service = outbound_service;
         this.settings = settings;
         settings.changed.connect ((key) => {
@@ -180,21 +202,36 @@ public class MailWindow : Adw.ApplicationWindow {
             if (key == "toolbar-layout") rebuild_toolbar ();
         });
         qa_layout = Environment.get_variable ("MAILFICIENT_QA") == "1";
+        if (!settings.compact_pane_widths_migrated) {
+            double previous_mailbox_width = settings.mailbox_pane_width;
+            double previous_message_width = settings.message_pane_width;
+            if (previous_mailbox_width >= 275) settings.mailbox_pane_width = 238;
+            if (previous_message_width >= 460) settings.message_pane_width = 340;
+            settings.compact_pane_widths_migrated = true;
+        }
         mailbox_pane_width = settings.mailbox_pane_width;
         message_pane_width = settings.message_pane_width;
         string? qa_mailbox_width = Environment.get_variable ("MAILFICIENT_QA_MAILBOX_WIDTH");
         string? qa_message_width = Environment.get_variable ("MAILFICIENT_QA_MESSAGE_WIDTH");
         double parsed_width = 0;
-        if (qa_mailbox_width != null && double.try_parse (qa_mailbox_width, out parsed_width))
+        if (qa_mailbox_width != null && qa_mailbox_width.strip () != "" &&
+            double.try_parse (qa_mailbox_width, out parsed_width))
             mailbox_pane_width = parsed_width;
-        if (qa_message_width != null && double.try_parse (qa_message_width, out parsed_width))
+        if (qa_message_width != null && qa_message_width.strip () != "" &&
+            double.try_parse (qa_message_width, out parsed_width))
             message_pane_width = parsed_width;
         this.credentials = credentials; this.credential_cleanup = credential_cleanup;
         this.mail_engine = mail_engine; this.sync_service = sync_service;
         this.folder_service = folder_service; this.online_accounts = online_accounts;
         message_list = new MessageList (repository, search_service);
+        message_list.clear_search_requested.connect (() => {
+            search.text = "";
+            search.grab_focus ();
+        });
+        message_list.get_mail_requested.connect (() => synchronize.begin ());
         task_view = new TaskView (task_service);
         var toolbar = new Adw.ToolbarView ();
+        toolbar.add_css_class ("mail-shell-toolbar-view");
         toolbar.overflow = Gtk.Overflow.HIDDEN;
         var header = build_header (); toolbar.add_top_bar (header);
         header.hexpand = true; header.halign = Gtk.Align.FILL;
@@ -261,6 +298,15 @@ public class MailWindow : Adw.ApplicationWindow {
             DebugTrace.duration ("navigation", "mailbox_selected_complete", selection_started);
         });
         sidebar.create_folder_requested.connect ((account, parent) => prompt_create_folder.begin (account, parent));
+        sidebar.create_folder_any_requested.connect (() => prompt_create_folder_for_account.begin ());
+        sidebar.create_smart_mailbox_requested.connect (() => show_preferences ("smart-mailboxes"));
+        sidebar.accounts_requested.connect (() => show_accounts ());
+        sidebar.messages_dropped.connect ((target, ids, copy) =>
+            transfer_dropped_messages (target, ids, copy));
+        sidebar.create_rule_requested.connect (show_new_rule);
+        sidebar.create_rule_for_mailbox_requested.connect ((account, mailbox) =>
+            show_rule_for_mailbox (account, mailbox));
+        sidebar.rules_requested.connect (show_rules);
         sidebar.rename_folder_requested.connect ((mailbox) => prompt_rename_folder.begin (mailbox));
         sidebar.delete_folder_requested.connect ((mailbox) => prompt_delete_folder.begin (mailbox));
         sidebar.empty_role_requested.connect ((role) => prompt_empty_role.begin (role));
@@ -357,7 +403,9 @@ public class MailWindow : Adw.ApplicationWindow {
         outbound_service.sent_filing_failed.connect ((draft_id, detail) =>
             toast_overlay.add_toast (new Adw.Toast ("Message sent, but it could not be filed in Sent.")));
         var mailbox_pane = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        mailbox_pane.add_css_class ("mailbox-pane");
         var sidebar_column = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        sidebar_column.add_css_class ("sidebar-column");
         sidebar.hexpand = true; sidebar.vexpand = true;
         sidebar_column.hexpand = true;
         sidebar_column.append (sidebar);
@@ -366,15 +414,26 @@ public class MailWindow : Adw.ApplicationWindow {
         var mailbox_handle = new PaneResizeHandle ("Resize mailbox and message panes"); mailbox_pane.append (mailbox_handle);
         mailbox_handle.bind_drag_to (mailbox_pane);
         mailbox_handle.drag_started.connect ((pointer_x) => {
+            mailbox_resize_active = true;
             resize_start_width = mailbox_pane.get_width ();
             resize_start_pointer_x = pointer_x;
         });
         mailbox_handle.dragged.connect ((pointer_x) =>
             set_mailbox_pane_width (resize_start_width + pointer_x - resize_start_pointer_x));
-        mailbox_handle.drag_finished.connect (() => settings.mailbox_pane_width = mailbox_pane_width);
+        mailbox_handle.drag_finished.connect (() => {
+            mailbox_resize_active = false;
+            settings.mailbox_pane_width = mailbox_pane_width;
+        });
         mailbox_split.sidebar = mailbox_pane; mailbox_split.sidebar_width_unit = Adw.LengthUnit.PX;
-        mailbox_split.min_sidebar_width = 190; mailbox_split.max_sidebar_width = 560;
-        mailbox_split.sidebar_width_fraction = mailbox_pane_width / 1320.0;
+        mailbox_split.add_css_class ("mail-shell-split");
+        mailbox_split.min_sidebar_width = mailbox_pane_width;
+        mailbox_split.max_sidebar_width = mailbox_pane_width;
+        mailbox_split.sidebar_width_fraction = mailbox_pane_width / 1180.0;
+        mailbox_split.notify["width"].connect (() => {
+            int available = mailbox_split.get_width ();
+            if (available > 0 && !mailbox_resize_active && !narrow_layout)
+                mailbox_split.sidebar_width_fraction = mailbox_pane_width / available;
+        });
         message_pane = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         message_pane.add_css_class ("message-pane");
         message_pane.hexpand = true; message_pane.vexpand = true;
@@ -382,17 +441,19 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.hexpand = true; message_list.vexpand = true;
         message_pane.append (message_list);
         message_split.hexpand = true; message_split.vexpand = true;
+        message_split.add_css_class ("message-split");
         message_split.set_size_request (0, -1);
         message_split.overflow = Gtk.Overflow.HIDDEN;
         // Match the three-column mail layout: the message list is flexible,
         // and the reader resizes into the remaining space. Its content is
         // responsive, so the divider can move to roughly 75% of the workspace
         // without pushing anything past the application's right edge.
-        message_split.resize_start_child = true; message_split.resize_end_child = true;
+        message_split.resize_start_child = false; message_split.resize_end_child = true;
         message_split.shrink_start_child = true; message_split.shrink_end_child = true;
         message_pane.set_size_request (280, -1);
         message_split.start_child = message_pane;
         content_stack.hexpand = true; content_stack.vexpand = true;
+        content_stack.add_css_class ("reader-stack");
         content_stack.overflow = Gtk.Overflow.HIDDEN;
         content_stack.transition_type = Gtk.StackTransitionType.NONE;
         content_stack.add_named (reader, "reader");
@@ -410,9 +471,10 @@ public class MailWindow : Adw.ApplicationWindow {
         });
         message_split.notify["position"].connect (() => {
             clamp_message_split_position ();
-            message_pane_width = message_split.position;
+            if (!restoring_pane_widths) message_pane_width = message_split.position;
         });
         workspace_stack.hexpand = true; workspace_stack.vexpand = true;
+        workspace_stack.add_css_class ("mail-workspace");
         // A crossfade snapshots the complete mail workspace, including the
         // active WebKit view. Rich or very tall HTML messages can make that
         // snapshot block the GTK main thread long enough for Today/Planned to
@@ -425,6 +487,7 @@ public class MailWindow : Adw.ApplicationWindow {
         mailbox_split.content = workspace_stack; toolbar.set_content (mailbox_split);
         mailbox_split.show_sidebar = settings.sidebar_visible;
         var mail_overlay = new Gtk.Overlay ();
+        mail_overlay.add_css_class ("mail-shell-overlay");
         mail_overlay.overflow = Gtk.Overflow.HIDDEN;
         mail_overlay.child = toolbar;
         toast_overlay.overflow = Gtk.Overflow.HIDDEN;
@@ -440,6 +503,7 @@ public class MailWindow : Adw.ApplicationWindow {
             prepare_for_shutdown ();
             return false;
         });
+        notify["maximized"].connect (() => restore_pane_widths_after_layout ());
         // Request the persisted state before present(). Queuing this as idle work
         // allowed a simultaneous startup sync to monopolize the main thread first.
         if (!qa_layout && settings.window_maximized) maximize ();
@@ -506,6 +570,7 @@ public class MailWindow : Adw.ApplicationWindow {
                     pending_folder_replacement_account,
                     pending_folder_replacement_name,
                     pending_folder_replacement_remote, false);
+                select_pending_account_inbox (account_id);
                 if (complete_account_sync (account_id))
                     finish_sync_progress ("Mail is up to date");
             });
@@ -534,7 +599,7 @@ public class MailWindow : Adw.ApplicationWindow {
                     repository.reload ();
                 }
                 if (complete_account_sync (account_id))
-                    finish_sync_progress (error.title);
+                    show_sync_failure (account_id, error);
                 if (selected_message == null) reader.show_error (error);
                 toast_overlay.add_toast (new Adw.Toast ("%s — %s".printf (error.title, error.suggestion)));
             });
@@ -789,7 +854,15 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void set_mailbox_pane_width (double requested) {
-        mailbox_pane_width = double.max (190, double.min (560, requested));
+        double previous = mailbox_pane_width;
+        mailbox_pane_width = double.max (190, double.min (320, requested));
+        if (mailbox_pane_width >= previous) {
+            mailbox_split.max_sidebar_width = mailbox_pane_width;
+            mailbox_split.min_sidebar_width = mailbox_pane_width;
+        } else {
+            mailbox_split.min_sidebar_width = mailbox_pane_width;
+            mailbox_split.max_sidebar_width = mailbox_pane_width;
+        }
         int available = mailbox_split.get_width ();
         if (available > 0)
             mailbox_split.sidebar_width_fraction = mailbox_pane_width / available;
@@ -822,11 +895,11 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void restore_pane_widths_after_layout () {
+        if (pane_restore_scheduled) return;
+        pane_restore_scheduled = true;
+        restoring_pane_widths = true;
         int stage = 0;
         add_tick_callback ((widget, frame_clock) => {
-            // Split-view fractions depend on the allocated width. Applying them
-            // from an idle callback races the first Libadwaita layout pass and
-            // can be overwritten by its default 25% fraction.
             if (mailbox_split.get_width () <= 0) return Source.CONTINUE;
             if (stage == 0) {
                 set_mailbox_pane_width (mailbox_pane_width);
@@ -836,10 +909,10 @@ public class MailWindow : Adw.ApplicationWindow {
             if (message_split.get_width () <= 0) return Source.CONTINUE;
             set_message_pane_width (message_pane_width);
             if (stage++ < 2) return Source.CONTINUE;
-            // Reapply once after both split views have reacted, making the
-            // second divider exact even when the first divider also moved.
             set_mailbox_pane_width (mailbox_pane_width);
             set_message_pane_width (message_pane_width);
+            restoring_pane_widths = false;
+            pane_restore_scheduled = false;
             return Source.REMOVE;
         });
     }
@@ -867,25 +940,97 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private async void prompt_create_folder (AccountSettings account, Mailbox? parent) {
         var entry = new Adw.EntryRow (); entry.title = "Folder name";
-        var dialog = new Adw.AlertDialog (parent == null ? "New Mailbox" : "New Subfolder",
-            parent == null ? "Create a mailbox in %s.".printf (account.display_name) :
-                "Create a mailbox inside %s.".printf (parent.name));
+        var dialog = new Adw.AlertDialog (parent == null ? "New Folder" : "New Subfolder",
+            parent == null ? "Create a folder in %s.".printf (account.display_name) :
+                "Create a folder inside %s.".printf (parent.name));
         dialog.extra_child = entry; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("create", "Create");
         dialog.default_response = "create"; dialog.close_response = "cancel";
         dialog.set_response_appearance ("create", Adw.ResponseAppearance.SUGGESTED);
+        dialog.set_response_enabled ("create", false);
+        entry.changed.connect (() => dialog.set_response_enabled ("create", valid_folder_name (entry.text)));
         if ((yield dialog.choose (this, null)) != "create") return;
+        string mailbox_name = entry.text.strip ();
+        string parent_remote = parent == null ? "" : parent.remote_name;
         try {
-            yield folder_service.create (account.id, parent == null ? "" : parent.remote_name, entry.text);
+            yield folder_service.create (account.id, parent_remote, mailbox_name);
             reconcile_mailbox_structure ("", "", "", false);
-            toast_overlay.add_toast (new Adw.Toast ("Mailbox created"));
+            if (!sidebar.select_new_mailbox (account.id, parent_remote, mailbox_name))
+                throw new MailError.PARTIAL_SYNC (
+                    "The folder was created on the mail server, but its refreshed folder list is not available yet. Check mail to show it in Favorites.");
+            toast_overlay.add_toast (new Adw.Toast (
+                "%s created and added to Favorites".printf (mailbox_name)));
+        } catch (Error error) { show_operation_error (error); }
+    }
+
+    private async void prompt_create_folder_for_account () {
+        Gee.List<AccountSettings> accounts;
+        try { accounts = cache.list_accounts (); }
+        catch (Error error) { show_operation_error (error); return; }
+        if (accounts.size == 0) {
+            toast_overlay.add_toast (new Adw.Toast ("Add a mail account before creating a folder"));
+            show_preferences ("accounts"); return;
+        }
+        var location_names = new Gtk.StringList (null);
+        var location_account_ids = new Gee.ArrayList<string> ();
+        var location_parent_names = new Gee.ArrayList<string> ();
+        Gee.List<Mailbox> mailboxes;
+        try { mailboxes = cache.list_cached_mailboxes (); }
+        catch (Error error) { show_operation_error (error); return; }
+        bool single_account = accounts.size == 1;
+        foreach (var account in accounts) {
+            location_names.append ("%s — Top Level".printf (account.display_name));
+            location_account_ids.add (account.id); location_parent_names.add ("");
+            foreach (var mailbox in mailboxes) {
+                if (mailbox.account_id != account.id || mailbox.role != MailboxRole.CUSTOM) continue;
+                int depth = 0;
+                for (int index = 0; index < mailbox.remote_name.length; index++)
+                    if (mailbox.remote_name[index] == '/' || mailbox.remote_name[index] == '\\') depth++;
+                var indent = new StringBuilder ();
+                for (int index = 0; index <= int.min (depth, 5); index++) indent.append ("  ");
+                location_names.append (single_account ?
+                    "%sInside %s".printf (indent.str, mailbox.name) :
+                    "%s%s — inside %s".printf (
+                        indent.str, account.display_name, mailbox.name));
+                location_account_ids.add (account.id);
+                location_parent_names.add (mailbox.remote_name);
+            }
+        }
+        var location_row = new Adw.ComboRow ();
+        location_row.title = "Location"; location_row.model = location_names;
+        var name_row = new Adw.EntryRow (); name_row.title = "Folder name";
+        var group = new Adw.PreferencesGroup (); group.add (location_row); group.add (name_row);
+        var dialog = new Adw.AlertDialog ("New Folder", "Choose where the new folder should be created.");
+        dialog.extra_child = group; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("create", "Create");
+        dialog.default_response = "create"; dialog.close_response = "cancel";
+        dialog.set_response_appearance ("create", Adw.ResponseAppearance.SUGGESTED);
+        dialog.set_response_enabled ("create", false);
+        name_row.changed.connect (() => dialog.set_response_enabled ("create", valid_folder_name (name_row.text)));
+        if ((yield dialog.choose (this, null)) != "create") return;
+        int selected_location = (int) location_row.selected;
+        string selected_account_id = location_account_ids[selected_location];
+        string selected_parent_remote = location_parent_names[selected_location];
+        string mailbox_name = name_row.text.strip ();
+        try {
+            yield folder_service.create (selected_account_id,
+                selected_parent_remote, mailbox_name);
+            reconcile_mailbox_structure ("", "", "", false);
+            if (!sidebar.select_new_mailbox (
+                    selected_account_id, selected_parent_remote, mailbox_name))
+                throw new MailError.PARTIAL_SYNC (
+                    "The folder was created on the mail server, but its refreshed folder list is not available yet. Check mail to show it in Favorites.");
+            toast_overlay.add_toast (new Adw.Toast (
+                "%s created and added to Favorites".printf (mailbox_name)));
         } catch (Error error) { show_operation_error (error); }
     }
 
     private async void prompt_rename_folder (Mailbox mailbox) {
-        var entry = new Adw.EntryRow (); entry.title = "Mailbox name"; entry.text = mailbox.name;
-        var dialog = new Adw.AlertDialog ("Rename Mailbox", "Choose a new name for %s.".printf (mailbox.name));
+        var entry = new Adw.EntryRow (); entry.title = "Folder name"; entry.text = mailbox.name;
+        var dialog = new Adw.AlertDialog ("Rename Folder", "Choose a new name for %s.".printf (mailbox.name));
         dialog.extra_child = entry; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("rename", "Rename");
         dialog.default_response = "rename"; dialog.close_response = "cancel";
+        dialog.set_response_enabled ("rename", false);
+        entry.changed.connect (() => dialog.set_response_enabled ("rename",
+            valid_folder_name (entry.text) && entry.text.strip () != mailbox.name));
         if ((yield dialog.choose (this, null)) != "rename") return;
         string new_name = entry.text.strip ();
         string new_remote_name = "";
@@ -897,9 +1042,22 @@ public class MailWindow : Adw.ApplicationWindow {
         pending_folder_replacement_remote = new_remote_name;
         try {
             yield folder_service.rename (mailbox, new_name);
+            string replacement_id = "";
+            foreach (var candidate in cache.list_cached_mailboxes ()) {
+                if (candidate.account_id != mailbox.account_id ||
+                    candidate.role != MailboxRole.CUSTOM) continue;
+                if ((new_remote_name != "" && candidate.remote_name == new_remote_name) ||
+                    (new_remote_name == "" && candidate.name == new_name)) {
+                    replacement_id = candidate.id; break;
+                }
+            }
+            if (replacement_id != "") {
+                cache.replace_automation_mailbox_reference (mailbox.id, replacement_id);
+                if (rules_window != null) rules_window.refresh ();
+            }
             reconcile_mailbox_structure (mailbox.account_id, new_name,
                 new_remote_name, false);
-            toast_overlay.add_toast (new Adw.Toast ("Mailbox renamed"));
+            toast_overlay.add_toast (new Adw.Toast ("Folder renamed"));
         } catch (Error error) {
             show_operation_error (error);
         } finally {
@@ -910,17 +1068,29 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private async void prompt_delete_folder (Mailbox mailbox) {
+        int automation_references = 0;
+        try { automation_references = cache.automation_mailbox_reference_count (mailbox.id); }
+        catch (Error error) { show_operation_error (error); return; }
+        string automation_warning = automation_references == 0 ? "" :
+            "\n\n%d automation %s to this folder. Affected rules and Quick Steps will show it as unavailable until you edit them.".printf (
+                automation_references, automation_references == 1 ? "reference points" : "references point");
         var dialog = new Adw.AlertDialog ("Delete %s?".printf (mailbox.name),
-            "This deletes the mailbox on the mail server and may delete the messages it contains. This cannot be undone in Mailficient.");
-        dialog.add_response ("cancel", "Cancel"); dialog.add_response ("delete", "Delete Mailbox");
+            "This deletes the folder on the mail server and may delete the messages it contains. This cannot be undone in Mailficient.%s".printf (
+                automation_warning));
+        dialog.add_response ("cancel", "Cancel"); dialog.add_response ("delete", "Delete Folder");
         dialog.default_response = "cancel"; dialog.close_response = "cancel";
         dialog.set_response_appearance ("delete", Adw.ResponseAppearance.DESTRUCTIVE);
         if ((yield dialog.choose (this, null)) != "delete") return;
         try {
             yield folder_service.delete (mailbox);
             reconcile_mailbox_structure ("", "", "", false);
-            reader.show_empty (); toast_overlay.add_toast (new Adw.Toast ("Mailbox deleted"));
+            reader.show_empty (); toast_overlay.add_toast (new Adw.Toast ("Folder deleted"));
         } catch (Error error) { show_operation_error (error); }
+    }
+
+    private static bool valid_folder_name (string value) {
+        try { FolderService.validate_name (value); return true; }
+        catch (MailError error) { return false; }
     }
 
     private async void prompt_empty_role (MailboxRole role) {
@@ -1033,6 +1203,12 @@ public class MailWindow : Adw.ApplicationWindow {
             warning ("Could not refresh local account mode: %s", error.message);
         }
         refresh_mailbox_structure ();
+        if (account != null) {
+            if (message_pane != null) message_pane.visible = true;
+            if (!narrow_layout) mailbox_split.show_sidebar = settings.sidebar_visible;
+            settings.selected_mailbox_id = "unified-inbox";
+            sidebar.select_mailbox ("unified-inbox");
+        }
         try {
             if (cache.list_accounts ().size == 0) {
                 selected_message = null;
@@ -1044,6 +1220,21 @@ public class MailWindow : Adw.ApplicationWindow {
             sync_service.resume_account (account.id);
             sync_service.sync_account.begin (account);
         }
+    }
+
+    private void select_pending_account_inbox (string account_id) {
+        if (pending_initial_inbox_account_id == "" ||
+            pending_initial_inbox_account_id != account_id) return;
+        foreach (var mailbox in sidebar.current_mailboxes ()) {
+            if (mailbox.account_id == account_id && mailbox.role == MailboxRole.INBOX &&
+                sidebar.select_mailbox (mailbox.id)) {
+                pending_initial_inbox_account_id = "";
+                return;
+            }
+        }
+        // The unified Inbox remains a valid landing page when a provider does
+        // not expose its physical Inbox until a later background refresh.
+        sidebar.select_mailbox ("unified-inbox");
     }
 
     private void set_active_search_text (string value) {
@@ -1061,12 +1252,9 @@ public class MailWindow : Adw.ApplicationWindow {
         if (server_search_cancellable != null) server_search_cancellable.cancel ();
         var request = new Cancellable (); server_search_cancellable = request;
         string mailbox_id = active_mailbox == null ? "" : active_mailbox.id;
-        MailSearchScope effective_scope = search_scope;
-        if (effective_scope == MailSearchScope.CURRENT_FOLDER && mailbox_id.has_prefix ("unified-"))
-            effective_scope = MailSearchScope.ALL_MAIL;
         toast_overlay.add_toast (new Adw.Toast ("Searching the mail server…"));
         try {
-            int added = yield search_service.fetch_from_server (requested, effective_scope,
+            int added = yield search_service.fetch_from_server (requested, search_scope,
                 mailbox_id, 200, request);
             if (request.is_cancelled () || search.text.strip () != requested) return;
             message_list.search (requested);
@@ -1105,6 +1293,25 @@ public class MailWindow : Adw.ApplicationWindow {
             toast_overlay.add_toast (new Adw.Toast (applied == 1 ?
                 "Quick Step “%s” applied".printf (selected.name) :
                 "Quick Step “%s” applied to %d messages".printf (selected.name, applied)));
+        } catch (Error error) { show_operation_error (error); }
+    }
+
+    private void apply_rules_to_selected () {
+        var messages = action_messages ();
+        if (messages.size == 0) return;
+        try {
+            int applied = new MailRuleService (cache).apply_to_messages (messages);
+            message_list.invalidate_cached_views ();
+            repository.reload ();
+            string result;
+            if (applied == 0)
+                result = messages.size == 1 ? "No enabled rules matched this message" :
+                    "No enabled rules matched the selected messages";
+            else if (applied == 1)
+                result = "Applied 1 rule";
+            else
+                result = "Applied %d rules".printf (applied);
+            toast_overlay.add_toast (new Adw.Toast (result));
         } catch (Error error) { show_operation_error (error); }
     }
 
@@ -1173,19 +1380,40 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Widget build_header () {
         var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
         header.add_css_class ("mail-header-bar");
+        header.add_css_class ("control-layer");
+        message_back.add_css_class ("header-back-button");
         message_back.tooltip_text = "Back to message list";
         Accessibility.label (message_back, "Back to message list");
         message_back.clicked.connect (() => set_message_content_visible (false));
         message_back.visible = false;
         header.append (message_back);
 
-        search.placeholder_text = search_service.server_search_available ?
-            "Search Mail — Enter searches server" : "Search Mail";
+        search.placeholder_text = "Search Mail";
         search.set_size_request (240, -1);
         search.add_css_class ("apple-toolbar-search");
         Accessibility.label (search, "Search mail");
         search.search_changed.connect (() => message_list.search (search.text));
         search.activate.connect (() => search_server.begin ());
+
+        var search_menu = new Menu ();
+        var scope_menu = new Menu ();
+        scope_menu.append ("This Folder", "win.search-scope::current-folder");
+        scope_menu.append ("This Account", "win.search-scope::current-account");
+        scope_menu.append ("All Mail", "win.search-scope::all-mail");
+        search_menu.append_section ("Search In", scope_menu);
+        var filter_menu = new Menu ();
+        filter_menu.append ("Unread", "win.add-search-filter::unread");
+        filter_menu.append ("Flagged", "win.add-search-filter::flagged");
+        filter_menu.append ("Has Attachments", "win.add-search-filter::attachments");
+        filter_menu.append ("From Selected Sender", "win.add-search-filter::sender");
+        filter_menu.append ("Past 7 Days", "win.add-search-filter::week");
+        search_menu.append_section ("Quick Filters", filter_menu);
+        search_scope_button.label = "Folder";
+        search_scope_button.menu_model = search_menu;
+        search_scope_button.tooltip_text = "Search this folder";
+        search_scope_button.add_css_class ("search-scope-button");
+        search_scope_button.always_show_arrow = true;
+        Accessibility.label (search_scope_button, "Search scope and filters");
 
         task_search.placeholder_text = "Search Tasks";
         task_search.set_size_request (300, -1);
@@ -1210,12 +1438,14 @@ public class MailWindow : Adw.ApplicationWindow {
         more_menu.append ("Forward", "win.forward");
         more_menu.append ("Archive", "win.archive"); more_menu.append ("Move to Trash", "win.trash");
         more_menu.append ("Junk or Not Junk", "win.junk"); more_menu.append ("Flag or Unflag", "win.flag");
+        more_menu.append ("Create Rule from Message…", "win.create-rule-from-message");
         more_menu.append ("Create Task from Message…", "win.create-task");
         rebuild_quick_steps_menu ();
         more_menu.append_submenu ("Quick Steps", quick_steps_menu);
         more_toggle_read_item = new MenuItem ("Mark as Read", "win.toggle-read");
         more_menu.append_item (more_toggle_read_item);
         more_menu.append ("Move or Copy…", "win.show-move");
+        more_menu.append ("Apply Rules", "win.apply-rules");
         more_button.icon_name = "view-more-symbolic"; more_button.tooltip_text = "More message actions"; more_button.menu_model = more_menu;
         Accessibility.label (more_button, "More message actions");
 
@@ -1230,7 +1460,7 @@ public class MailWindow : Adw.ApplicationWindow {
         task_toolbar.set_size_request (0, -1);
         task_toolbar.add_css_class ("apple-toolbar");
         var task_sidebar = make_toolbar_button ("sidebar", "");
-        task_sidebar.tooltip_text = "Show or hide mailboxes";
+        task_sidebar.tooltip_text = "Show or hide folders";
         task_sidebar.clicked.connect (() =>
             set_mailbox_sidebar_visible (!mailbox_split.show_sidebar));
         task_toolbar.append (task_sidebar);
@@ -1241,6 +1471,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
         toolbar_stack.hexpand = true;
         toolbar_stack.halign = Gtk.Align.FILL;
+        toolbar_stack.add_css_class ("mail-toolbar-stack");
         toolbar_stack.transition_type = Gtk.StackTransitionType.NONE;
         toolbar_stack.add_named (customizable_toolbar, "mail");
         toolbar_stack.add_named (task_toolbar, "tasks");
@@ -1250,6 +1481,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var app_menu = new Menu ();
         var mail_menu = new Menu ();
         mail_menu.append ("New Message", "win.compose");
+        mail_menu.append ("New Folder…", "win.new-mailbox");
         mail_menu.append ("New Task", "win.new-task");
         mail_menu.append ("Get Mail", "win.refresh");
         app_menu.append_section ("Mail", mail_menu);
@@ -1269,11 +1501,10 @@ public class MailWindow : Adw.ApplicationWindow {
         display_menu.append ("Display Full HTML", "win.full-html-formatting");
         view_menu.append_submenu ("Message Display", display_menu);
         var search_scope_menu = new Menu ();
-        search_scope_menu.append ("Current Folder", "win.search-scope::current-folder");
-        search_scope_menu.append ("Current Account", "win.search-scope::current-account");
+        search_scope_menu.append ("This Folder", "win.search-scope::current-folder");
+        search_scope_menu.append ("This Account", "win.search-scope::current-account");
         search_scope_menu.append ("All Mail", "win.search-scope::all-mail");
         view_menu.append_submenu ("Search Scope", search_scope_menu);
-        view_menu.append ("Search Syntax…", "win.search-help");
         app_menu.append_section ("View", view_menu);
 
         var accounts_menu = new Menu ();
@@ -1281,6 +1512,7 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu.append_section ("Accounts", accounts_menu);
 
         var settings_menu = new Menu ();
+        settings_menu.append ("Rules…", "win.rules");
         settings_menu.append ("Preferences…", "win.preferences");
         settings_menu.append ("Customize Toolbar…", "win.customize-toolbar");
         app_menu.append_section ("Settings", settings_menu);
@@ -1298,6 +1530,7 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu_button.tooltip_text = "Mailficient menu"; app_menu_button.menu_model = app_menu; header.append (app_menu_button);
         Accessibility.label (app_menu_button, "Mailficient menu");
         var window_controls = new Gtk.WindowControls (Gtk.PackType.END);
+        window_controls.add_css_class ("mail-window-controls");
         header.append (window_controls);
 
         var toolbar_menu = new Menu ();
@@ -1320,6 +1553,7 @@ public class MailWindow : Adw.ApplicationWindow {
         customizable_toolbar.add_controller (secondary_click);
         rebuild_toolbar ();
         var window_handle = new Gtk.WindowHandle ();
+        window_handle.add_css_class ("mail-header-handle");
         window_handle.child = header;
         return window_handle;
     }
@@ -1356,13 +1590,8 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private bool overflows_in_compact_toolbar (string id) {
-        if (narrow_layout && (id == "reply-group" || id == "reply" ||
-            id == "reply-all" || id == "forward")) return true;
+        if (id == "reply-group" || id == "reply-all" || id == "forward") return true;
         switch (id) {
-        case "mail-actions":
-        case "archive":
-        case "trash":
-        case "junk":
         case "move":
         case "flag":
         case "toggle-read":
@@ -1416,6 +1645,7 @@ public class MailWindow : Adw.ApplicationWindow {
         // a nested/partially rebuilt layout must never feed an already-parented
         // widget to gtk_box_append().
         if (!detach_toolbar_widget (search) ||
+            !detach_toolbar_widget (search_scope_button) ||
             !detach_toolbar_widget (sort_button) ||
             !detach_toolbar_widget (more_button)) return;
         percentage_spacers.clear ();
@@ -1445,10 +1675,7 @@ public class MailWindow : Adw.ApplicationWindow {
             var narrow_spacer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
             narrow_spacer.hexpand = true;
             customizable_toolbar.append (narrow_spacer);
-            search.hexpand = false;
-            search.halign = Gtk.Align.FILL;
-            search.set_size_request (170, -1);
-            customizable_toolbar.append (search);
+            customizable_toolbar.append (make_search_control ());
             var narrow_sort = toolbar_widget_for ("sort");
             if (narrow_sort != null) customizable_toolbar.append (narrow_sort);
             return;
@@ -1489,9 +1716,6 @@ public class MailWindow : Adw.ApplicationWindow {
         // The search field is the flexible part of the toolbar. Keeping a
         // minimum width preserves usability while allowing the toolbar to
         // consume extra window width instead of clipping its right side.
-        search.hexpand = !compact_toolbar;
-        search.halign = Gtk.Align.FILL;
-        search.set_size_request (narrow_layout ? 120 : (compact_toolbar ? 150 : 240), -1);
         update_percentage_spacers ();
     }
 
@@ -1538,6 +1762,20 @@ public class MailWindow : Adw.ApplicationWindow {
         }
     }
 
+    private Gtk.Widget make_search_control () {
+        var control = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        control.add_css_class ("toolbar-search-control");
+        control.hexpand = false;
+        control.halign = Gtk.Align.CENTER;
+        search_scope_button.valign = Gtk.Align.CENTER;
+        control.append (search_scope_button);
+        search.hexpand = true;
+        search.halign = Gtk.Align.FILL;
+        search.set_size_request (narrow_layout ? 118 : (compact_toolbar ? 170 : 236), -1);
+        control.append (search);
+        return control;
+    }
+
     private Gtk.Widget? toolbar_widget_for (string id) {
         if (ToolbarLayout.is_flexible_space (id)) {
             var flexible = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
@@ -1556,7 +1794,7 @@ public class MailWindow : Adw.ApplicationWindow {
             mailbox_toggle = make_toolbar_button (id, "");
             mailbox_toggle.sensitive = true;
             mailbox_toggle.clicked.connect (() => set_mailbox_sidebar_visible (!mailbox_split.show_sidebar));
-            mailbox_toggle.tooltip_text = "Show or hide mailboxes";
+            mailbox_toggle.tooltip_text = "Show or hide folders";
             return mailbox_toggle;
         case "refresh":
             refresh_button = make_toolbar_button (id, "win.refresh");
@@ -1570,8 +1808,8 @@ public class MailWindow : Adw.ApplicationWindow {
                 ToolbarLayout.label (id));
         case "mail-actions":
             return make_toolbar_group (
-                { "trash", "archive", "junk" },
-                { "win.trash", "win.archive", "win.junk" },
+                { "archive", "trash", "junk" },
+                { "win.archive", "win.trash", "win.junk" },
                 ToolbarLayout.label (id));
         case "reply": reply_button = make_toolbar_button (id, "win.reply"); return reply_button;
         case "reply-all": reply_all_button = make_toolbar_button (id, "win.reply-all"); return reply_all_button;
@@ -1587,12 +1825,12 @@ public class MailWindow : Adw.ApplicationWindow {
         case "move":
             move_button = new Gtk.MenuButton ();
             move_button.icon_name = ToolbarLayout.icon_name (id);
-            move_button.tooltip_text = "Move or copy to mailbox";
+            move_button.tooltip_text = "Move or copy to folder";
             move_button.add_css_class ("toolbar-menu-button");
-            Accessibility.label (move_button, "Move or copy to mailbox");
+            Accessibility.label (move_button, "Move or copy to folder");
             rebuild_move_menu ();
             return move_button;
-        case "search": return search;
+        case "search": return make_search_control ();
         case "sort":
             sort_button.add_css_class ("toolbar-menu-button");
             sort_button.add_css_class ("sort-toolbar-button");
@@ -1718,6 +1956,7 @@ public class MailWindow : Adw.ApplicationWindow {
         }
         bool was_narrow = narrow_layout;
         narrow_layout = false;
+        reader.remove_css_class ("narrow-reader");
         if (compact_toolbar && !was_narrow) return;
         task_search.set_size_request (300, -1);
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
@@ -1730,6 +1969,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void apply_wide_layout () {
         bool was_narrow = narrow_layout;
         narrow_layout = false;
+        reader.remove_css_class ("narrow-reader");
         if (!compact_toolbar && !was_narrow) return;
         task_search.set_size_request (300, -1);
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
@@ -1742,6 +1982,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void apply_narrow_layout () {
         if (narrow_layout) return;
         narrow_layout = true;
+        reader.add_css_class ("narrow-reader");
         task_search.set_size_request (220, -1);
         compact_toolbar = true;
         mailbox_split.collapsed = true;
@@ -1758,11 +1999,17 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void install_actions () {
         var compose = new SimpleAction ("compose", null); compose.activate.connect (() => open_compose ()); add_action (compose);
+        var new_mailbox = new SimpleAction ("new-mailbox", null);
+        new_mailbox.activate.connect (() => prompt_create_folder_for_account.begin ()); add_action (new_mailbox);
         var new_task = new SimpleAction ("new-task", null);
         new_task.activate.connect (() => task_view.new_task ()); add_action (new_task);
         var create_task = new SimpleAction ("create-task", null);
         create_task.activate.connect (create_task_from_selected_message); add_action (create_task);
+        var create_rule_from_message = new SimpleAction ("create-rule-from-message", null);
+        create_rule_from_message.activate.connect (show_rule_from_selected_message);
+        add_action (create_rule_from_message);
         var preferences = new SimpleAction ("preferences", null); preferences.activate.connect (() => show_preferences ()); add_action (preferences);
+        var rules = new SimpleAction ("rules", null); rules.activate.connect (() => show_rules ()); add_action (rules);
         var customize_toolbar = new SimpleAction ("customize-toolbar", null);
         customize_toolbar.activate.connect (() => show_toolbar_customization ());
         add_action (customize_toolbar);
@@ -1795,11 +2042,48 @@ public class MailWindow : Adw.ApplicationWindow {
             new Variant.string ("current-folder"));
         search_scope_action.change_state.connect ((value) => {
             string scope = value.get_string (); search_scope_action.set_state (value);
-            if (scope == "all-mail") search_scope = MailSearchScope.ALL_MAIL;
-            else if (scope == "current-account") search_scope = MailSearchScope.CURRENT_ACCOUNT;
-            else search_scope = MailSearchScope.CURRENT_FOLDER;
+            if (scope == "all-mail") {
+                search_scope = MailSearchScope.ALL_MAIL;
+                search_scope_button.label = "All Mail";
+                search_scope_button.tooltip_text = "Search all mail";
+            } else if (scope == "current-account") {
+                search_scope = MailSearchScope.CURRENT_ACCOUNT;
+                search_scope_button.label = "Account";
+                search_scope_button.tooltip_text = "Search this account";
+            } else {
+                search_scope = MailSearchScope.CURRENT_FOLDER;
+                search_scope_button.label = "Folder";
+                search_scope_button.tooltip_text = "Search this folder";
+            }
+            message_list.set_search_scope (search_scope);
         });
         add_action (search_scope_action);
+        var add_search_filter = new SimpleAction ("add-search-filter", VariantType.STRING);
+        add_search_filter.activate.connect ((parameter) => {
+            if (parameter == null) return;
+            string token = "";
+            switch (parameter.get_string ()) {
+            case "unread": token = "is:unread"; break;
+            case "flagged": token = "is:flagged"; break;
+            case "attachments": token = "has:attachment"; break;
+            case "sender":
+                if (selected_message == null || selected_message.sender_address.strip () == "") {
+                    toast_overlay.add_toast (new Adw.Toast ("Select a message to filter by its sender"));
+                    return;
+                }
+                token = "from:\"%s\"".printf (selected_message.sender_address.strip ());
+                break;
+            case "week":
+                token = "after:%s".printf (new DateTime.now_local ().add_days (-7).format ("%F"));
+                break;
+            default: return;
+            }
+            string current = search.text.strip ();
+            search.text = current == "" ? token : current + " " + token;
+            search.grab_focus ();
+            search.set_position (-1);
+        });
+        add_action (add_search_filter);
         var search_help = new SimpleAction ("search-help", null);
         search_help.activate.connect (() => show_search_help ()); add_action (search_help);
         var run_quick_step = new SimpleAction ("run-quick-step", VariantType.INT64);
@@ -1808,6 +2092,8 @@ public class MailWindow : Adw.ApplicationWindow {
         }); add_action (run_quick_step);
         var manage_quick_steps = new SimpleAction ("manage-quick-steps", null);
         manage_quick_steps.activate.connect (() => show_preferences ("rules")); add_action (manage_quick_steps);
+        var apply_rules = new SimpleAction ("apply-rules", null);
+        apply_rules.activate.connect (apply_rules_to_selected); add_action (apply_rules);
         var zoom_in = new SimpleAction ("zoom-in", null);
         zoom_in.activate.connect (() => reader.zoom_in ());
         add_action (zoom_in);
@@ -1815,6 +2101,7 @@ public class MailWindow : Adw.ApplicationWindow {
         zoom_out.activate.connect (() => reader.zoom_out ());
         add_action (zoom_out);
         application.set_accels_for_action ("win.compose", { "<Control>n" });
+        application.set_accels_for_action ("win.new-mailbox", { "<Control><Shift>n" });
         application.set_accels_for_action ("win.new-task", { "<Control><Shift>t" });
         application.set_accels_for_action ("win.search", { "<Control>f" });
         application.set_accels_for_action ("win.zoom-in", { "<Control>plus", "<Control>equal", "<Control>KP_Add" });
@@ -1950,6 +2237,16 @@ public class MailWindow : Adw.ApplicationWindow {
         heading.append (sync_cancel_button);
         panel.append (heading);
         panel.append (sync_progress_bar);
+        sync_retry_button.add_css_class ("suggested-action");
+        sync_retry_button.clicked.connect (() => retry_failed_sync ());
+        Accessibility.label (sync_retry_button, "Retry checking this mail account");
+        sync_settings_button.clicked.connect (() => show_preferences ("accounts"));
+        Accessibility.label (sync_settings_button, "Open account settings");
+        sync_recovery_actions.halign = Gtk.Align.END;
+        sync_recovery_actions.append (sync_settings_button);
+        sync_recovery_actions.append (sync_retry_button);
+        sync_recovery_actions.visible = false;
+        panel.append (sync_recovery_actions);
         panel.margin_start = 12;
         panel.margin_end = 12;
         panel.margin_bottom = 12;
@@ -1965,6 +2262,8 @@ public class MailWindow : Adw.ApplicationWindow {
             Source.remove (sync_status_hide_source); sync_status_hide_source = 0;
         }
         sync_status_label.label = detail == "" ? "Getting mail…" : detail;
+        sync_progress_bar.visible = true;
+        sync_recovery_actions.visible = false;
         double bounded = double.max (0, double.min (1, fraction));
         sync_progress_bar.fraction = bounded;
         string progress_description = bounded > 0 ?
@@ -2031,6 +2330,34 @@ public class MailWindow : Adw.ApplicationWindow {
         });
     }
 
+    private void show_sync_failure (string account_id, UserFacingError error) {
+        if (sync_status_hide_source != 0) {
+            Source.remove (sync_status_hide_source); sync_status_hide_source = 0;
+        }
+        failed_sync_account_id = account_id;
+        sync_status_label.label = "%s — %s".printf (error.title, error.suggestion);
+        sync_progress_bar.visible = false;
+        sync_cancel_button.sensitive = false;
+        sync_recovery_actions.visible = true;
+        sync_status_revealer.reveal_child = true;
+    }
+
+    private void retry_failed_sync () {
+        if (failed_sync_account_id == "" || sync_service == null) return;
+        try {
+            var account = cache.find_account (failed_sync_account_id);
+            if (account == null) {
+                show_preferences ("accounts");
+                return;
+            }
+            failed_sync_account_id = "";
+            sync_recovery_actions.visible = false;
+            show_sync_progress (0, "Checking for new mail…");
+            sync_service.resume_account (account.id);
+            sync_service.sync_account.begin (account);
+        } catch (Error error) { show_operation_error (error); }
+    }
+
     private void update_action_sensitivity () {
         var messages = action_messages ();
         bool selected = messages.size > 0;
@@ -2069,7 +2396,7 @@ public class MailWindow : Adw.ApplicationWindow {
         foreach (var name in new string[] { "flag", "clear-flag", "set-flag-color", "toggle-read", "labels", "snooze" }) {
             var action = lookup_action (name) as SimpleAction; if (action != null) action.set_enabled (selected);
         }
-        foreach (var name in new string[] { "archive", "junk", "move-to", "copy-to", "show-move" }) {
+        foreach (var name in new string[] { "archive", "junk", "move-to", "copy-to", "show-move", "apply-rules" }) {
             var action = lookup_action (name) as SimpleAction; if (action != null) action.set_enabled (server_messages);
         }
         var trash_action = lookup_action ("trash") as SimpleAction;
@@ -2077,6 +2404,9 @@ public class MailWindow : Adw.ApplicationWindow {
         var create_task_action = lookup_action ("create-task") as SimpleAction;
         if (create_task_action != null)
             create_task_action.set_enabled (single && !is_local_draft (messages[0].id));
+        var create_rule_action = lookup_action ("create-rule-from-message") as SimpleAction;
+        if (create_rule_action != null)
+            create_rule_action.set_enabled (single && server_messages);
     }
 
     private void rebuild_move_menu () {
@@ -2100,12 +2430,32 @@ public class MailWindow : Adw.ApplicationWindow {
             }
         }
         if (found) { root.append_section ("Move to", moves); root.append_section ("Copy to", copies); }
-        else root.append ("No other mailboxes", null);
+        else root.append ("No other folders", null);
         move_button.menu_model = root;
     }
 
     private void transfer_selected_to (string mailbox_id, bool copy) {
-        var messages = action_messages (); if (messages.size == 0) return;
+        transfer_messages_to (action_messages (), mailbox_id, copy);
+    }
+
+    private void transfer_dropped_messages (Mailbox target, string[] message_ids, bool copy) {
+        var messages = new Gee.ArrayList<Message> ();
+        foreach (var id in message_ids) {
+            var message = repository.find_message (id);
+            if (message == null || is_local_draft (message.id)) continue;
+            if (target.account_id == "" || message.account_id != target.account_id) {
+                toast_overlay.add_toast (new Adw.Toast (
+                    "Messages can only be dropped into a folder in the same account"));
+                return;
+            }
+            if (!copy && message.mailbox_id == target.id) continue;
+            messages.add (message);
+        }
+        transfer_messages_to (messages, target.id, copy);
+    }
+
+    private void transfer_messages_to (Gee.List<Message> messages, string mailbox_id, bool copy) {
+        if (messages.size == 0) return;
         message_list.invalidate_cached_view (mailbox_id);
         var undo = new Gee.HashMap<string, string> (); int completed = 0;
         repository.begin_batch ();
@@ -2286,9 +2636,79 @@ public class MailWindow : Adw.ApplicationWindow {
         dialog.accounts_changed.connect (() => account_changed (null));
         dialog.smart_mailboxes_changed.connect (refresh_mailbox_structure);
         dialog.automation_changed.connect (() => { rebuild_quick_steps_menu (); repository.reload (); });
+        dialog.rules_requested.connect (show_rules);
         dialog.sender_safety_changed.connect (queue_reader_policy_refresh);
-        if (page_name != "") dialog.set_visible_page_name (page_name);
+        if (page_name == "smart-mailboxes") dialog.show_smart_mailbox_creation ();
+        else if (page_name != "") dialog.set_visible_page_name (page_name);
         dialog.present (this);
+    }
+
+    private RulesWindow ensure_rules_window () {
+        var existing = rules_window;
+        if (existing != null) return existing;
+        var created = new RulesWindow (this, cache); rules_window = created;
+        created.rules_changed.connect (() => { rebuild_quick_steps_menu (); repository.reload (); });
+        return created;
+    }
+
+    public void show_rules () {
+        ensure_rules_window ().present ();
+    }
+
+    private void show_new_rule () {
+        var window = ensure_rules_window ();
+        window.present ();
+        // Let the non-modal rules window map before attaching its editor.
+        Idle.add (() => { window.create_rule (); return Source.REMOVE; });
+    }
+
+    private void show_rule_for_mailbox (AccountSettings? account, Mailbox? mailbox) {
+        var window = ensure_rules_window ();
+        window.present ();
+        string account_id = account != null ? account.id :
+            (mailbox == null ? "" : mailbox.account_id);
+        // Unified, demo, and local views are navigation concepts, not durable
+        // provider mailbox IDs that an incoming rule can match. Only prefill a
+        // mailbox condition when the clicked ID is present in the real cached
+        // folder inventory; a rule created from Flagged/VIP/etc. must never
+        // start with a broken “Unavailable mailbox” reference.
+        string mailbox_id = "";
+        if (mailbox != null && mailbox.account_id != "" &&
+            mailbox.role != MailboxRole.VIP && mailbox.role != MailboxRole.FLAGGED &&
+            mailbox.role != MailboxRole.SNOOZED) {
+            try {
+                foreach (var cached_mailbox in cache.list_cached_mailboxes ()) {
+                    if (cached_mailbox.id == mailbox.id &&
+                        cached_mailbox.account_id == mailbox.account_id) {
+                        mailbox_id = mailbox.id;
+                        break;
+                    }
+                }
+            } catch (Error error) {
+                warning ("Could not validate rule mailbox context: %s", error.message);
+            }
+        }
+        Idle.add (() => {
+            window.create_rule_for_context (account_id, mailbox_id);
+            return Source.REMOVE;
+        });
+    }
+
+    private void show_rule_from_selected_message () {
+        var messages = action_messages ();
+        if (messages.size != 1 || is_local_draft (messages[0].id)) {
+            toast_overlay.add_toast (new Adw.Toast (
+                "Select one received message to create a rule"));
+            return;
+        }
+        var message = repository.find_message (messages[0].id) ?? messages[0];
+        var window = ensure_rules_window ();
+        window.present ();
+        Idle.add (() => {
+            window.create_rule_for_context (message.account_id, message.mailbox_id,
+                message.sender_address, message.subject);
+            return Source.REMOVE;
+        });
     }
 
     private void queue_reader_policy_refresh () {
@@ -2338,7 +2758,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.3.2"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.4.0"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -2352,7 +2772,14 @@ public class MailWindow : Adw.ApplicationWindow {
             mail_engine, sync_service, online_accounts, onboarding);
         dialog.account_saved.connect ((account) => account_changed (account));
         dialog.accounts_changed.connect (() => account_changed (null));
-        if (onboarding) dialog.closed.connect (() => settings.onboarding_completed = true);
+        if (onboarding) {
+            dialog.setup_completed.connect ((account) => {
+                settings.onboarding_completed = true;
+                pending_initial_inbox_account_id = account.id;
+                sidebar.select_mailbox ("unified-inbox");
+            });
+            dialog.setup_deferred.connect (() => settings.onboarding_completed = true);
+        }
         dialog.present (this);
     }
 
@@ -2397,14 +2824,42 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void select_preferred_mailbox () {
+        try {
+            bool normal_mode = Environment.get_variable ("MAILFICIENT_QA") != "1" ||
+                Environment.get_variable ("MAILFICIENT_QA_NO_DEMO") == "1";
+            if (normal_mode && cache.list_accounts ().size == 0) {
+                active_mailbox = null;
+                selected_message = null;
+                sidebar.clear_selection ();
+                workspace_stack.visible_child_name = "mail";
+                toolbar_stack.visible_child_name = "mail";
+                if (message_pane != null) message_pane.visible = false;
+                mailbox_split.show_sidebar = false;
+                reader.show_no_accounts ();
+                return;
+            }
+        } catch (Error error) {
+            warning ("Could not inspect accounts at startup: %s", error.message);
+        }
         string preferred = settings.selected_mailbox_id;
         if (preferred != "" && preferred != CachedMailRepository.GNOME_CALENDAR_ID &&
             preferred != "local-calendar" && sidebar.select_mailbox (preferred)) return;
         var mailboxes = repository.list_mailboxes ();
+        // Mail is the product's primary workspace. A fresh profile should
+        // never land in Tasks merely because synthetic productivity views are
+        // inserted before the real mailboxes.
+        if (sidebar.select_mailbox ("unified-inbox")) return;
         foreach (var mailbox in mailboxes) {
-            if (mailbox.id != CachedMailRepository.GNOME_CALENDAR_ID)
+            if (mailbox.role == MailboxRole.INBOX && sidebar.select_mailbox (mailbox.id)) return;
+        }
+        foreach (var mailbox in mailboxes) {
+            if (mailbox.id != CachedMailRepository.GNOME_CALENDAR_ID &&
+                !is_task_mailbox (mailbox.id))
                 if (sidebar.select_mailbox (mailbox.id)) return;
         }
+        foreach (var mailbox in mailboxes)
+            if (mailbox.id != CachedMailRepository.GNOME_CALENDAR_ID &&
+                sidebar.select_mailbox (mailbox.id)) return;
     }
 
     private void open_gnome_calendar (string previous_mailbox_id) {
@@ -2693,9 +3148,14 @@ public class MailWindow : Adw.ApplicationWindow {
         } finally { repository.end_batch (); }
         if (completed == 0) local_removal_refresh_pending = false;
         select_after_removal (next_message_id, completed);
-        show_transfer_undo (completed == 1 ? (mark_junk ? "Marked as junk" : "Returned to Inbox") :
-            (mark_junk ? "%d messages marked as junk".printf (completed) :
-                         "%d messages returned to Inbox".printf (completed)), undo);
+        string result_description;
+        if (completed == 1)
+            result_description = mark_junk ? "Marked as junk" : "Returned to Inbox";
+        else if (mark_junk)
+            result_description = "%d messages marked as junk".printf (completed);
+        else
+            result_description = "%d messages returned to Inbox".printf (completed);
+        show_transfer_undo (result_description, undo);
     }
 
     private void select_after_removal (string next_message_id, int completed) {
@@ -2825,14 +3285,14 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private async void export_mailbox (Mailbox mailbox) {
-        var dialog = new Gtk.FileDialog (); dialog.title = "Export Mailbox"; dialog.accept_label = "Export";
+        var dialog = new Gtk.FileDialog (); dialog.title = "Export Folder"; dialog.accept_label = "Export";
         dialog.initial_folder = settings.file_dialog_initial_folder ();
         dialog.initial_name = AttachmentSafety.safe_filename (mailbox.name) + ".mbox";
         try {
             var destination = yield dialog.save (this, null);
             settings.remember_file_dialog_selection (destination);
             new MessageExportService ().export_mbox (repository, mailbox, destination);
-            toast_overlay.add_toast (new Adw.Toast ("Mailbox exported"));
+            toast_overlay.add_toast (new Adw.Toast ("Folder exported"));
         } catch (Error error) { if (!DialogErrors.was_cancelled (error)) show_operation_error (error); }
     }
 

@@ -4,16 +4,20 @@ public class MessageList : Gtk.Box {
     public signal void message_activated (Message message);
     public signal void selection_changed (Gee.List<Message> messages);
     public signal void no_messages ();
+    public signal void clear_search_requested ();
+    public signal void get_mail_requested ();
     private MailRepository repository;
     private MailSearchService search_service;
     private Gtk.ListView list;
     private Gtk.ScrolledWindow scroller = new Gtk.ScrolledWindow ();
     private Gtk.Stack content_stack = new Gtk.Stack ();
     private Adw.StatusPage empty_status = new Adw.StatusPage ();
+    private Gtk.Button empty_action = new Gtk.Button ();
     private VirtualMessageModel? model;
     private Gtk.SelectionModel? selection;
     private string mailbox_id = "inbox";
     private string query = "";
+    private MailSearchScope search_scope = MailSearchScope.CURRENT_FOLDER;
     private uint search_source;
     private MessageSortMode sort_mode = MessageSortMode.NEWEST;
     private bool suppress_selection;
@@ -27,6 +31,7 @@ public class MessageList : Gtk.Box {
     private Gtk.Stack list_stack = new Gtk.Stack ();
     private Gee.HashMap<string, MessageRow> bound_rows = new Gee.HashMap<string, MessageRow> ();
     private bool suppress_unread_filter_reload;
+    private uint unread_filter_reload_source;
     private bool refresh_deferred_until_shown;
 
     public MessageList (MailRepository repository, MailSearchService search_service) {
@@ -39,6 +44,7 @@ public class MessageList : Gtk.Box {
         var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
         header.add_css_class ("message-list-header");
         var labels = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); labels.hexpand = true;
+        labels.add_css_class ("message-list-title-group");
         mailbox_title.xalign = 0; mailbox_title.add_css_class ("title-3"); labels.append (mailbox_title);
         message_count.xalign = 0; message_count.add_css_class ("dim-label"); message_count.add_css_class ("message-count"); labels.append (message_count);
         header.append (labels);
@@ -46,7 +52,23 @@ public class MessageList : Gtk.Box {
         unread_filter.tooltip_text = "Show unread messages only";
         Accessibility.label (unread_filter, "Show unread messages only");
         unread_filter.toggled.connect (() => {
-            if (!suppress_unread_filter_reload) reload ();
+            string label = unread_filter.active ?
+                "Show all messages" : "Show unread messages only";
+            unread_filter.tooltip_text = label;
+            Accessibility.label (unread_filter, label);
+            if (suppress_unread_filter_reload) return;
+            // Rebuilding the virtual list synchronously from inside GTK's
+            // ToggleButton state transition can leave the original pointer
+            // event active while a large real mailbox is being rebound. Queue
+            // one reload after the control has finished changing state, and
+            // collapse a quick on/off gesture to the final requested state.
+            if (unread_filter_reload_source != 0)
+                Source.remove (unread_filter_reload_source);
+            unread_filter_reload_source = Idle.add (() => {
+                unread_filter_reload_source = 0;
+                reload ();
+                return Source.REMOVE;
+            });
         });
         header.append (unread_filter);
         select_multiple.icon_name = "object-select-symbolic";
@@ -56,7 +78,10 @@ public class MessageList : Gtk.Box {
         // and Ctrl-click gestures. This button only reveals checkboxes.
         select_multiple.toggled.connect (refresh_row_widgets);
         header.append (select_multiple);
-        append (header); append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
+        append (header);
+        var header_divider = new Gtk.Separator (Gtk.Orientation.HORIZONTAL);
+        header_divider.add_css_class ("message-list-divider");
+        append (header_divider);
 
         list = create_list_view ();
         list_stack.add_named (list, "transient");
@@ -67,6 +92,17 @@ public class MessageList : Gtk.Box {
         content_stack.transition_duration = 160;
         empty_status.vexpand = true;
         empty_status.add_css_class ("empty-state");
+        empty_action.halign = Gtk.Align.CENTER;
+        empty_action.add_css_class ("pill");
+        empty_action.clicked.connect (() => {
+            if (query.strip () != "") {
+                query = "";
+                clear_search_requested ();
+            } else if (unread_filter.active) {
+                unread_filter.active = false;
+            } else get_mail_requested ();
+        });
+        empty_status.child = empty_action;
         content_stack.add_named (scroller, "messages");
         content_stack.add_named (empty_status, "empty");
         append (content_stack);
@@ -106,7 +142,7 @@ public class MessageList : Gtk.Box {
         var result = new Gtk.ListView (null, factory);
         result.add_css_class ("boxed-list");
         result.add_css_class ("message-list-items");
-        result.show_separators = true;
+        result.show_separators = false;
         result.activate.connect ((position) => {
             var message = model == null ? null : model.get_item (position) as Message;
             if (message != null) message_activated (message);
@@ -158,6 +194,12 @@ public class MessageList : Gtk.Box {
         search_source = Timeout.add (120, () => {
             search_source = 0; reload (); return Source.REMOVE;
         });
+    }
+
+    public void set_search_scope (MailSearchScope scope) {
+        if (search_scope == scope) return;
+        search_scope = scope;
+        if (query.strip () != "") reload (true, true);
     }
 
     public void refresh () { reload (true, false, "", true); }
@@ -388,7 +430,7 @@ public class MessageList : Gtk.Box {
         int total;
         try {
             total = query == "" ? repository.message_count (mailbox_id, "", unread_filter.active) :
-                search_service.count (query, unread_filter.active);
+                search_service.count (query, unread_filter.active, search_scope, mailbox_id);
         } catch (Error error) {
             show_status ("Search Unavailable",
                 "The local mail index could not be searched. Try refreshing Mailficient.",
@@ -404,7 +446,8 @@ public class MessageList : Gtk.Box {
             try {
                 return current_query == "" ? repository.list_messages (current_mailbox, "",
                     limit, offset, unread_only, current_sort) :
-                    search_service.search (current_query, limit, offset, unread_only, current_sort);
+                    search_service.search (current_query, limit, offset, unread_only, current_sort,
+                        search_scope, current_mailbox);
             } catch (Error error) {
                 warning ("Could not load a virtual mail page: %s".printf (error.message));
                 return new Gee.ArrayList<Message> ();
@@ -418,7 +461,18 @@ public class MessageList : Gtk.Box {
         // idle turn, and detaching here would paint an empty Inbox meanwhile.
         list_stack.set_visible_child (list);
         mailbox_loaded = true;
-        mailbox_title.label = query == "" ? mailbox_name : "Search Results";
+        // Build an owned title before handing it to GTK. Vala can otherwise
+        // lower the concatenating branch of a nested conditional to a
+        // short-lived temporary, which showed up as corrupted text during a
+        // live search even though the result set itself was correct.
+        string visible_title;
+        if (query == "") visible_title = mailbox_name;
+        else if (search_scope == MailSearchScope.CURRENT_FOLDER)
+            visible_title = "Search in %s".printf (mailbox_name);
+        else if (search_scope == MailSearchScope.CURRENT_ACCOUNT)
+            visible_title = "Search This Account";
+        else visible_title = "Search All Mail";
+        mailbox_title.label = visible_title;
         message_count.label = total == 1 ? "1 message" : "%d messages".printf (total);
         local_queue = mailbox_id == CachedMailRepository.LOCAL_DRAFTS_ID ||
             mailbox_id == CachedMailRepository.LOCAL_OUTBOX_ID || mailbox_id == "drafts";
@@ -433,7 +487,7 @@ public class MessageList : Gtk.Box {
         } else {
             show_status (unread_filter.active ? "No Unread Messages" : "No Messages",
                 unread_filter.active ? "All messages here have been read." :
-                    (query == "" ? "This mailbox is empty." : "Try a different search."),
+                    (query == "" ? "This folder is empty." : "Try a different search."),
                 "mail-read-symbolic");
             no_messages ();
         }
@@ -494,6 +548,16 @@ public class MessageList : Gtk.Box {
     private void show_status (string title, string description, string icon_name) {
         empty_status.icon_name = icon_name; empty_status.title = title;
         empty_status.description = description;
+        if (query.strip () != "") {
+            empty_action.label = "Clear Search";
+            Accessibility.label (empty_action, "Clear this mail search");
+        } else if (unread_filter.active) {
+            empty_action.label = "Show All Messages";
+            Accessibility.label (empty_action, "Show read and unread messages");
+        } else {
+            empty_action.label = "Get Mail";
+            Accessibility.label (empty_action, "Check for new mail");
+        }
         content_stack.visible_child_name = "empty";
     }
 }

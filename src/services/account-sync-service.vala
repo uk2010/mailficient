@@ -276,7 +276,12 @@ public class AccountSyncService : Object {
                 foreach (var remote_draft in batch.remote_drafts)
                     remote_drafts.add (remote_draft);
                 junk_filter.apply (batch);
-                mail_rules.apply (batch);
+                // Adding an account imports history; it is not an arrival
+                // event. Never let a newly configured on-device rule move or
+                // trash that history without the explicit previewed Run Now
+                // flow in the Rules window.
+                if (allow_notifications && established_cache)
+                    mail_rules.apply (batch);
                 // Camel publishes the complete folder inventory before it
                 // starts fetching messages. Persist that metadata immediately,
                 // but do not wake the message list for an inventory-only batch.
@@ -367,7 +372,8 @@ public class AccountSyncService : Object {
             foreach (var remote_draft in snapshot.remote_drafts)
                 remote_drafts.add (remote_draft);
             junk_filter.apply (snapshot);
-            mail_rules.apply (snapshot);
+            if (allow_notifications && established_cache)
+                mail_rules.apply (snapshot);
             try {
                 // Import while the received-attachment cache paths emitted by
                 // Camel are still referenced by this completed sync pass.

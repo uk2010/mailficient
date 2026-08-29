@@ -121,6 +121,7 @@ sources = files(
   'ui/preferences-window.vala',
   'ui/sender-lists-dialog.vala',
   'ui/rule-editor-dialog.vala',
+  'ui/rules-window.vala',
   'ui/shortcuts-dialog.vala',
   'ui/recipient-completion-controller.vala',
   'ui/contact-picker-window.vala',

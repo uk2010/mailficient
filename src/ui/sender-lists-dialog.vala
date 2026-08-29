@@ -23,7 +23,10 @@ public class SenderListsDialog : Adw.PreferencesDialog {
         title = "Sender Lists";
         content_width = 720;
         content_height = 600;
+        width_request = 360;
+        height_request = 480;
         search_enabled = true;
+        add_css_class ("sender-lists-dialog");
 
         add (build_safe_senders_page ());
         add (build_blocked_senders_page ());
@@ -43,8 +46,13 @@ public class SenderListsDialog : Adw.PreferencesDialog {
         page.name = "safe";
         page.title = "Safe Senders";
         page.icon_name = "security-medium-symbolic";
-        safe_senders_group.title = "Safe Senders";
-        safe_senders_group.description = "Remote images load automatically and automatic sender warnings are hidden. Full findings remain available from Security Details.";
+        style_page (page, "sender-lists-safe-page");
+        add_intro (page, "TRUST", "Mail from people you know",
+            "Allow familiar senders without weakening protection for anyone else.",
+            "security-medium-symbolic", "You can revoke access anytime");
+        style_group (safe_senders_group, "safe-senders");
+        safe_senders_group.title = "Allowed Senders";
+        safe_senders_group.description = "Remote images load automatically and routine sender warnings stay out of the way. Full findings remain in Security Details.";
         page.add (safe_senders_group);
         reload_safe_senders ();
         return page;
@@ -55,8 +63,13 @@ public class SenderListsDialog : Adw.PreferencesDialog {
         page.name = "remote-images";
         page.title = "Remote Image Senders";
         page.icon_name = "image-x-generic-symbolic";
-        trusted_senders_group.title = "Remote Image Senders";
-        trusted_senders_group.description = "Remote images load automatically for these senders. Safe Senders are trusted for images automatically and do not need to be listed here.";
+        style_page (page, "sender-lists-images-page");
+        add_intro (page, "REMOTE CONTENT", "Choose who can load images",
+            "Keep tracking protection on by default, with precise exceptions for senders you trust.",
+            "image-x-generic-symbolic", "Blocked for everyone else");
+        style_group (trusted_senders_group, "remote-image-senders");
+        trusted_senders_group.title = "Automatic Image Loading";
+        trusted_senders_group.description = "Safe Senders already receive this access and do not need to appear twice.";
         page.add (trusted_senders_group);
         reload_trusted_senders ();
         return page;
@@ -67,27 +80,37 @@ public class SenderListsDialog : Adw.PreferencesDialog {
         page.name = "blocked";
         page.title = "Blocked Senders";
         page.icon_name = "mail-mark-junk-symbolic";
+        style_page (page, "sender-lists-blocked-page");
+        add_intro (page, "INBOX SAFETY", "Keep repeat junk out",
+            "Block a single address or an entire domain with a rule you can remove at any time.",
+            "mail-mark-junk-symbolic", "Rules stay on this device");
 
         var add_group = new Adw.PreferencesGroup ();
-        add_group.title = "Block a Sender";
+        style_group (add_group, "block-sender");
+        add_group.title = "Add to Block List";
         add_group.description = "New Inbox messages matching an address or domain are marked as junk on the server and moved to Junk.";
         var kinds = new Gtk.StringList (null);
         kinds.append ("Email address");
         kinds.append ("Domain");
         junk_kind_row.title = "Match";
         junk_kind_row.model = kinds;
+        style_row (junk_kind_row, "view-list-symbolic");
         add_group.add (junk_kind_row);
         junk_pattern_row.title = "Address or domain";
         junk_pattern_row.show_apply_button = true;
+        junk_pattern_row.add_css_class ("settings-control-row");
+        junk_pattern_row.add_css_class ("sender-list-entry-row");
         junk_pattern_row.apply.connect (add_junk_rule);
         add_group.add (junk_pattern_row);
-        junk_error_row.add_prefix (new Gtk.Image.from_icon_name ("dialog-warning-symbolic"));
+        style_row (junk_error_row, "dialog-warning-symbolic");
         junk_error_row.visible = false;
         junk_error_row.add_css_class ("error");
+        junk_error_row.add_css_class ("settings-state-row");
         add_group.add (junk_error_row);
         page.add (add_group);
 
-        junk_rules_group.title = "Blocked Senders";
+        style_group (junk_rules_group, "blocked-senders");
+        junk_rules_group.title = "Current Block List";
         junk_rules_group.description = "Rules are stored locally. Removing a rule does not restore mail already classified as junk.";
         page.add (junk_rules_group);
         reload_junk_rules ();
@@ -103,7 +126,8 @@ public class SenderListsDialog : Adw.PreferencesDialog {
                 var empty = new Adw.ActionRow ();
                 empty.title = "No Safe Senders";
                 empty.subtitle = "Add a sender from the message Security Details";
-                empty.add_prefix (new Gtk.Image.from_icon_name ("security-medium-symbolic"));
+                empty.add_css_class ("settings-empty-row");
+                style_row (empty, "security-medium-symbolic");
                 safe_senders_group.add (empty);
                 safe_sender_rows.add (empty);
                 return;
@@ -112,6 +136,8 @@ public class SenderListsDialog : Adw.PreferencesDialog {
                 var row = new Adw.ActionRow ();
                 row.title = address;
                 row.subtitle = "Remote images allowed; automatic sender warnings hidden";
+                style_row (row, "avatar-default-symbolic");
+                row.add_css_class ("sender-list-row");
                 var remove = remove_button ("Remove from Safe Senders",
                     "Remove " + address + " from Safe Senders");
                 remove.clicked.connect (() => {
@@ -144,7 +170,8 @@ public class SenderListsDialog : Adw.PreferencesDialog {
                 var empty = new Adw.ActionRow ();
                 empty.title = "No Remote Image Senders";
                 empty.subtitle = "Remote images remain blocked by default";
-                empty.add_prefix (new Gtk.Image.from_icon_name ("network-offline-symbolic"));
+                empty.add_css_class ("settings-empty-row");
+                style_row (empty, "network-offline-symbolic");
                 trusted_senders_group.add (empty);
                 trusted_sender_rows.add (empty);
                 return;
@@ -153,6 +180,8 @@ public class SenderListsDialog : Adw.PreferencesDialog {
                 var row = new Adw.ActionRow ();
                 row.title = address;
                 row.subtitle = "Remote images allowed";
+                style_row (row, "avatar-default-symbolic");
+                row.add_css_class ("sender-list-row");
                 var remove = remove_button ("Stop trusting this sender",
                     "Stop loading remote images from " + address);
                 remove.clicked.connect (() => {
@@ -199,7 +228,8 @@ public class SenderListsDialog : Adw.PreferencesDialog {
                 var empty = new Adw.ActionRow ();
                 empty.title = "No Blocked Senders";
                 empty.subtitle = "Messages are not moved to Junk by a local sender rule";
-                empty.add_prefix (new Gtk.Image.from_icon_name ("mail-mark-junk-symbolic"));
+                empty.add_css_class ("settings-empty-row");
+                style_row (empty, "mail-mark-junk-symbolic");
                 junk_rules_group.add (empty);
                 junk_rule_rows.add (empty);
                 return;
@@ -208,6 +238,9 @@ public class SenderListsDialog : Adw.PreferencesDialog {
                 var row = new Adw.ActionRow ();
                 row.title = rule.kind == JunkRuleKind.DOMAIN ? "@" + rule.pattern : rule.pattern;
                 row.subtitle = rule.kind == JunkRuleKind.DOMAIN ? "Entire domain" : "Email address";
+                style_row (row, rule.kind == JunkRuleKind.DOMAIN ?
+                    "network-workgroup-symbolic" : "avatar-default-symbolic");
+                row.add_css_class ("sender-list-row");
                 var remove = remove_button ("Remove blocked sender rule",
                     "Remove blocked sender rule for " + rule.pattern);
                 remove.clicked.connect (() => {
@@ -235,6 +268,7 @@ public class SenderListsDialog : Adw.PreferencesDialog {
         var button = new Gtk.Button.from_icon_name ("user-trash-symbolic");
         button.valign = Gtk.Align.CENTER;
         button.add_css_class ("flat");
+        button.add_css_class ("sender-list-remove");
         button.tooltip_text = tooltip;
         Accessibility.label (button, accessible_label);
         return button;
@@ -244,8 +278,39 @@ public class SenderListsDialog : Adw.PreferencesDialog {
         var row = new Adw.ActionRow ();
         row.title = title;
         row.subtitle = detail;
-        row.add_prefix (new Gtk.Image.from_icon_name ("dialog-warning-symbolic"));
+        row.add_css_class ("settings-state-row");
+        row.add_css_class ("error");
+        style_row (row, "dialog-warning-symbolic");
         return row;
+    }
+
+    private static void style_page (Adw.PreferencesPage page, string page_class) {
+        page.add_css_class ("settings-page-frame");
+        page.add_css_class ("settings-subpage-frame");
+        page.add_css_class (page_class);
+    }
+
+    private static void add_intro (Adw.PreferencesPage page, string kicker,
+                                   string title, string description,
+                                   string icon_name, string status) {
+        var group = new Adw.PreferencesGroup ();
+        group.add_css_class ("settings-intro-group");
+        group.add_css_class ("settings-subpage-intro-group");
+        group.add (new SettingsPageIntro (kicker, title, description, icon_name, status));
+        page.add (group);
+    }
+
+    private static void style_group (Adw.PreferencesGroup group, string section_name) {
+        group.add_css_class ("settings-section");
+        group.add_css_class ("settings-section-card");
+        group.add_css_class ("settings-section-" + section_name);
+    }
+
+    private static void style_row (Adw.ActionRow row, string icon_name) {
+        row.add_css_class ("settings-control-row");
+        var icon = new Gtk.Image.from_icon_name (icon_name);
+        icon.add_css_class ("settings-control-icon");
+        row.add_prefix (icon);
     }
 }
 }

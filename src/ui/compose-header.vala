@@ -126,6 +126,7 @@ internal class ComposeHeader : Gtk.Box {
         append_separator ();
 
         var recipient_buttons = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        recipient_buttons.add_css_class ("compose-recipient-actions");
         var contacts_button = new Gtk.Button.with_label ("Contacts");
         configure_reveal_button (contacts_button, "Choose a contact for To");
         contacts_button.clicked.connect (() => contacts_requested (to_entry));
@@ -163,7 +164,7 @@ internal class ComposeHeader : Gtk.Box {
         row.add_css_class ("compose-field-row");
         var label = new Gtk.Label (title);
         label.xalign = 0; label.valign = Gtk.Align.CENTER;
-        label.width_chars = 8; label.add_css_class ("compose-field-label");
+        label.width_chars = 6; label.add_css_class ("compose-field-label");
         row.append (label); row.append (field);
         if (suffix != null) row.append (suffix);
         return row;
@@ -175,12 +176,13 @@ internal class ComposeHeader : Gtk.Box {
     }
 
     private static void configure_reveal_button (Gtk.Button button, string accessible_name) {
+        button.has_frame = false;
         button.add_css_class ("flat"); button.add_css_class ("compose-recipient-reveal");
         button.valign = Gtk.Align.CENTER; Accessibility.label (button, accessible_name);
     }
 
     private Gtk.Button contact_button (Gtk.Entry entry, string accessible_name) {
-        var button = new Gtk.Button.from_icon_name ("contact-new-symbolic");
+        var button = new Gtk.Button.with_label ("Contacts");
         button.tooltip_text = accessible_name; configure_reveal_button (button, accessible_name);
         button.clicked.connect (() => contacts_requested (entry)); return button;
     }

@@ -32,7 +32,7 @@ sudo apt install valac meson ninja-build libgtk-4-dev libadwaita-1-dev libgee-0.
 meson setup build
 meson compile -C build
 meson test -C build --print-errorlogs
-build/src/mailficient
+MAILFICIENT_DEV_INSTANCE=1 build/src/mailficient
 ```
 
 Fedora equivalents include `vala`, `meson`, `ninja-build`, `gtk4-devel`, `libadwaita-devel`, `libgee-devel`, `json-glib-devel`, `webkitgtk6.0-devel`, `libsecret-devel`, `evolution-data-server-devel`, `libical-devel`, `sqlite-devel`, `libxml2-devel`, and `openssl-devel`.
@@ -41,9 +41,10 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Release downloads
 
-The [v0.3.2 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.3.2)
-provides the complete source archive, Debian packages for AMD64 and ARM64, RPM
-packages for x86_64 and aarch64, and SHA-256 checksums for every download.
+The [v0.4.0 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.4.0)
+provides the complete source archive, Debian packages for AMD64 and ARM64, and
+SHA-256 checksums for the downloadable packages. Reproducible workflows for
+Flatpak, Snap, and RPM builds are included in the source repository.
 
 ## Flatpak package
 
@@ -51,7 +52,7 @@ Build the current Flatpak from the pinned source manifest, then install and run
 the resulting bundle with:
 
 ```sh
-flatpak install --user ./Mailficient-0.3.2-x86_64.flatpak
+flatpak install --user ./Mailficient-0.4.0-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -67,7 +68,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.3.2_arm64.snap
+sudo snap install --dangerous ./mailficient_0.4.0_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -94,7 +95,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.3.2-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.4.0-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 

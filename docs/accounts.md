@@ -10,7 +10,7 @@ If a server presents an invalid certificate, setup remains on the account form a
 
 Removing an account asks for confirmation, disconnects its Camel session, clears its Secret Service entries, and transactionally removes its cached mail, pending operations, local drafts, and Outbox entries. It does not delete mail from the provider. Removing the final account returns Mailficient to its no-accounts state with an Add Email Account action; sample mail is never inserted in normal use.
 
-Use the folder button beside an account in the mailbox sidebar to create a server mailbox. Right-click a custom mailbox to create a subfolder, rename it, or delete it. System mailboxes such as Inbox, Sent, and Trash are protected from rename and deletion. Deleting a custom mailbox requires confirmation because the server may also delete the messages it contains.
+Use the **+** control beside Favorites or right-click the sidebar to create a server folder. Right-click a custom folder to create a subfolder, add it to Favorites, rename it, export it, or delete it. System folders such as Inbox, Sent, and Trash are protected from rename and deletion. Deleting a custom folder requires confirmation because the server may also delete the messages it contains.
 
 The folder button in the message toolbar lists every other mailbox in the selected message's account under separate **Move to** and **Copy to** sections. Both operations are written to the local queue first, so a move is reflected immediately and survives a restart or temporary connection failure.
 

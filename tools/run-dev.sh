@@ -4,6 +4,16 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILD_DIR="$ROOT_DIR/build"
 
+# Reuse the repository's working native build when it is already configured.
+# This is the exact build used by local QA and avoids needlessly entering the
+# Flatpak SDK (which may be unavailable when its document portal is stale).
+LOCAL_BUILD_DIR="$ROOT_DIR/build-local"
+if command -v meson >/dev/null 2>&1 &&
+   [ -f "$LOCAL_BUILD_DIR/build.ninja" ]; then
+  meson compile -C "$LOCAL_BUILD_DIR" src/mailficient
+  MAILFICIENT_DEV_INSTANCE=1 exec "$LOCAL_BUILD_DIR/src/mailficient" "$@"
+fi
+
 # Prefer a native build when the host provides Evolution Data Server's
 # address-book API. The GNOME SDK used by the fallback build does not include
 # libebook, which would compile Contacts support out of the application.

@@ -908,7 +908,8 @@ private void test_mail_rules_and_labels () {
         var cache = new CacheDatabase (path); string account_id = "rules-account";
         var inbox = new Mailbox (account_id + ":inbox", "Inbox", "mail-inbox-symbolic", MailboxRole.INBOX, 1, account_id, "INBOX");
         var archive = new Mailbox (account_id + ":archive", "Archive", "package-x-generic-symbolic", MailboxRole.ARCHIVE, 0, account_id, "Archive");
-        var snapshot = new MailSyncResult (account_id); snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (archive);
+        var junk = new Mailbox (account_id + ":junk", "Junk", "dialog-warning-symbolic", MailboxRole.JUNK, 0, account_id, "Junk");
+        var snapshot = new MailSyncResult (account_id); snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (archive); snapshot.mailboxes.add (junk);
         var message = new Message (account_id + ":inbox:1", inbox.id, "Build Bot", "build@example.net", "Alex", "Nightly report passed", "", "Body", "Now", true, false, false, 1, false, account_id, "1");
         snapshot.messages.add (message); cache.store_sync_result (snapshot);
         cache.add_mail_rule ("Read reports", "", MailRuleField.SUBJECT, "report", MailRuleAction.MARK_READ);
@@ -919,6 +920,14 @@ private void test_mail_rules_and_labels () {
         assert (updated.mailbox_id == archive.id); assert (cache.pending_transfer_count () == 1);
         assert (cache.labels_for_message (message.id).size == 1);
         assert (cache.search_messages (SearchQuery.parse ("label:automation")).size == 1);
+        var junk_operation = new Gee.ArrayList<MailRuleOperation> ();
+        junk_operation.add (new MailRuleOperation (MailRuleAction.MARK_JUNK));
+        MailRuleService.apply_operations (cache, updated, junk_operation);
+        assert (cache.find_cached_message (message.id).mailbox_id == junk.id);
+        var not_junk_operation = new Gee.ArrayList<MailRuleOperation> ();
+        not_junk_operation.add (new MailRuleOperation (MailRuleAction.MARK_NOT_JUNK));
+        MailRuleService.apply_operations (cache, cache.find_cached_message (message.id), not_junk_operation);
+        assert (cache.find_cached_message (message.id).mailbox_id == inbox.id);
         var rules = cache.list_mail_rules (); assert (rules.size == 3);
         cache.remove_mail_rule (rules[0].id); assert (cache.list_mail_rules ().size == 2);
     } catch (Error error) { GLib.error ("mail rules/labels test failed: %s", error.message); }
@@ -1953,6 +1962,8 @@ private void test_settings_store () {
         settings.set_signature ("account-1", "Alex Morgan\nDesign Team");
         settings.set_signature_enabled ("account-1", true);
         settings.mailbox_pane_width = 276; settings.message_pane_width = 428;
+        assert (!settings.compact_pane_widths_migrated);
+        settings.compact_pane_widths_migrated = true;
         settings.save_window_state (1480, 910, false);
         settings.sidebar_visible = false;
         settings.onboarding_completed = true;
@@ -1980,6 +1991,7 @@ private void test_settings_store () {
         assert (!reopened.notifications_enabled); assert (reopened.signature_enabled ("account-1"));
         assert (reopened.signature ("account-1") == "Alex Morgan\nDesign Team");
         assert (reopened.mailbox_pane_width == 276); assert (reopened.message_pane_width == 428);
+        assert (reopened.compact_pane_widths_migrated);
         assert (reopened.window_width == 1480); assert (reopened.window_height == 910);
         assert (!reopened.window_maximized);
         assert (!reopened.sidebar_visible);
@@ -2004,7 +2016,7 @@ private void test_settings_store () {
         maximized.window_width = 10; maximized.window_height = 9999;
         maximized.mailbox_pane_width = 2; maximized.message_pane_width = 9999;
         assert (maximized.window_width == 640); assert (maximized.window_height == 2160);
-        assert (maximized.mailbox_pane_width == 190); assert (maximized.message_pane_width == 620);
+        assert (maximized.mailbox_pane_width == 190); assert (maximized.message_pane_width == 520);
         maximized.sync_interval_minutes = 1;
         assert (maximized.sync_interval_minutes == 1);
         maximized.sync_interval_minutes = 7;
@@ -4085,6 +4097,8 @@ private void test_initial_history_backfill_stays_silent () {
         account.incoming_host = "imap.example.net";
         account.outgoing_host = "smtp.example.net";
         cache.save_account (account);
+        cache.add_mail_rule ("Read imported history", account.id,
+            MailRuleField.SUBJECT, "Initial history", MailRuleAction.MARK_READ);
         var inbox = new Mailbox (account.id + ":inbox", "Inbox", "mail-inbox-symbolic",
             MailboxRole.INBOX, 501, account.id, "INBOX");
 
@@ -4130,6 +4144,13 @@ private void test_initial_history_backfill_stays_silent () {
         assert (!timed_out); assert (completed == 1);
         assert (engine.synchronize_calls == 3);
         assert (cache.cached_message_count (account.id) == 501);
+        // Initial account history is not an incoming-mail event. Client rules
+        // remain available for a previewed explicit run, but must not mutate
+        // the import automatically.
+        assert (cache.find_cached_message (
+            account.id + ":inbox:0").unread);
+        assert (cache.find_cached_message (
+            account.id + ":inbox:500").unread);
         assert (messages == 0); assert (summaries == 0);
     } catch (Error error) {
         GLib.error ("initial backfill notification test failed: %s", error.message);
@@ -5507,14 +5528,14 @@ private void test_safe_sender_inline_warning_policy () {
         "<p><a href='https://credential-check.example/login'>example.com</a></p>";
 
     // Safe Sender status changes presentation, not the assessment evidence.
-    // Security Details must retain high-confidence findings even though the
-    // automatic inline warning is dismissed for a sender the user approved.
+    // Security Details and the reader must retain a high-confidence failure
+    // even when the sender was previously approved.
     var safe = service.assess (message, true);
     assert (safe.sender_is_safe);
     assert (safe.level == MessageThreatLevel.DANGER);
     assert (safe.authentication_reported);
     assert (safe.findings.size >= 4);
-    assert (!safe.should_show_inline_warning);
+    assert (safe.should_show_inline_warning);
 
     // The identical message from a sender not on the Safe Senders list still
     // qualifies for the automatic inline warning.
@@ -5681,6 +5702,58 @@ private void test_server_search_scope_bound_and_cache () {
     FileUtils.unlink (path);
 }
 
+private void test_local_search_honors_visible_scope () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-local-search-scope-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        var first = AccountSettings.for_email ("Personal", "me@example.net");
+        first.id = "local-scope-one"; first.incoming_host = "imap.example.net";
+        first.outgoing_host = "smtp.example.net"; cache.save_account (first);
+        var second = AccountSettings.for_email ("Work", "me@example.org");
+        second.id = "local-scope-two"; second.incoming_host = "imap.example.org";
+        second.outgoing_host = "smtp.example.org"; cache.save_account (second);
+
+        var first_snapshot = new MailSyncResult (first.id);
+        first_snapshot.folder_inventory_complete = true;
+        first_snapshot.mailboxes.add (new Mailbox ("scope-one-inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 0, first.id, "INBOX"));
+        first_snapshot.mailboxes.add (new Mailbox ("scope-one-projects", "Projects",
+            "folder-symbolic", MailboxRole.CUSTOM, 0, first.id, "Projects"));
+        cache.store_sync_result (first_snapshot);
+        var second_snapshot = new MailSyncResult (second.id);
+        second_snapshot.folder_inventory_complete = true;
+        second_snapshot.mailboxes.add (new Mailbox ("scope-two-inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 0, second.id, "INBOX"));
+        cache.store_sync_result (second_snapshot);
+
+        cache.cache_message (new Message ("scope-message-one", "scope-one-inbox", "A",
+            "a@example.net", "me@example.net", "Needle inbox", "", "Needle", "Today",
+            true, true, false, 1, false, first.id));
+        cache.cache_message (new Message ("scope-message-two", "scope-one-projects", "B",
+            "b@example.net", "me@example.net", "Needle project", "", "Needle", "Today",
+            true, false, false, 1, false, first.id));
+        cache.cache_message (new Message ("scope-message-three", "scope-two-inbox", "C",
+            "c@example.org", "me@example.org", "Needle work", "", "Needle", "Today",
+            true, false, false, 1, false, second.id));
+
+        var search = new MailSearchService (cache);
+        assert (search.count ("Needle", false, MailSearchScope.CURRENT_FOLDER,
+            "scope-one-projects") == 1);
+        assert (search.count ("Needle", false, MailSearchScope.CURRENT_FOLDER,
+            "unified-inbox") == 2);
+        assert (search.count ("Needle", false, MailSearchScope.CURRENT_FOLDER,
+            "unified-flagged") == 1);
+        assert (search.count ("Needle", false, MailSearchScope.CURRENT_ACCOUNT,
+            "scope-one-inbox") == 2);
+        assert (search.search ("Needle", 50, 0, false, MessageSortMode.NEWEST,
+            MailSearchScope.ALL_MAIL, "scope-one-inbox").size == 3);
+    } catch (Error error) {
+        GLib.error ("local search scope test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
 private void test_advanced_rules_and_quick_steps () {
     string path = Path.build_filename (Environment.get_tmp_dir (),
         "mailficient-advanced-rules-%s.sqlite".printf (Uuid.string_random ())) ;
@@ -5690,6 +5763,12 @@ private void test_advanced_rules_and_quick_steps () {
             "build@example.net", "alex@example.net", "Nightly release report", "", "Passed",
             "Today", true, false, true, 1, false, "rules-account");
         message.message_size = 5000;
+        message.reply_to = "release-team@example.net";
+        message.date_unix = new DateTime.local (2026, 8, 20, 12, 0, 0).to_unix ();
+        message.security_status = "signed encrypted";
+        message.authentication_results = "dkim=pass spf=pass";
+        message.list_unsubscribe = "<https://lists.example.net/unsubscribe>";
+        message.raw_headers = "List-Id: Release Team <release.lists.example.net>\nX-Build: nightly";
         message.add_attachment (new Attachment ("log", "", "results.txt", 120, "text/plain"));
         cache.cache_message (message);
 
@@ -5719,6 +5798,30 @@ private void test_advanced_rules_and_quick_steps () {
         var after_rule = cache.find_cached_message (message.id);
         assert (!after_rule.unread && after_rule.flagged);
         assert (cache.labels_for_message (message.id).size == 0);
+        var temporary = cache.create_mail_label ("Release");
+        cache.set_message_label (message.id, temporary.id, true);
+        var enriched = cache.find_cached_message (message.id);
+        assert (new MailRuleCondition (MailRuleField.REPLY_TO, "release-team").matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.DATE_RECEIVED, "2026-08-20",
+            MailRuleOperator.EQUALS).matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.DATE_RECEIVED, "2026-08-19",
+            MailRuleOperator.AFTER).matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.LABEL, "Release",
+            MailRuleOperator.EQUALS).matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.SECURITY_STATUS, "dkim=pass").matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.MAILING_LIST, "release.lists").matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.RAW_HEADERS, "X-Build: nightly").matches (enriched));
+        var richer_operations = new Gee.ArrayList<MailRuleOperation> ();
+        richer_operations.add (new MailRuleOperation (MailRuleAction.SET_FLAG_COLOR, "purple"));
+        richer_operations.add (new MailRuleOperation (MailRuleAction.REMOVE_LABEL, "Release"));
+        MailRuleService.apply_operations (cache, enriched, richer_operations);
+        assert (cache.find_cached_message (message.id).flag_color == "purple");
+        assert (cache.labels_for_message (message.id).size == 0);
+        cache.set_cached_read (message.id, false);
+        var selected_for_rules = new Gee.ArrayList<Message> ();
+        selected_for_rules.add (cache.find_cached_message (message.id));
+        assert (new MailRuleService (cache).apply_to_messages (selected_for_rules) == 1);
+        assert (!cache.find_cached_message (message.id).unread);
 
         var excepted = new Message ("advanced-rule-excepted", "inbox", "Build Bot",
             "build@example.net", "alex@example.net", "Nightly release failed", "",
@@ -5746,7 +5849,30 @@ private void test_advanced_rules_and_quick_steps () {
         any_rule.match_mode = MailRuleMatchMode.ANY;
         var saved_any = cache.save_mail_rule (any_rule);
         assert (cache.list_mail_rules ()[2].match_mode == MailRuleMatchMode.ANY);
+        var preview_service = new MailRuleService (cache);
+        MailRuleRunResult? preview_result = null;
+        Error? preview_error = null;
+        var preview_loop = new MainLoop ();
+        preview_service.preview_run.begin (saved_any, 10000, null, "inbox", (object, result) => {
+            try { preview_result = preview_service.preview_run.end (result); }
+            catch (Error error) { preview_error = error; }
+            preview_loop.quit ();
+        });
+        preview_loop.run ();
+        assert (preview_error == null);
+        assert (preview_result != null && preview_result.inspected == 2 &&
+            preview_result.matched == 1 && !preview_result.truncated);
+        // Preview is a true dry run: it must not execute Mark Read.
+        assert (cache.find_cached_message (excepted.id).unread);
         assert (new MailRuleService (cache).run_now (saved_any) == 1);
+        assert (!cache.find_cached_message (excepted.id).unread);
+        cache.set_mail_rule_enabled (saved_any.id, false);
+        cache.set_cached_read (excepted.id, false);
+        var disabled_any = cache.list_mail_rules ()[2];
+        assert (!disabled_any.matches (cache.find_cached_message (excepted.id)));
+        // Explicit Run Now is an intentional one-off operation and remains
+        // useful while a rule is disabled for future incoming messages.
+        assert (new MailRuleService (cache).run_now (disabled_any) == 1);
         assert (!cache.find_cached_message (excepted.id).unread);
         cache.remove_mail_rule (saved_any.id);
 
@@ -5772,6 +5898,27 @@ private void test_advanced_rules_and_quick_steps () {
         cache.move_mail_rule (saved.id, 1);
         assert (cache.list_mail_rules ()[1].id == saved.id);
 
+        var mailbox_rule = new MailRule (0, "Mailbox routing", "rules-account",
+            MailRuleField.MAILBOX, "old-mailbox-id", MailRuleAction.MOVE,
+            "old-mailbox-id");
+        var saved_mailbox_rule = cache.save_mail_rule (mailbox_rule);
+        var mailbox_step_operations = new Gee.ArrayList<MailRuleOperation> ();
+        mailbox_step_operations.add (new MailRuleOperation (
+            MailRuleAction.COPY, "old-mailbox-id"));
+        var mailbox_step = cache.add_quick_step ("Copy from mailbox", "rules-account",
+            mailbox_step_operations);
+        assert (cache.automation_mailbox_reference_count ("old-mailbox-id") == 3);
+        cache.replace_automation_mailbox_reference ("old-mailbox-id", "new-mailbox-id");
+        assert (cache.automation_mailbox_reference_count ("old-mailbox-id") == 0);
+        assert (cache.automation_mailbox_reference_count ("new-mailbox-id") == 3);
+        foreach (var candidate in cache.list_mail_rules ())
+            if (candidate.id == saved_mailbox_rule.id) {
+                assert (candidate.conditions[0].pattern == "new-mailbox-id");
+                assert (candidate.operations[0].value == "new-mailbox-id");
+            }
+        cache.remove_quick_step (mailbox_step.id);
+        cache.remove_mail_rule (saved_mailbox_rule.id);
+
         // Older databases migrate all legacy rules with position zero. A new
         // cache connection must preserve their id order while assigning
         // unique positions so Up/Down works immediately.
@@ -5787,6 +5934,110 @@ private void test_advanced_rules_and_quick_steps () {
         migrated.move_mail_rule (first_migrated_id, 1);
         assert (migrated.list_mail_rules ()[1].id == first_migrated_id);
     } catch (Error error) { GLib.error ("advanced rules test failed: %s", error.message); }
+    FileUtils.unlink (path);
+}
+
+private void test_rule_run_keeps_paged_scope_stable () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-rule-run-stable-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        string account_id = "paged-rule-account";
+        var inbox = new Mailbox (account_id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 501, account_id, "INBOX");
+        var archive = new Mailbox (account_id + ":archive", "Archive",
+            "package-x-generic-symbolic", MailboxRole.ARCHIVE, 0,
+            account_id, "Archive");
+        var snapshot = new MailSyncResult (account_id);
+        snapshot.folder_inventory_complete = true;
+        snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (archive);
+        for (int index = 0; index < 501; index++)
+            snapshot.messages.add (new Message (
+                "%s:message:%d".printf (account_id, index), inbox.id,
+                "Build Bot", "build@example.net", "me@example.net",
+                "Paged report", "", "", "Today", true, false, false,
+                1, false, account_id, index.to_string ()));
+        cache.store_sync_result (snapshot);
+
+        var rule = new MailRule (0, "File paged reports", account_id,
+            MailRuleField.SUBJECT, "Paged report", MailRuleAction.MOVE,
+            archive.id);
+        var service = new MailRuleService (cache);
+        MailRuleRunResult? run_result = null;
+        Error? run_error = null;
+        var loop = new MainLoop ();
+        service.run_now_async.begin (rule, 1000, null, inbox.id,
+            (object, result) => {
+                try { run_result = service.run_now_async.end (result); }
+                catch (Error error) { run_error = error; }
+                loop.quit ();
+            });
+        loop.run ();
+
+        assert (run_error == null);
+        assert (run_result != null && run_result.inspected == 501 &&
+            run_result.matched == 501 && !run_result.truncated);
+        assert (cache.find_cached_message (
+            "%s:message:0".printf (account_id)).mailbox_id == archive.id);
+        assert (cache.find_cached_message (
+            "%s:message:500".printf (account_id)).mailbox_id == archive.id);
+    } catch (Error error) {
+        GLib.error ("stable paged rule run test failed: %s", error.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_rule_folder_destination_isolation () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-rule-folder-isolation-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        string account_id = "rule-folder-account";
+        var inbox = new Mailbox (account_id + ":inbox", "Inbox",
+            "mail-inbox-symbolic", MailboxRole.INBOX, 1, account_id, "INBOX");
+        var receipts = new Mailbox (account_id + ":receipts", "Receipts",
+            "folder-symbolic", MailboxRole.CUSTOM, 0, account_id, "Receipts");
+        var snapshot = new MailSyncResult (account_id);
+        snapshot.folder_inventory_complete = true;
+        snapshot.mailboxes.add (inbox); snapshot.mailboxes.add (receipts);
+        var message = new Message (account_id + ":message:1", inbox.id,
+            "Shop", "orders@example.net", "me@example.net", "Your receipt",
+            "", "Receipt body", "Today", true, false, false, 1, false,
+            account_id, "1");
+        snapshot.messages.add (message);
+        cache.store_sync_result (snapshot);
+
+        // A deleted destination must skip the complete rule before its earlier
+        // operations run, and it must not prevent later valid rules from
+        // processing the same incoming message.
+        var stale = new MailRule (0, "Old receipts folder", account_id,
+            MailRuleField.SUBJECT, "receipt", MailRuleAction.MARK_READ);
+        stale.replace_legacy_parts ();
+        stale.conditions.add (new MailRuleCondition (MailRuleField.SUBJECT, "receipt"));
+        stale.operations.add (new MailRuleOperation (MailRuleAction.MARK_READ));
+        stale.operations.add (new MailRuleOperation (
+            MailRuleAction.MOVE, account_id + ":deleted-folder"));
+        stale.stop_processing = true;
+        var saved_stale = cache.save_mail_rule (stale);
+        var flag = cache.save_mail_rule (new MailRule (0, "Flag receipts", account_id,
+            MailRuleField.SUBJECT, "receipt", MailRuleAction.FLAG));
+        assert (new MailRuleService (cache).apply (snapshot) == 1);
+        var after_isolation = cache.find_cached_message (message.id);
+        assert (after_isolation.unread);
+        assert (after_isolation.flagged);
+        assert (cache.pending_transfer_count () == 0);
+
+        cache.remove_mail_rule (saved_stale.id);
+        cache.remove_mail_rule (flag.id);
+        var route = cache.save_mail_rule (new MailRule (0, "File receipts", account_id,
+            MailRuleField.SUBJECT, "receipt", MailRuleAction.MOVE, receipts.id));
+        assert (new MailRuleService (cache).apply (snapshot) == 1);
+        assert (cache.find_cached_message (message.id).mailbox_id == receipts.id);
+        assert (cache.pending_transfer_count () == 1);
+        cache.remove_mail_rule (route.id);
+    } catch (Error error) {
+        GLib.error ("rule folder isolation test failed: %s", error.message);
+    }
     FileUtils.unlink (path);
 }
 
@@ -5918,9 +6169,15 @@ int main (string[] args) {
     Test.add_func ("/junk/rules-and-filter", test_junk_rules_and_filter);
     Test.add_func ("/mail/rules-and-labels", test_mail_rules_and_labels);
     Test.add_func ("/mail/advanced-rules-and-quick-steps", test_advanced_rules_and_quick_steps);
+    Test.add_func ("/mail/rule-run-keeps-paged-scope-stable",
+        test_rule_run_keeps_paged_scope_stable);
+    Test.add_func ("/mail/rule-folder-destination-isolation",
+        test_rule_folder_destination_isolation);
     Test.add_func ("/search/advanced-boolean-scopes", test_advanced_search_boolean_scopes);
     Test.add_func ("/search/server-scope-bound-and-cache",
         test_server_search_scope_bound_and_cache);
+    Test.add_func ("/search/local-visible-scope",
+        test_local_search_honors_visible_scope);
     Test.add_func ("/mail/smart-mailboxes-and-planner", test_smart_mailboxes_and_planner);
     Test.add_func ("/mail/scheduling-snooze-and-templates", test_scheduling_snooze_and_templates);
     Test.add_func ("/mail/snoozed-unread-is-removed-from-inbox-badges",

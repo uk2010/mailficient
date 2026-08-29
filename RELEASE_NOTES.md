@@ -1,3 +1,25 @@
+# Mailficient 0.4.0
+
+Mailficient 0.4.0 turns folders and rules into complete desktop workflows and
+brings the mail window, preferences, and account setup into one compact,
+adaptive visual system.
+
+Highlights:
+
+- Adds native sidebar add and right-click menus for account-aware folders and
+  subfolders, automatically adds new folders to Favorites, and supports
+  renaming, exporting, and confirmed deletion
+- Adds a dedicated Rules window with rich conditions, exceptions, ordered
+  actions, account and folder destinations, drag reordering, duplication,
+  preview, cancellable Run Now, and manual rules for selected messages
+- Synchronizes folder changes with providers, preserves Favorites and rule
+  references across renames, and safely skips rules with missing destinations
+- Refines the toolbar, sidebar, message list, preferences, and account flow with
+  compact controls, consistent interaction states, adaptive layouts, and
+  coherent light, dark, and system appearance choices
+- Improves mailbox navigation, search scope, unread filtering, synchronization
+  recovery, provider folder-role detection, and empty/error states
+
 # Mailficient 0.3.2
 
 Mailficient 0.3.2 makes sending dependable and keeps mail state honest across

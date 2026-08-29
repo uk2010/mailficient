@@ -11,6 +11,11 @@
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
+    <release version="0.4.0" date="2026-08-28">
+      <description>
+        <p>Adds complete provider-backed folder workflows and a dedicated advanced Rules window, while refining the toolbar, sidebar, preferences, account setup, adaptive layouts, and light and dark appearance.</p>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-08-27">
       <description>
         <p>Makes Send own a reliable isolated SMTP attempt, moves optional Undo Send to a bottom-window action, fixes deleted conversation members and stale unread indicators, and keeps cross-process Outbox status current.</p>

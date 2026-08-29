@@ -792,6 +792,1111 @@ menubutton.app-menu-button > button {
   }
 }
 
+/* Focused first-party surfaces for toolbar customization and message security.
+ * These dialogs stay compact and content-led while sharing the blue-gray
+ * material language used by the main mail shell and Settings. */
+.toolbar-customization-dialog toolbarview,
+.toolbar-customization-dialog .toolbar-customization-page {
+  background: #f4f7fa;
+}
+
+.toolbar-customization-dialog headerbar {
+  min-height: 42px;
+  padding: 3px 8px;
+  background: rgba(248, 251, 253, .96);
+  border-bottom: 1px solid rgba(44, 73, 104, .11);
+  box-shadow: 0 3px 12px rgba(31, 55, 80, .07);
+}
+
+.toolbar-customization-page {
+  padding: 6px 14px 18px;
+}
+
+.toolbar-customization-intro-group {
+  margin-bottom: 2px;
+}
+
+.toolbar-customization-intro {
+  padding: 12px 14px;
+  border: 1px solid rgba(53, 132, 228, .17);
+  border-radius: 14px;
+  background: rgba(53, 132, 228, .065);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .72),
+              0 3px 12px rgba(31, 55, 80, .055);
+}
+
+.toolbar-customization-intro-badge {
+  min-width: 38px;
+  min-height: 38px;
+  border: 1px solid rgba(53, 132, 228, .20);
+  border-radius: 12px;
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .13);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .70);
+}
+
+.toolbar-customization-intro-icon {
+  min-width: 18px;
+  min-height: 18px;
+}
+
+.toolbar-customization-eyebrow {
+  color: #1c71d8;
+  font-size: .71em;
+  font-weight: 760;
+  letter-spacing: .08em;
+}
+
+.toolbar-customization-intro-title {
+  color: rgba(20, 40, 61, .96);
+  font-size: 1.08em;
+  font-weight: 760;
+}
+
+.toolbar-customization-intro-description {
+  color: rgba(44, 66, 88, .68);
+  font-size: .89em;
+}
+
+.toolbar-customization-section {
+  margin-top: 4px;
+}
+
+.toolbar-customization-section > box > label.title-4 {
+  color: rgba(20, 40, 61, .94);
+  font-size: 1.02em;
+  font-weight: 750;
+}
+
+.toolbar-customization-section > box > label.dim-label {
+  color: rgba(44, 66, 88, .62);
+  font-size: .86em;
+}
+
+.toolbar-customization-dialog .toolbar-palette {
+  padding: 8px;
+  border: 1px solid rgba(44, 73, 104, .11);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .72);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .76),
+              0 3px 12px rgba(31, 55, 80, .05);
+}
+
+.toolbar-customization-dialog .toolbar-palette flowboxchild {
+  padding: 0;
+  border-radius: 11px;
+  background: transparent;
+}
+
+.toolbar-customization-dialog .toolbar-palette-item {
+  min-width: 82px;
+  min-height: 66px;
+  padding: 7px 5px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: rgba(22, 42, 63, .88);
+  background: transparent;
+  box-shadow: none;
+}
+
+.toolbar-customization-dialog .toolbar-palette flowboxchild:hover .toolbar-palette-item,
+.toolbar-customization-dialog .toolbar-palette-item:hover {
+  color: #155fb4;
+  border-color: rgba(53, 132, 228, .20);
+  background: rgba(53, 132, 228, .085);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .60);
+}
+
+.toolbar-customization-dialog .toolbar-palette-icon-badge {
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid rgba(53, 132, 228, .14);
+  border-radius: 10px;
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .10);
+}
+
+.toolbar-customization-dialog .toolbar-palette-icon {
+  min-width: 17px;
+  min-height: 17px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+}
+
+.toolbar-customization-dialog .toolbar-preview-scroller {
+  border: 1px solid rgba(44, 73, 104, .12);
+  border-radius: 14px;
+  background: rgba(228, 236, 244, .54);
+  box-shadow: inset 0 1px 3px rgba(31, 55, 80, .05);
+}
+
+.toolbar-customization-dialog .toolbar-preview {
+  padding: 10px;
+}
+
+.toolbar-customization-dialog .toolbar-preview-item {
+  min-width: 104px;
+  min-height: 82px;
+  padding: 8px;
+  border: 1px solid rgba(44, 73, 104, .12);
+  border-radius: 11px;
+  color: rgba(22, 42, 63, .88);
+  background: rgba(255, 255, 255, .86);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .78),
+              0 2px 7px rgba(31, 55, 80, .06);
+}
+
+.toolbar-customization-dialog .toolbar-preview-item:hover {
+  border-color: rgba(53, 132, 228, .25);
+  background: rgba(248, 252, 255, .96);
+  box-shadow: 0 3px 10px rgba(31, 85, 139, .10);
+}
+
+.toolbar-customization-dialog .toolbar-preview-icon-badge {
+  min-width: 29px;
+  min-height: 29px;
+  border-radius: 9px;
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .11);
+}
+
+.toolbar-customization-dialog .toolbar-preview-icon {
+  color: inherit;
+}
+
+.toolbar-customization-dialog .toolbar-preview-controls {
+  border: 1px solid rgba(44, 73, 104, .10);
+  border-radius: 8px;
+  background: rgba(230, 237, 244, .60);
+}
+
+.toolbar-customization-dialog .toolbar-preview-item button {
+  min-width: 25px;
+  min-height: 24px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 7px;
+  color: rgba(32, 58, 83, .72);
+  background: transparent;
+  box-shadow: none;
+}
+
+.toolbar-customization-dialog .toolbar-preview-item button:hover {
+  color: #155fb4;
+  background: rgba(53, 132, 228, .13);
+}
+
+.toolbar-customization-dialog .toolbar-preview-item button.toolbar-preview-remove:hover {
+  color: #c01c28;
+  background: rgba(224, 27, 36, .10);
+}
+
+.toolbar-customization-dialog .toolbar-drop-end {
+  min-width: 82px;
+  min-height: 82px;
+  padding: 8px;
+  border: 1px dashed rgba(53, 132, 228, .34);
+  border-radius: 11px;
+  color: rgba(28, 113, 216, .72);
+  background: rgba(53, 132, 228, .045);
+}
+
+.toolbar-customization-dialog .toolbar-reset-row {
+  min-height: 48px;
+  margin-top: 7px;
+  border: 1px solid rgba(44, 73, 104, .10);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .70);
+}
+
+.toolbar-customization-dialog .toolbar-reset-button {
+  min-height: 32px;
+  padding: 2px 11px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 9px;
+  color: #155fb4;
+  background: rgba(53, 132, 228, .09);
+  box-shadow: none;
+}
+
+.toolbar-customization-dialog .toolbar-reset-button:hover {
+  background: rgba(53, 132, 228, .15);
+}
+
+.message-security-content {
+  margin-top: 2px;
+}
+
+.message-security-summary,
+.message-security-section {
+  padding: 11px 13px;
+  border: 1px solid rgba(44, 73, 104, .12);
+  border-radius: 13px;
+  color: rgba(20, 40, 61, .94);
+  background: #f8fafc;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .75),
+              0 3px 12px rgba(31, 55, 80, .055);
+}
+
+.message-security-summary.danger {
+  border-color: rgba(224, 27, 36, .24);
+  background: rgba(224, 27, 36, .065);
+}
+
+.message-security-summary.warning {
+  border-color: rgba(230, 126, 34, .24);
+  background: rgba(230, 126, 34, .07);
+}
+
+.message-security-summary.trusted {
+  border-color: rgba(38, 162, 105, .20);
+  background: rgba(38, 162, 105, .06);
+}
+
+.message-security-summary-badge {
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 11px;
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .12);
+}
+
+.message-security-summary.danger .message-security-summary-badge {
+  color: #c01c28;
+  background: rgba(224, 27, 36, .12);
+}
+
+.message-security-summary.warning .message-security-summary-badge {
+  color: #b75c00;
+  background: rgba(230, 126, 34, .13);
+}
+
+.message-security-summary.trusted .message-security-summary-badge {
+  color: #1b8553;
+  background: rgba(38, 162, 105, .12);
+}
+
+.message-security-eyebrow {
+  color: alpha(currentColor, .58);
+  font-size: .69em;
+  font-weight: 760;
+  letter-spacing: .075em;
+}
+
+.message-security-summary-title {
+  font-size: 1.04em;
+  font-weight: 760;
+}
+
+.message-security-summary-status {
+  color: alpha(currentColor, .60);
+  font-size: .82em;
+}
+
+.message-security-section-title {
+  font-size: .92em;
+  font-weight: 750;
+}
+
+.message-security-finding {
+  padding: 7px 8px;
+  border: 1px solid rgba(44, 73, 104, .075);
+  border-radius: 9px;
+  background: rgba(44, 73, 104, .035);
+}
+
+.message-security-finding-icon {
+  min-width: 16px;
+  min-height: 16px;
+  margin-top: 1px;
+  color: #b75c00;
+}
+
+.message-security-finding-text {
+  color: rgba(31, 52, 73, .86);
+  font-size: .88em;
+}
+
+.message-security-notice {
+  padding: 9px 10px;
+  border: 1px solid rgba(53, 132, 228, .12);
+  border-radius: 10px;
+  color: rgba(36, 61, 86, .72);
+  background: rgba(53, 132, 228, .055);
+  font-size: .84em;
+}
+
+.message-security-header-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: rgba(36, 61, 86, .62);
+  background: rgba(44, 73, 104, .07);
+  font-size: .74em;
+  font-weight: 650;
+}
+
+.message-security-header-scroller {
+  border: 1px solid rgba(44, 73, 104, .13);
+  border-radius: 10px;
+  background: #edf2f7;
+  box-shadow: inset 0 1px 3px rgba(31, 55, 80, .06);
+}
+
+.message-security-header-text,
+.message-security-header-text text {
+  padding: 9px 10px;
+  color: #263b50;
+  background: #edf2f7;
+  font-size: .84em;
+}
+
+.message-security-dialog button,
+.compose-security-dialog button {
+  min-height: 34px;
+  border-radius: 9px;
+}
+
+.compose-security-options {
+  border-radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .toolbar-customization-dialog toolbarview,
+  .toolbar-customization-dialog .toolbar-customization-page {
+    color: #edf5fd;
+    background: #111922;
+  }
+
+  .toolbar-customization-dialog headerbar {
+    color: #f3f7fb;
+    background: #1c2732;
+    border-bottom-color: rgba(205, 225, 245, .10);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+  }
+
+  .toolbar-customization-intro {
+    border-color: rgba(120, 174, 237, .20);
+    background: rgba(53, 132, 228, .11);
+    box-shadow: inset 0 1px rgba(255, 255, 255, .055),
+                0 4px 14px rgba(0, 0, 0, .18);
+  }
+
+  .toolbar-customization-intro-badge {
+    color: #b7d7ff;
+    border-color: rgba(120, 174, 237, .20);
+    background: rgba(83, 155, 245, .16);
+    box-shadow: inset 0 1px rgba(255, 255, 255, .06);
+  }
+
+  .toolbar-customization-eyebrow { color: #8fc2ff; }
+  .toolbar-customization-intro-title,
+  .toolbar-customization-section > box > label.title-4 {
+    color: rgba(239, 246, 253, .96);
+  }
+
+  .toolbar-customization-intro-description,
+  .toolbar-customization-section > box > label.dim-label {
+    color: rgba(205, 222, 239, .65);
+  }
+
+  .toolbar-customization-dialog .toolbar-palette {
+    border-color: rgba(205, 225, 245, .10);
+    background: rgba(31, 44, 57, .82);
+    box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+                0 4px 14px rgba(0, 0, 0, .17);
+  }
+
+  .toolbar-customization-dialog .toolbar-palette-item {
+    color: rgba(229, 239, 249, .88);
+  }
+
+  .toolbar-customization-dialog .toolbar-palette flowboxchild:hover .toolbar-palette-item,
+  .toolbar-customization-dialog .toolbar-palette-item:hover {
+    color: #d7eaff;
+    border-color: rgba(120, 174, 237, .23);
+    background: rgba(83, 155, 245, .14);
+    box-shadow: inset 0 1px rgba(255, 255, 255, .05);
+  }
+
+  .toolbar-customization-dialog .toolbar-palette-icon-badge,
+  .toolbar-customization-dialog .toolbar-preview-icon-badge {
+    color: #b7d7ff;
+    border-color: rgba(120, 174, 237, .18);
+    background: rgba(83, 155, 245, .15);
+  }
+
+  .toolbar-customization-dialog .toolbar-preview-scroller {
+    border-color: rgba(205, 225, 245, .10);
+    background: #151f29;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, .22);
+  }
+
+  .toolbar-customization-dialog .toolbar-preview-item {
+    color: rgba(229, 239, 249, .90);
+    border-color: rgba(205, 225, 245, .11);
+    background: #202c38;
+    box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+                0 3px 9px rgba(0, 0, 0, .18);
+  }
+
+  .toolbar-customization-dialog .toolbar-preview-item:hover {
+    border-color: rgba(120, 174, 237, .28);
+    background: #243444;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .24);
+  }
+
+  .toolbar-customization-dialog .toolbar-preview-controls {
+    border-color: rgba(205, 225, 245, .09);
+    background: rgba(8, 15, 22, .35);
+  }
+
+  .toolbar-customization-dialog .toolbar-preview-item button {
+    color: rgba(213, 229, 245, .72);
+  }
+
+  .toolbar-customization-dialog .toolbar-preview-item button:hover {
+    color: #d7eaff;
+    background: rgba(83, 155, 245, .18);
+  }
+
+  .toolbar-customization-dialog .toolbar-drop-end {
+    color: #9ac7fa;
+    border-color: rgba(120, 174, 237, .30);
+    background: rgba(83, 155, 245, .07);
+  }
+
+  .toolbar-customization-dialog .toolbar-reset-row {
+    color: #edf5fd;
+    border-color: rgba(205, 225, 245, .10);
+    background: #1b2631;
+  }
+
+  .toolbar-customization-dialog .toolbar-reset-button {
+    color: #b7d7ff;
+    border-color: rgba(120, 174, 237, .18);
+    background: rgba(83, 155, 245, .13);
+  }
+
+  .toolbar-customization-dialog .toolbar-reset-button:hover {
+    background: rgba(83, 155, 245, .21);
+  }
+
+  .message-security-summary,
+  .message-security-section {
+    color: #edf5fd;
+    border-color: rgba(205, 225, 245, .11);
+    background: #1b2631;
+    box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+                0 4px 14px rgba(0, 0, 0, .20);
+  }
+
+  .message-security-summary.danger {
+    border-color: rgba(255, 123, 130, .24);
+    background: rgba(224, 27, 36, .12);
+  }
+
+  .message-security-summary.warning {
+    border-color: rgba(255, 179, 95, .24);
+    background: rgba(230, 126, 34, .12);
+  }
+
+  .message-security-summary.trusted {
+    border-color: rgba(92, 210, 148, .20);
+    background: rgba(38, 162, 105, .11);
+  }
+
+  .message-security-summary.danger .message-security-summary-badge {
+    color: #ffb1b5;
+    background: rgba(255, 123, 130, .14);
+  }
+
+  .message-security-summary.warning .message-security-summary-badge {
+    color: #ffc487;
+    background: rgba(255, 179, 95, .14);
+  }
+
+  .message-security-summary.trusted .message-security-summary-badge {
+    color: #9ce5bd;
+    background: rgba(92, 210, 148, .13);
+  }
+
+  .message-security-finding {
+    border-color: rgba(205, 225, 245, .075);
+    background: rgba(205, 225, 245, .045);
+  }
+
+  .message-security-finding-icon { color: #ffc487; }
+  .message-security-finding-text { color: rgba(226, 238, 250, .86); }
+
+  .message-security-notice {
+    color: rgba(205, 225, 245, .72);
+    border-color: rgba(120, 174, 237, .15);
+    background: rgba(83, 155, 245, .09);
+  }
+
+  .message-security-header-badge {
+    color: rgba(205, 225, 245, .66);
+    background: rgba(205, 225, 245, .08);
+  }
+
+  .message-security-header-scroller {
+    border-color: rgba(205, 225, 245, .11);
+    background: #101820;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, .30);
+  }
+
+  .message-security-header-text,
+  .message-security-header-text text {
+    color: #d9e6f2;
+    background: #101820;
+  }
+
+  .compose-security-options row {
+    color: #edf5fd;
+    background: #1b2631;
+  }
+}
+
+/* Message Security uses an application-themed floating sheet, rather than
+ * AlertDialog's narrow response stack. These rules intentionally use live
+ * Adwaita colors so an in-app Light/Dark choice does not depend on the
+ * desktop's prefers-color-scheme value. */
+.message-security-dialog .message-security-surface,
+.message-security-dialog .message-security-page {
+  color: var(--window-fg-color);
+  background: var(--window-bg-color);
+}
+
+.message-security-dialog .message-security-headerbar {
+  min-height: 42px;
+  color: var(--headerbar-fg-color);
+  background: var(--headerbar-bg-color);
+  border-bottom: 1px solid alpha(currentColor, .10);
+  box-shadow: 0 3px 12px alpha(black, .08);
+}
+
+.message-security-dialog .message-security-content {
+  color: var(--window-fg-color);
+}
+
+.message-security-dialog .message-security-summary,
+.message-security-dialog .message-security-section {
+  color: var(--card-fg-color);
+  background: color-mix(in srgb, var(--card-bg-color) 96%, var(--accent-bg-color));
+  border-color: alpha(currentColor, .12);
+  box-shadow: inset 0 1px alpha(white, .08), 0 3px 12px alpha(black, .08);
+}
+
+.message-security-dialog .message-security-summary.danger {
+  background: color-mix(in srgb, var(--card-bg-color) 90%, #e01b24);
+  border-color: rgba(224, 27, 36, .28);
+}
+
+.message-security-dialog .message-security-summary.warning {
+  background: color-mix(in srgb, var(--card-bg-color) 91%, #e67e22);
+  border-color: rgba(230, 126, 34, .27);
+}
+
+.message-security-dialog .message-security-summary.trusted {
+  background: color-mix(in srgb, var(--card-bg-color) 92%, #26a269);
+  border-color: rgba(38, 162, 105, .24);
+}
+
+.message-security-dialog .message-security-finding {
+  color: inherit;
+  background: alpha(currentColor, .035);
+  border-color: alpha(currentColor, .075);
+}
+
+.message-security-dialog .message-security-finding-text,
+.message-security-dialog .message-security-notice,
+.message-security-dialog .message-security-header-badge {
+  color: alpha(currentColor, .72);
+}
+
+.message-security-dialog .message-security-notice {
+  background: color-mix(in srgb, var(--card-bg-color) 95%, var(--accent-bg-color));
+  border-color: alpha(var(--accent-bg-color), .20);
+}
+
+.message-security-dialog .message-security-header-scroller,
+.message-security-dialog .message-security-header-text,
+.message-security-dialog .message-security-header-text text {
+  color: var(--view-fg-color);
+  background: var(--view-bg-color);
+}
+
+.message-security-dialog .message-security-header-scroller {
+  border-color: alpha(currentColor, .14);
+  box-shadow: inset 0 1px 3px alpha(black, .10);
+}
+
+.message-security-dialog .message-security-action-bar {
+  color: var(--headerbar-fg-color);
+  background: var(--headerbar-bg-color);
+}
+
+.message-security-dialog .message-security-action-bar button,
+.message-security-dialog .message-security-done {
+  min-height: 32px;
+  padding: 2px 12px;
+  border-radius: 9px;
+}
+
+/* Settings subpages -------------------------------------------------------
+ * Sender exceptions and Quick Steps are launched from Settings, so they
+ * preserve the same card language while staying clearly subordinate to the
+ * primary preferences window. */
+.sender-lists-dialog toolbarview {
+  background: color-mix(in srgb, var(--window-bg-color) 95%, #3584e4);
+}
+
+.sender-lists-dialog headerbar {
+  min-height: 42px;
+  border-bottom: 1px solid alpha(currentColor, .09);
+  background: color-mix(in srgb, var(--headerbar-bg-color) 96%, #3584e4);
+  box-shadow: 0 3px 12px alpha(black, .06);
+}
+
+.sender-lists-dialog viewswitcher {
+  padding: 3px;
+  border: 1px solid alpha(currentColor, .08);
+  border-radius: 11px;
+  background: alpha(currentColor, .035);
+}
+
+.sender-lists-dialog viewswitcher button {
+  min-height: 30px;
+  padding: 1px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 130ms ease-out, border-color 130ms ease-out;
+}
+
+.sender-lists-dialog viewswitcher button:hover:not(:checked) {
+  background: alpha(currentColor, .05);
+}
+
+.sender-lists-dialog viewswitcher button:checked {
+  color: inherit;
+  background: rgba(53, 132, 228, .13);
+  border-color: rgba(53, 132, 228, .24);
+  box-shadow: inset 0 -2px #3584e4;
+}
+
+.settings-page-frame.settings-subpage-frame {
+  padding: 6px 14px 18px;
+}
+
+.settings-subpage-intro-group {
+  margin-bottom: 1px;
+}
+
+.sender-list-entry-row {
+  min-height: 44px;
+}
+
+.sender-list-entry-row:focus-within {
+  background: rgba(53, 132, 228, .075);
+  box-shadow: inset 3px 0 #3584e4;
+}
+
+.sender-list-row {
+  min-height: 44px;
+}
+
+.sender-list-remove {
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 9px;
+  color: alpha(currentColor, .62);
+}
+
+.sender-list-remove:hover {
+  color: #c01c28;
+  background: rgba(224, 27, 36, .08);
+}
+
+.settings-subpage-editor {
+  min-width: 430px;
+}
+
+.quick-step-editor {
+  padding: 1px 0;
+}
+
+.quick-step-editor .quick-step-basics-card,
+.quick-step-editor .quick-step-actions-card {
+  margin: 0;
+  padding: 10px 11px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-bg-color) 97%, #3584e4);
+  box-shadow: inset 0 1px alpha(white, .11), 0 3px 11px alpha(black, .045);
+}
+
+.quick-step-name-entry,
+.quick-step-account-dropdown {
+  min-height: 34px;
+  border-radius: 9px;
+  background: alpha(currentColor, .025);
+}
+
+.quick-step-name-entry:focus,
+.quick-step-account-dropdown:focus-within {
+  border-color: rgba(53, 132, 228, .52);
+  background: rgba(53, 132, 228, .045);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, .11);
+}
+
+.quick-step-action-list {
+  padding: 1px 0;
+}
+
+.quick-step-add-action {
+  min-height: 30px;
+  padding: 1px 11px;
+  border: 1px dashed alpha(currentColor, .20);
+  border-radius: 9px;
+  color: #3584e4;
+  background: transparent;
+}
+
+.quick-step-add-action:hover {
+  border-color: rgba(53, 132, 228, .38);
+  background: rgba(53, 132, 228, .07);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sender-lists-dialog toolbarview {
+    background: color-mix(in srgb, var(--window-bg-color) 84%, #132a43);
+  }
+
+  .sender-lists-dialog headerbar {
+    background: color-mix(in srgb, var(--headerbar-bg-color) 86%, #173452);
+    border-bottom-color: rgba(151, 190, 235, .13);
+    box-shadow: 0 3px 14px alpha(black, .22);
+  }
+
+  .sender-lists-dialog viewswitcher {
+    border-color: rgba(151, 190, 235, .11);
+    background: rgba(11, 25, 39, .35);
+  }
+
+  .sender-lists-dialog viewswitcher button:checked {
+    background: rgba(53, 132, 228, .18);
+    border-color: rgba(91, 159, 244, .34);
+  }
+
+  .sender-list-entry-row:focus-within {
+    color: #edf5ff;
+    background: rgba(19, 45, 69, .72);
+  }
+
+  .quick-step-editor .quick-step-basics-card,
+  .quick-step-editor .quick-step-actions-card {
+    background: color-mix(in srgb, var(--card-bg-color) 90%, #244464);
+    border-color: rgba(151, 190, 235, .13);
+    box-shadow: inset 0 1px alpha(white, .035), 0 4px 13px alpha(black, .15);
+  }
+
+  .quick-step-name-entry,
+  .quick-step-account-dropdown,
+  .quick-step-name-entry:focus,
+  .quick-step-account-dropdown:focus-within {
+    color: #edf5ff;
+    background: rgba(15, 31, 47, .74);
+  }
+
+  .quick-step-name-entry:focus,
+  .quick-step-account-dropdown:focus-within {
+    border-color: rgba(91, 159, 244, .72);
+    box-shadow: 0 0 0 2px rgba(53, 132, 228, .18);
+  }
+}
+
+/* Libadwaita's forced color scheme changes widget colors without making GTK's
+ * prefers-color-scheme media query observable on every backend. MailWindow
+ * mirrors StyleManager.dark into this class so the opaque application shell
+ * remains correct under X11, Wayland, light overrides, and visual QA alike. */
+window.mail-window.mail-dark,
+window.mail-window.mail-dark.background,
+window.mail-window.mail-dark > contents,
+.mail-window.mail-dark .mail-shell-overlay,
+.mail-window.mail-dark .mail-shell-toolbar-view {
+  color: #eef3f8;
+  background-color: #101720;
+}
+
+.mail-window.mail-dark .mail-header-bar {
+  background-color: #202c39;
+  border-bottom-color: rgba(255, 255, 255, .10);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .07), 0 5px 20px rgba(0, 0, 0, .30);
+}
+
+.mail-window.mail-dark .apple-toolbar-button,
+.mail-window.mail-dark menubutton.apple-toolbar-button > button,
+.mail-window.mail-dark menubutton.toolbar-menu-button > button,
+.mail-window.mail-dark menubutton.app-menu-button > button,
+.mail-window.mail-dark .header-back-button,
+.mail-window.mail-dark .apple-toolbar-group,
+.mail-window.mail-dark .toolbar-action-cluster,
+.mail-window.mail-dark .flag-control,
+.mail-window.mail-dark .toolbar-search-control {
+  color: rgba(238, 243, 248, .88);
+  background: rgba(255, 255, 255, .065);
+  border-color: rgba(255, 255, 255, .13);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .08), 0 3px 9px rgba(0, 0, 0, .22);
+}
+
+.mail-window.mail-dark .apple-toolbar-button:hover,
+.mail-window.mail-dark menubutton.apple-toolbar-button > button:hover,
+.mail-window.mail-dark menubutton.toolbar-menu-button > button:hover,
+.mail-window.mail-dark menubutton.app-menu-button > button:hover,
+.mail-window.mail-dark .header-back-button:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, .115);
+  border-color: rgba(255, 255, 255, .19);
+}
+
+.mail-window.mail-dark .apple-toolbar-button.compose-toolbar-button,
+.mail-window.mail-dark .apple-toolbar-button.compose-toolbar-button:hover {
+  color: white;
+  background: #3584e4;
+  border-color: #62a0ea;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .24), 0 4px 13px rgba(53, 132, 228, .36);
+}
+
+.mail-window.mail-dark .toolbar-search-control menubutton.search-scope-button > button {
+  color: rgba(238, 243, 248, .68);
+  background: rgba(255, 255, 255, .025);
+  border-right-color: rgba(255, 255, 255, .11);
+}
+
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search,
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search text {
+  color: #eef3f8;
+  background: transparent;
+}
+
+.mail-window.mail-dark .mailbox-pane,
+.mail-window.mail-dark .sidebar-column,
+.mail-window.mail-dark .mail-sidebar {
+  color: #eaf0f6;
+  background-color: #192633;
+}
+
+.mail-window.mail-dark .sidebar-column {
+  border-right-color: rgba(255, 255, 255, .075);
+  box-shadow: inset -1px 0 rgba(0, 0, 0, .22);
+}
+
+.mail-window.mail-dark .sidebar-identity-badge {
+  color: white;
+  background: #111923;
+  border-color: #415a73;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .10), 0 4px 12px rgba(0, 0, 0, .32);
+}
+
+.mail-window.mail-dark .mail-sidebar row.mailbox-row.active-mailbox,
+.mail-window.mail-dark .mail-sidebar row.mailbox-row.active-mailbox:hover,
+.mail-window.mail-dark .mail-sidebar row.mailbox-row:selected,
+.mail-window.mail-dark .mail-sidebar row.mailbox-row:selected:hover {
+  color: #f5f8fb;
+  background: rgba(83, 155, 245, .28);
+  border-color: rgba(120, 174, 237, .34);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .10), 0 4px 12px rgba(0, 0, 0, .18);
+}
+
+.mail-window.mail-dark .mail-sidebar row.mailbox-row.active-mailbox image,
+.mail-window.mail-dark .mail-sidebar row.mailbox-row:selected image,
+.mail-window.mail-dark .mail-sidebar .sidebar-add-button:hover {
+  color: #99c1f1;
+}
+
+.mail-window.mail-dark .message-pane,
+.mail-window.mail-dark .message-list,
+.mail-window.mail-dark .message-list scrolledwindow,
+.mail-window.mail-dark .message-list scrolledwindow viewport,
+.mail-window.mail-dark .message-list-items {
+  color: #eef3f8;
+  background-color: #141c25;
+}
+
+.mail-window.mail-dark .message-list-header {
+  background-color: #1d2834;
+  border-bottom-color: rgba(255, 255, 255, .08);
+  box-shadow: 0 3px 13px rgba(0, 0, 0, .22), inset 0 1px rgba(255, 255, 255, .045);
+}
+
+.mail-window.mail-dark .message-list-items > row:hover:not(:selected) {
+  background: rgba(255, 255, 255, .052);
+  border-color: rgba(255, 255, 255, .07);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .14);
+}
+
+.mail-window.mail-dark .message-list-items > row:selected,
+.mail-window.mail-dark .message-list-items > row:selected:hover,
+.mail-window.mail-dark .message-list-items > row:focus-visible {
+  color: #f5f8fb;
+  background: rgba(83, 155, 245, .28);
+  border-color: rgba(120, 174, 237, .36);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .09), 0 5px 15px rgba(0, 0, 0, .20);
+}
+
+.mail-window.mail-dark .message-list-items > row:selected .preview,
+.mail-window.mail-dark .message-list-items > row:selected .timestamp,
+.mail-window.mail-dark .message-list-items > row:selected .dim-label {
+  color: rgba(238, 243, 248, .72);
+}
+
+.mail-window.mail-dark .message-row .unread-indicator-dot {
+  border-color: #141c25;
+}
+
+.mail-window.mail-dark .sender-avatar.avatar-tone-0 { color: #b7d7ff; background: #294b73; }
+.mail-window.mail-dark .sender-avatar.avatar-tone-1 { color: #dcc5ff; background: #513a70; }
+.mail-window.mail-dark .sender-avatar.avatar-tone-2 { color: #a7eee5; background: #245c58; }
+.mail-window.mail-dark .sender-avatar.avatar-tone-3 { color: #ffd3a5; background: #704827; }
+.mail-window.mail-dark .sender-avatar.avatar-tone-4 { color: #c4e9b8; background: #3b5f36; }
+.mail-window.mail-dark .sender-avatar.avatar-tone-5 { color: #ffc4dd; background: #713b53; }
+
+.mail-window.mail-dark .reader-stack,
+.mail-window.mail-dark .reading-pane,
+.mail-window.mail-dark .reading-pane scrolledwindow,
+.mail-window.mail-dark .reading-pane scrolledwindow viewport {
+  color: #eef3f8;
+  background-color: #101820;
+}
+
+.mail-window.mail-dark .message-header {
+  background-color: #192634;
+  border-bottom-color: rgba(255, 255, 255, .075);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+}
+
+.mail-window.mail-dark .reader-subject-action:hover,
+.mail-window.mail-dark .reader-subject-action:checked,
+.mail-window.mail-dark .conversation-message .conversation-details-button:hover {
+  color: #99c1f1;
+  background: rgba(120, 174, 237, .12);
+}
+
+.mail-window.mail-dark .conversation-message {
+  color: #eef3f8;
+  background-color: #1e2a37;
+  border-color: rgba(255, 255, 255, .095);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .055), 0 6px 20px rgba(0, 0, 0, .25);
+}
+
+.mail-window.mail-dark .conversation-message.conversation-expanded {
+  border-color: rgba(255, 255, 255, .12);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .065), 0 9px 28px rgba(0, 0, 0, .31);
+}
+
+.mail-window.mail-dark .attachment-row {
+  background: rgba(255, 255, 255, .035);
+  border-color: rgba(255, 255, 255, .08);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+}
+
+/* Sidebar direct manipulation ------------------------------------------------
+ * Keep hierarchy and drag targets quiet until the pointer asks for them. */
+.mail-sidebar .mailbox-row-content {
+  min-height: 27px;
+}
+
+.mail-sidebar .mailbox-disclosure {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 1px;
+  margin-right: -3px;
+  border-radius: 6px;
+  color: alpha(currentColor, .58);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mail-sidebar .mailbox-disclosure:hover {
+  color: currentColor;
+  background: alpha(currentColor, .075);
+}
+
+.mail-sidebar row.context-mailbox:not(.active-mailbox):not(:selected) {
+  background: alpha(currentColor, .075);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, .13);
+}
+
+.mail-sidebar row.mailbox-drop-target {
+  background: alpha(var(--accent-bg-color), .13);
+  box-shadow: inset 0 0 0 2px alpha(var(--accent-bg-color), .62);
+}
+
+.mail-sidebar .sidebar-add-button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 3px;
+  border-radius: 8px;
+}
+
+.mail-sidebar .favorites-header {
+  min-height: 30px;
+}
+
+.mail-sidebar .favorites-header .sidebar-add-button {
+  opacity: .48;
+  transition: opacity 120ms ease-out, background-color 120ms ease-out;
+}
+
+.mail-sidebar .favorites-header:hover .sidebar-add-button,
+.mail-sidebar .favorites-header .sidebar-add-button:hover,
+.mail-sidebar .favorites-header .sidebar-add-button:focus {
+  opacity: 1;
+}
+
+.mail-sidebar row.follow-up-section-row {
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-sidebar .follow-up-section > title {
+  min-height: 30px;
+  color: alpha(currentColor, .78);
+}
+
+.mail-sidebar .follow-up-list {
+  margin-top: 2px;
+}
+
+.sidebar-add-popover > contents {
+  padding: 5px;
+  border-radius: 11px;
+}
+
+.sidebar-add-menu {
+  min-width: 224px;
+}
+
+.sidebar-add-menu .sidebar-add-menu-item {
+  min-height: 32px;
+  padding: 4px 9px;
+  border-radius: 7px;
+}
+
+.sidebar-add-menu .sidebar-add-menu-item:hover {
+  background: alpha(currentColor, .075);
+}
+
+.sidebar-add-menu .sidebar-add-menu-item image {
+  min-width: 18px;
+}
+
 /* Compose --------------------------------------------------------------- */
 
 .compose-window {
@@ -1252,7 +2357,7 @@ statuspage.empty-state {
 }
 
 statuspage.empty-state image {
-  color: alpha(currentColor, .38);
+  color: alpha(currentColor, .48);
 }
 
 statuspage.empty-state .title-1,
@@ -1263,7 +2368,35 @@ statuspage.empty-state .title-3 {
 
 statuspage.empty-state .body,
 statuspage.empty-state .dim-label {
-  color: alpha(currentColor, .54);
+  color: alpha(currentColor, .66);
+}
+
+.toolbar-search-control {
+  min-width: 0;
+}
+
+.mail-header-bar menubutton.search-scope-button {
+  min-height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.mail-header-bar menubutton.search-scope-button > button {
+  min-height: 28px;
+  padding: 1px 9px;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 999px;
+  color: alpha(currentColor, .76);
+  background: alpha(currentColor, .045);
+  box-shadow: inset 0 1px alpha(white, .18);
+}
+
+.mail-header-bar menubutton.search-scope-button > button:hover {
+  color: inherit;
+  background: alpha(currentColor, .09);
+  border-color: alpha(currentColor, .16);
 }
 
 statuspage.error-state {
@@ -1654,4 +2787,3906 @@ window.compose-window.compose-dark > contents,
     background: rgba(120, 174, 237, .16);
     border-color: rgba(120, 174, 237, .28);
   }
+}
+
+/* First-run and account setup ------------------------------------------- */
+.account-onboarding {
+  min-height: 350px;
+  padding: 32px 30px 24px;
+}
+
+.account-onboarding-icon-badge {
+  min-width: 72px;
+  min-height: 72px;
+  margin-bottom: 20px;
+  border-radius: 999px;
+  background: rgba(53, 132, 228, .11);
+  border: 1px solid rgba(53, 132, 228, .15);
+}
+
+.account-onboarding-icon {
+  color: #3584e4;
+}
+
+.account-onboarding-title {
+  margin-bottom: 8px;
+  font-size: 1.72em;
+  font-weight: 700;
+}
+
+.account-onboarding-description {
+  margin-bottom: 24px;
+  font-size: 1.03em;
+  color: alpha(currentColor, .72);
+}
+
+.account-onboarding-actions {
+  margin-bottom: 14px;
+}
+
+.account-onboarding button.suggested-action {
+  min-width: 220px;
+  min-height: 42px;
+  padding: 5px 22px;
+  border-radius: 999px;
+}
+
+.account-onboarding-note {
+  font-size: .88em;
+  color: alpha(currentColor, .57);
+}
+
+.account-setup-card preferencesrow,
+.account-setup-actions preferencesrow {
+  min-height: 48px;
+}
+
+preferencesrow.account-field-error {
+  box-shadow: inset 3px 0 var(--error-color);
+}
+
+/* Premium main mail shell --------------------------------------------------
+ * Identity lives in the floating control and navigation layers. Mail content
+ * remains calm, legible, and familiar while each pane has a distinct material
+ * role. This block is intentionally scoped to the main window. */
+window.mail-window,
+window.mail-window.background,
+.mail-window > contents,
+.mail-window .mail-shell-overlay,
+.mail-window .mail-shell-toolbar-view {
+  color: #26313d;
+  background-color: #f4f7fa;
+}
+
+.mail-window .mail-header-handle {
+  background: transparent;
+}
+
+.mail-window .mail-header-bar {
+  min-height: 50px;
+  padding: 7px 12px;
+  background-color: #edf2f7;
+  border: 0;
+  border-bottom: 1px solid alpha(currentColor, .12);
+  box-shadow: inset 0 1px alpha(white, .54), 0 4px 18px alpha(black, .10);
+}
+
+.mail-window .mail-toolbar-stack,
+.mail-window .apple-toolbar {
+  min-height: 34px;
+}
+
+.mail-window .apple-toolbar-button,
+.mail-window menubutton.apple-toolbar-button > button,
+.mail-window menubutton.toolbar-menu-button > button,
+.mail-window menubutton.app-menu-button > button,
+.mail-window .header-back-button {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 2px 9px;
+  border: 1px solid alpha(currentColor, .12);
+  border-radius: 11px;
+  color: alpha(currentColor, .86);
+  background: rgba(255, 255, 255, .78);
+  box-shadow: inset 0 1px alpha(white, .42), 0 2px 6px alpha(black, .075);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out, transform 100ms ease-out;
+}
+
+.mail-window .apple-toolbar-button:hover,
+.mail-window menubutton.apple-toolbar-button > button:hover,
+.mail-window menubutton.toolbar-menu-button > button:hover,
+.mail-window menubutton.app-menu-button > button:hover,
+.mail-window .header-back-button:hover {
+  color: currentColor;
+  background: #f4f8fc;
+  border-color: alpha(currentColor, .18);
+  box-shadow: inset 0 1px alpha(white, .55), 0 4px 10px alpha(black, .11);
+}
+
+.mail-window .apple-toolbar-button:active,
+.mail-window menubutton.apple-toolbar-button > button:active,
+.mail-window menubutton.toolbar-menu-button > button:active,
+.mail-window menubutton.app-menu-button > button:active {
+  background: rgba(53, 132, 228, .18);
+  border-color: rgba(53, 132, 228, .34);
+  box-shadow: inset 0 2px 4px alpha(black, .12);
+}
+
+.mail-window .apple-toolbar-button.compose-toolbar-button,
+.mail-window .apple-toolbar-button.compose-toolbar-button:hover {
+  color: white;
+  background: #3584e4;
+  border-color: #1c71d8;
+  box-shadow: inset 0 1px alpha(white, .30), 0 3px 10px rgba(28, 113, 216, .34);
+}
+
+.mail-window .apple-toolbar-button.compose-toolbar-button:hover {
+  background: #4b92e6;
+  box-shadow: inset 0 1px alpha(white, .38), 0 5px 14px rgba(28, 113, 216, .38);
+}
+
+.mail-window .apple-toolbar-group,
+.mail-window .toolbar-action-cluster,
+.mail-window .flag-control {
+  min-height: 34px;
+  border: 1px solid alpha(currentColor, .12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .78);
+  box-shadow: inset 0 1px alpha(white, .40), 0 2px 7px alpha(black, .075);
+}
+
+.mail-window .apple-toolbar-group .apple-toolbar-button,
+.mail-window .toolbar-action-cluster .apple-toolbar-group .apple-toolbar-button,
+.mail-window .toolbar-action-cluster > .toolbar-cluster-segment,
+.mail-window .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button,
+.mail-window .flag-control .apple-toolbar-button,
+.mail-window .flag-control menubutton.toolbar-menu-button > button {
+  min-height: 32px;
+  min-width: 36px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border: 0;
+  border-right: 1px solid alpha(currentColor, .11);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .apple-toolbar-group .apple-toolbar-button:hover,
+.mail-window .toolbar-action-cluster .apple-toolbar-button:hover,
+.mail-window .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button:hover,
+.mail-window .flag-control .apple-toolbar-button:hover,
+.mail-window .flag-control menubutton.toolbar-menu-button > button:hover {
+  background: alpha(currentColor, .085);
+  box-shadow: none;
+}
+
+.mail-window .apple-toolbar-group > :last-child,
+.mail-window .toolbar-action-cluster > :last-child,
+.mail-window .flag-control > :last-child,
+.mail-window .toolbar-action-cluster > menubutton.toolbar-cluster-segment:last-child > button,
+.mail-window .flag-control menubutton.toolbar-menu-button:last-child > button {
+  border-right: 0;
+}
+
+/* Search scope and query form one composite command surface. */
+.mail-window .toolbar-search-control {
+  min-height: 34px;
+  border: 1px solid alpha(currentColor, .14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .84);
+  box-shadow: inset 0 1px 2px alpha(black, .055), 0 2px 7px alpha(black, .06);
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out,
+              background-color 140ms ease-out;
+}
+
+.mail-window .toolbar-search-control:focus-within {
+  background: white;
+  border-color: rgba(53, 132, 228, .62);
+  box-shadow: 0 0 0 3px rgba(53, 132, 228, .15), 0 3px 10px alpha(black, .08);
+}
+
+.mail-window .toolbar-search-control menubutton.search-scope-button > button {
+  min-height: 32px;
+  padding: 1px 10px;
+  border: 0;
+  border-right: 1px solid alpha(currentColor, .11);
+  border-radius: 11px 0 0 11px;
+  color: alpha(currentColor, .72);
+  background: alpha(currentColor, .025);
+  box-shadow: none;
+}
+
+.mail-window .toolbar-search-control menubutton.search-scope-button > button:hover {
+  color: currentColor;
+  background: alpha(currentColor, .07);
+}
+
+.mail-window .toolbar-search-control .apple-toolbar-search,
+.mail-window .toolbar-search-control .apple-toolbar-search:focus,
+.mail-window .toolbar-search-control .apple-toolbar-search:focus-within {
+  min-height: 32px;
+  border: 0;
+  border-radius: 0 11px 11px 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-window-controls {
+  margin-left: 3px;
+  opacity: .84;
+}
+
+/* Sidebar material and navigation hierarchy. */
+.mail-window .mailbox-pane,
+.mail-window .sidebar-column,
+.mail-window .mail-sidebar {
+  background-color: #edf3f8;
+}
+
+.mail-window .sidebar-column {
+  border-right: 1px solid alpha(currentColor, .09);
+  box-shadow: inset -1px 0 alpha(white, .22);
+}
+
+.mail-window .mail-sidebar {
+  border: 0;
+}
+
+.mail-window .sidebar-identity {
+  min-height: 42px;
+  margin-top: 4px;
+  margin-bottom: 3px;
+}
+
+.mail-window .sidebar-identity-badge {
+  min-width: 30px;
+  min-height: 30px;
+  border: 1px solid #1c71d8;
+  border-radius: 10px;
+  color: white;
+  background: #293746;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .18), 0 4px 10px rgba(20, 34, 49, .24);
+}
+
+.mail-window .sidebar-identity-icon {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  color: white;
+  background: transparent;
+  box-shadow: none;
+  -gtk-icon-size: 17px;
+}
+
+.mail-window .sidebar-identity-title {
+  font-size: 1.06em;
+  font-weight: 760;
+  letter-spacing: -.01em;
+}
+
+.mail-window .sidebar-section-title {
+  color: alpha(currentColor, .56);
+  font-size: .74em;
+  font-weight: 760;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+
+.mail-window .mail-sidebar row.mailbox-row {
+  min-height: 34px;
+  margin: 1px 9px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out;
+}
+
+.mail-window .mail-sidebar row.mailbox-row:hover:not(:selected):not(.active-mailbox) {
+  background: alpha(currentColor, .065);
+  border-color: alpha(currentColor, .055);
+}
+
+.mail-window .mail-sidebar row.mailbox-row.active-mailbox,
+.mail-window .mail-sidebar row.mailbox-row.active-mailbox:hover,
+.mail-window .mail-sidebar row.mailbox-row:selected,
+.mail-window .mail-sidebar row.mailbox-row:selected:hover {
+  color: #26313d;
+  background: rgba(53, 132, 228, .18);
+  border-color: rgba(53, 132, 228, .24);
+  box-shadow: inset 0 1px alpha(white, .18), 0 3px 10px rgba(53, 132, 228, .13);
+}
+
+.mail-window .mail-sidebar row.mailbox-row.active-mailbox image,
+.mail-window .mail-sidebar row.mailbox-row:selected image {
+  color: #1c71d8;
+}
+
+.mail-window .mail-sidebar row.mailbox-row.active-mailbox .mailbox-count,
+.mail-window .mail-sidebar row.mailbox-row:selected .mailbox-count {
+  color: white;
+  background: #3584e4;
+  box-shadow: inset 0 1px alpha(white, .25);
+}
+
+.mail-window .mail-sidebar .mailbox-row-content {
+  min-height: 30px;
+}
+
+.mail-window .mail-sidebar .mailbox-count {
+  min-width: 19px;
+  min-height: 19px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: alpha(currentColor, .095);
+  font-size: .76em;
+}
+
+.mail-window .mail-sidebar .favorites-header {
+  min-height: 34px;
+}
+
+.mail-window .mail-sidebar .sidebar-add-button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  opacity: .66;
+}
+
+.mail-window .mail-sidebar .favorites-header:hover .sidebar-add-button,
+.mail-window .mail-sidebar .sidebar-add-button:hover,
+.mail-window .mail-sidebar .sidebar-add-button:focus {
+  opacity: 1;
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .10);
+  border-color: rgba(53, 132, 228, .18);
+}
+
+.mail-window .mail-sidebar .follow-up-section > title {
+  min-height: 34px;
+  border-radius: 9px;
+  color: alpha(currentColor, .74);
+}
+
+.mail-window .mail-sidebar .follow-up-section > title:hover {
+  background: alpha(currentColor, .055);
+}
+
+.mail-window .mail-sidebar .follow-up-title {
+  font-size: .88em;
+  font-weight: 700;
+}
+
+.mail-window .sidebar-add-popover > contents {
+  padding: 6px;
+  border: 1px solid alpha(currentColor, .11);
+  border-radius: 13px;
+  box-shadow: 0 12px 32px alpha(black, .18);
+}
+
+/* Message list: compact information hierarchy with continuous hover and
+ * selection feedback, without turning the content layer into decoration. */
+.mail-window .message-pane,
+.mail-window .message-list,
+.mail-window .message-list scrolledwindow,
+.mail-window .message-list scrolledwindow viewport,
+.mail-window .message-list-items {
+  background-color: #f8fafc;
+}
+
+.mail-window .message-list-header {
+  min-height: 58px;
+  padding: 8px 13px 7px 17px;
+  background-color: #f1f5f9;
+  border: 0;
+  box-shadow: 0 2px 10px alpha(black, .055), inset 0 1px alpha(white, .30);
+}
+
+.mail-window .message-list-divider {
+  background: alpha(currentColor, .075);
+}
+
+.mail-window .message-list-header .title-3 {
+  font-size: 1.30em;
+  font-weight: 780;
+  letter-spacing: -.025em;
+}
+
+.mail-window .message-list-header .message-count {
+  min-height: 0;
+  padding: 0;
+  color: alpha(currentColor, .50);
+  background: transparent;
+  font-size: .80em;
+  font-weight: 550;
+}
+
+.mail-window .message-list-header button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: alpha(currentColor, .68);
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 140ms ease-out, color 140ms ease-out,
+              border-color 140ms ease-out;
+}
+
+.mail-window .message-list-header button:hover {
+  color: currentColor;
+  background: alpha(currentColor, .065);
+  border-color: alpha(currentColor, .08);
+}
+
+.mail-window .message-list-header button:checked {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .14);
+  border-color: rgba(53, 132, 228, .20);
+}
+
+.mail-window .message-list-items {
+  padding: 6px 5px 14px;
+}
+
+.mail-window .message-list-items > row {
+  margin: 2px 3px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out;
+}
+
+.mail-window .message-list-items > row:hover:not(:selected) {
+  background: rgba(255, 255, 255, .74);
+  border-color: alpha(currentColor, .075);
+  box-shadow: 0 3px 10px alpha(black, .045);
+}
+
+.mail-window .message-list-items > row:selected,
+.mail-window .message-list-items > row:selected:hover,
+.mail-window .message-list-items > row:focus-visible {
+  color: #26313d;
+  background: rgba(53, 132, 228, .19);
+  border-color: rgba(53, 132, 228, .28);
+  box-shadow: inset 0 1px alpha(white, .17), 0 4px 12px rgba(53, 132, 228, .14);
+  outline: none;
+}
+
+.mail-window .message-row,
+.mail-window .message-row:hover,
+.mail-window .message-row.selected-message,
+.mail-window .message-row.selected-message:hover,
+.mail-window .message-row:selected,
+.mail-window .message-row:selected:hover,
+.mail-window .message-list-items > row:selected .message-row {
+  min-height: 66px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .message-row .sender {
+  font-size: .94em;
+  font-weight: 610;
+  letter-spacing: -.008em;
+}
+
+.mail-window .message-row .subject {
+  margin-top: 1px;
+  font-size: .91em;
+  color: alpha(currentColor, .88);
+}
+
+.mail-window .message-row .preview {
+  margin-top: 2px;
+  color: alpha(currentColor, .53);
+  font-size: .84em;
+}
+
+.mail-window .message-row .timestamp {
+  min-width: 62px;
+  color: alpha(currentColor, .49);
+  font-size: .76em;
+  font-variant-numeric: tabular-nums;
+}
+
+.mail-window .message-row.unread .sender,
+.mail-window .message-row.unread .subject {
+  font-weight: 760;
+  color: currentColor;
+}
+
+.mail-window .message-row .unread-indicator-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border: 2px solid #f8fafc;
+  background: #3584e4;
+  box-shadow: 0 2px 5px rgba(53, 132, 228, .34);
+}
+
+/* Deterministic contact colors create identity and scanning landmarks while
+ * leaving semantic UI colors untouched. */
+.mail-window .sender-avatar {
+  min-width: 34px;
+  min-height: 34px;
+  border: 1px solid alpha(currentColor, .10);
+  font-size: .84em;
+  font-weight: 780;
+  box-shadow: inset 0 1px alpha(white, .30), 0 2px 6px alpha(black, .08);
+}
+
+.mail-window .sender-avatar.avatar-tone-0 { color: #1556a0; background: #d9eaff; }
+.mail-window .sender-avatar.avatar-tone-1 { color: #6b3fa0; background: #eee1ff; }
+.mail-window .sender-avatar.avatar-tone-2 { color: #08766e; background: #d4f3ee; }
+.mail-window .sender-avatar.avatar-tone-3 { color: #9a5316; background: #ffe6ca; }
+.mail-window .sender-avatar.avatar-tone-4 { color: #39732f; background: #dff1d8; }
+.mail-window .sender-avatar.avatar-tone-5 { color: #9a3f66; background: #f9dce9; }
+
+/* Reader is the quiet paper layer beneath navigation and controls. */
+.mail-window .reader-stack,
+.mail-window .reading-pane,
+.mail-window .reading-pane scrolledwindow,
+.mail-window .reading-pane scrolledwindow viewport {
+  background-color: #ffffff;
+}
+
+.mail-window .message-split > separator {
+  min-width: 1px;
+  background: alpha(currentColor, .09);
+  box-shadow: -1px 0 alpha(white, .20), 1px 0 alpha(black, .025);
+}
+
+.mail-window .message-header {
+  min-height: 72px;
+  padding: 24px 34px 18px;
+  background-color: #f7f9fb;
+  border-bottom: 1px solid alpha(currentColor, .075);
+  box-shadow: inset 0 1px alpha(white, .22);
+}
+
+.mail-window .message-subject {
+  font-size: 1.62em;
+  font-weight: 790;
+  letter-spacing: -.026em;
+}
+
+.mail-window .reader-subject-action {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: alpha(currentColor, .72);
+  background: alpha(currentColor, .04);
+}
+
+.mail-window .reader-subject-action:hover,
+.mail-window .reader-subject-action:checked {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .12);
+  border-color: rgba(53, 132, 228, .17);
+}
+
+.mail-window .conversation-message {
+  margin: 14px 24px 0;
+  border: 1px solid alpha(currentColor, .095);
+  border-radius: 15px;
+  background-color: #fbfcfd;
+  box-shadow: inset 0 1px alpha(white, .38), 0 4px 16px alpha(black, .065);
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+
+.mail-window .conversation-message.conversation-expanded {
+  border-color: alpha(currentColor, .11);
+  box-shadow: inset 0 1px alpha(white, .42), 0 7px 24px alpha(black, .085);
+}
+
+.mail-window .conversation-message .conversation-header-button {
+  min-height: 68px;
+  padding: 12px 15px;
+  border: 0;
+  border-radius: 14px 0 0 14px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .conversation-message .conversation-header-button:hover {
+  background: alpha(currentColor, .035);
+}
+
+.mail-window .conversation-message .conversation-details-button {
+  min-width: 34px;
+  min-height: 34px;
+  margin-right: 10px;
+  padding: 5px;
+  border-radius: 10px;
+  color: alpha(currentColor, .58);
+}
+
+.mail-window .conversation-message .conversation-details-button:hover {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .10);
+}
+
+.mail-window .conversation-message .conversation-sender-meta .heading {
+  font-size: .98em;
+  font-weight: 730;
+}
+
+.mail-window .conversation-message .conversation-sender-meta .dim-label {
+  color: alpha(currentColor, .53);
+  font-size: .86em;
+}
+
+.mail-window .conversation-message > separator {
+  opacity: 0;
+}
+
+.mail-window .message-body {
+  padding: 20px 30px 44px;
+  color: alpha(currentColor, .90);
+  font-size: 1.02em;
+  line-height: 1.50;
+}
+
+.mail-window .reading-pane.narrow-reader .message-header {
+  padding: 18px 20px 15px;
+}
+
+.mail-window .reading-pane.narrow-reader .conversation-message {
+  margin-left: 14px;
+  margin-right: 14px;
+}
+
+.mail-window .reading-pane.narrow-reader .message-body {
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.mail-window .attachment-row {
+  margin: 0 28px 10px;
+  padding: 10px 12px;
+  border: 1px solid alpha(currentColor, .08);
+  border-radius: 11px;
+  background: alpha(currentColor, .032);
+  box-shadow: inset 0 1px alpha(white, .16);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out;
+}
+
+.mail-window .attachment-row:hover {
+  background: alpha(currentColor, .052);
+  border-color: alpha(currentColor, .13);
+}
+
+.mail-window .pane-resize-handle {
+  min-width: 4px;
+  background: transparent;
+}
+
+.mail-window .pane-resize-handle:hover {
+  background: rgba(53, 132, 228, .12);
+}
+
+@media (prefers-color-scheme: dark) {
+  window.mail-window,
+  window.mail-window.background,
+  .mail-window > contents,
+  .mail-window .mail-shell-overlay,
+  .mail-window .mail-shell-toolbar-view {
+    color: #eef3f8;
+    background-color: #101720;
+  }
+
+  .mail-window .mail-header-bar {
+    background-color: #202c39;
+    border-bottom-color: alpha(white, .10);
+    box-shadow: inset 0 1px alpha(white, .07), 0 5px 20px alpha(black, .30);
+  }
+
+  .mail-window .apple-toolbar-button,
+  .mail-window menubutton.apple-toolbar-button > button,
+  .mail-window menubutton.toolbar-menu-button > button,
+  .mail-window menubutton.app-menu-button > button,
+  .mail-window .header-back-button,
+  .mail-window .apple-toolbar-group,
+  .mail-window .toolbar-action-cluster,
+  .mail-window .flag-control,
+  .mail-window .toolbar-search-control {
+    background: alpha(white, .065);
+    border-color: alpha(white, .13);
+    box-shadow: inset 0 1px alpha(white, .08), 0 3px 9px alpha(black, .22);
+  }
+
+  .mail-window .apple-toolbar-button:hover,
+  .mail-window menubutton.apple-toolbar-button > button:hover,
+  .mail-window menubutton.toolbar-menu-button > button:hover,
+  .mail-window menubutton.app-menu-button > button:hover {
+    background: alpha(white, .115);
+    border-color: alpha(white, .19);
+    box-shadow: inset 0 1px alpha(white, .11), 0 5px 13px alpha(black, .28);
+  }
+
+  .mail-window .mailbox-pane,
+  .mail-window .sidebar-column,
+  .mail-window .mail-sidebar {
+    background-color: #192633;
+  }
+
+  .mail-window .sidebar-column {
+    border-right-color: alpha(white, .075);
+    box-shadow: inset -1px 0 alpha(black, .22);
+  }
+
+  .mail-window .mail-sidebar row.mailbox-row.active-mailbox,
+  .mail-window .mail-sidebar row.mailbox-row.active-mailbox:hover,
+  .mail-window .mail-sidebar row.mailbox-row:selected,
+  .mail-window .mail-sidebar row.mailbox-row:selected:hover {
+    background: rgba(83, 155, 245, .28);
+    border-color: rgba(120, 174, 237, .34);
+    box-shadow: inset 0 1px alpha(white, .10), 0 4px 12px alpha(black, .18);
+  }
+
+  .mail-window .message-pane,
+  .mail-window .message-list,
+  .mail-window .message-list scrolledwindow,
+  .mail-window .message-list scrolledwindow viewport,
+  .mail-window .message-list-items {
+    background-color: #141c25;
+  }
+
+  .mail-window .message-list-header {
+    background-color: #1d2834;
+    box-shadow: 0 3px 13px alpha(black, .22), inset 0 1px alpha(white, .045);
+  }
+
+  .mail-window .message-list-items > row:hover:not(:selected) {
+    background: alpha(white, .052);
+    border-color: alpha(white, .07);
+    box-shadow: 0 4px 12px alpha(black, .14);
+  }
+
+  .mail-window .message-list-items > row:selected,
+  .mail-window .message-list-items > row:selected:hover,
+  .mail-window .message-list-items > row:focus-visible {
+    background: rgba(83, 155, 245, .28);
+    border-color: rgba(120, 174, 237, .36);
+    box-shadow: inset 0 1px alpha(white, .09), 0 5px 15px alpha(black, .20);
+  }
+
+  .mail-window .message-row .unread-indicator-dot {
+    border-color: #141c25;
+  }
+
+  .mail-window .sender-avatar.avatar-tone-0 { color: #b7d7ff; background: #294b73; }
+  .mail-window .sender-avatar.avatar-tone-1 { color: #dcc5ff; background: #513a70; }
+  .mail-window .sender-avatar.avatar-tone-2 { color: #a7eee5; background: #245c58; }
+  .mail-window .sender-avatar.avatar-tone-3 { color: #ffd3a5; background: #704827; }
+  .mail-window .sender-avatar.avatar-tone-4 { color: #c4e9b8; background: #3b5f36; }
+  .mail-window .sender-avatar.avatar-tone-5 { color: #ffc4dd; background: #713b53; }
+
+  .mail-window .reader-stack,
+  .mail-window .reading-pane,
+  .mail-window .reading-pane scrolledwindow,
+  .mail-window .reading-pane scrolledwindow viewport {
+    background-color: #101820;
+  }
+
+  .mail-window .message-header {
+    background-color: #192634;
+    border-bottom-color: alpha(white, .075);
+    box-shadow: inset 0 1px alpha(white, .035);
+  }
+
+  .mail-window .conversation-message {
+    background-color: #1e2a37;
+    border-color: alpha(white, .095);
+    box-shadow: inset 0 1px alpha(white, .055), 0 6px 20px alpha(black, .25);
+  }
+
+  .mail-window .conversation-message.conversation-expanded {
+    border-color: alpha(white, .12);
+    box-shadow: inset 0 1px alpha(white, .065), 0 9px 28px alpha(black, .31);
+  }
+
+  .mail-window .attachment-row {
+    background: alpha(white, .035);
+    border-color: alpha(white, .08);
+    box-shadow: inset 0 1px alpha(white, .035);
+  }
+}
+
+/* Rules -------------------------------------------------------------------
+ * Automation reads as a calm, ordered workflow: one restrained hero,
+ * tactile rule cards, and nested builder rows for progressively disclosed
+ * detail. Alpha surfaces adapt to both native light and dark palettes. */
+.rules-window toolbarview,
+.rule-editor-dialog toolbarview,
+.rule-run-dialog toolbarview {
+  background: transparent;
+}
+
+.rules-window headerbar,
+.rule-editor-dialog headerbar,
+.rule-run-dialog headerbar {
+  border-bottom: 1px solid alpha(currentColor, .09);
+  box-shadow: 0 3px 14px alpha(black, .07);
+}
+
+.rules-primary-action,
+.rules-primary-action > button {
+  min-height: 36px;
+  border-radius: 11px;
+  color: white;
+  background: #3584e4;
+  border-color: #1c71d8;
+  box-shadow: inset 0 1px alpha(white, .24), 0 3px 10px rgba(28, 113, 216, .22);
+}
+
+.rules-hero,
+.rule-editor-hero,
+.rule-editor-section,
+.rule-preview-card,
+.rule-run-scope-card,
+.rules-empty-card {
+  padding: 16px 18px;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 16px;
+  background: alpha(currentColor, .028);
+  box-shadow: inset 0 1px alpha(white, .13), 0 3px 14px alpha(black, .055);
+}
+
+.rules-hero,
+.rule-editor-hero {
+  background: rgba(53, 132, 228, .055);
+  border-color: rgba(53, 132, 228, .16);
+}
+
+.rules-hero-icon,
+.rule-run-hero-icon {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 10px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .13);
+  box-shadow: inset 0 1px alpha(white, .16);
+}
+
+.rules-eyebrow,
+.rule-preview-eyebrow {
+  color: #3584e4;
+  font-weight: 750;
+  letter-spacing: .08em;
+}
+
+.rules-hero-title,
+.rule-preview-title {
+  font-weight: 790;
+  letter-spacing: -.018em;
+}
+
+.rules-hero-copy,
+.rule-preview-text,
+.rule-metadata,
+.rule-status-label,
+.rules-selection-label {
+  color: alpha(currentColor, .66);
+}
+
+.rules-count-pill,
+.rule-editor-device-badge {
+  padding: 4px 9px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .11);
+  font-size: .78em;
+  font-weight: 750;
+}
+
+.rules-list,
+.rules-list > row {
+  background: transparent;
+}
+
+.rules-list row.rule-card {
+  margin: 0 0 10px;
+  padding: 13px 15px;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 14px;
+  background: alpha(currentColor, .028);
+  box-shadow: inset 0 1px alpha(white, .11), 0 2px 10px alpha(black, .045);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out;
+}
+
+.rules-list row.rule-card:hover:not(:selected) {
+  background: alpha(currentColor, .045);
+  border-color: alpha(currentColor, .15);
+  box-shadow: inset 0 1px alpha(white, .13), 0 4px 14px alpha(black, .065);
+}
+
+.rules-list row.rule-card:selected,
+.rules-list row.rule-card:selected:hover {
+  color: inherit;
+  background: rgba(53, 132, 228, .14);
+  border-color: rgba(53, 132, 228, .38);
+  box-shadow: inset 3px 0 #3584e4, inset 0 1px alpha(white, .12),
+              0 4px 16px alpha(black, .07);
+}
+
+.rules-list row.rule-card:selected .dim-label,
+.rules-list row.rule-card:selected .rule-metadata,
+.rules-list row.rule-card:selected .rule-status-label {
+  color: alpha(currentColor, .66);
+}
+
+.rule-card-disabled {
+  opacity: .58;
+}
+
+.rule-title {
+  font-weight: 750;
+  letter-spacing: -.012em;
+}
+
+.rule-order-badge,
+.rule-editor-section-number {
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px solid alpha(currentColor, .07);
+  border-radius: 999px;
+  background: alpha(currentColor, .07);
+  font-size: .82em;
+  font-weight: 750;
+}
+
+.rule-flow {
+  margin-top: 5px;
+}
+
+.rule-flow-label {
+  min-width: 42px;
+  color: #3584e4;
+  font-size: .78em;
+  font-weight: 780;
+  letter-spacing: .06em;
+}
+
+.rule-flow-value {
+  color: alpha(currentColor, .84);
+}
+
+.rule-drag-handle {
+  color: alpha(currentColor, .38);
+}
+
+.rule-builder-row {
+  padding: 10px;
+  border: 1px solid alpha(currentColor, .08);
+  border-radius: 12px;
+  background: alpha(currentColor, .035);
+  box-shadow: inset 0 1px alpha(white, .08);
+}
+
+.rule-builder-row:hover {
+  background: alpha(currentColor, .05);
+  border-color: alpha(currentColor, .13);
+}
+
+.rule-editor-field {
+  min-width: 0;
+}
+
+.rule-editor-add-row {
+  min-height: 34px;
+  border: 1px dashed alpha(currentColor, .18);
+  border-radius: 10px;
+  color: #3584e4;
+  background: transparent;
+}
+
+.rule-editor-add-row:hover {
+  border-color: rgba(53, 132, 228, .38);
+  background: rgba(53, 132, 228, .08);
+}
+
+.rule-preview-card {
+  background: rgba(53, 132, 228, .075);
+  border-color: rgba(53, 132, 228, .18);
+}
+
+.rule-editor-validation {
+  padding: 0 4px;
+}
+
+.rules-action-bar {
+  min-height: 42px;
+  border-top: 1px solid alpha(currentColor, .09);
+  background: alpha(currentColor, .022);
+  box-shadow: 0 -2px 10px alpha(black, .035);
+}
+
+.rule-run-progress trough {
+  min-height: 6px;
+  border-radius: 999px;
+}
+
+.rule-run-progress progress {
+  min-height: 6px;
+  border-radius: 999px;
+}
+
+.rule-run-match-count {
+  color: #3584e4;
+  font-size: 2em;
+  font-weight: 800;
+  letter-spacing: -.025em;
+}
+
+.rule-run-detail-row {
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.rule-run-detail-row:hover {
+  background: alpha(currentColor, .035);
+}
+
+.rule-run-notice {
+  padding: 10px 12px;
+  border: 1px solid alpha(currentColor, .08);
+  border-radius: 11px;
+  background: alpha(currentColor, .045);
+}
+
+.rule-run-notice.warning {
+  color: #b56b00;
+  background: rgba(245, 121, 0, .10);
+  border-color: rgba(245, 121, 0, .22);
+}
+
+.rules-empty-card {
+  padding-top: 34px;
+  padding-bottom: 34px;
+}
+
+.rules-empty-icon {
+  min-width: 46px;
+  min-height: 46px;
+  color: #3584e4;
+}
+
+/* Compact desktop density -------------------------------------------------
+ * A mail window is a scanning workspace, so controls stay comfortably
+ * targetable without consuming content-sized blocks of space. */
+.mail-window .mail-header-bar {
+  min-height: 34px;
+  padding: 3px 9px;
+}
+
+.mail-window .mail-toolbar-stack,
+.mail-window .apple-toolbar {
+  min-height: 26px;
+}
+
+.mail-window .apple-toolbar-button,
+.mail-window menubutton.apple-toolbar-button > button,
+.mail-window menubutton.toolbar-menu-button > button,
+.mail-window menubutton.app-menu-button > button,
+.mail-window .header-back-button {
+  min-width: 22px;
+  min-height: 20px;
+  padding: 0 5px;
+  border-radius: 8px;
+}
+
+.mail-window .apple-toolbar-group,
+.mail-window .toolbar-action-cluster,
+.mail-window .flag-control,
+.mail-window .toolbar-search-control {
+  min-height: 26px;
+  border-radius: 9px;
+}
+
+.mail-window .apple-toolbar-group .apple-toolbar-button,
+.mail-window .toolbar-action-cluster .apple-toolbar-group .apple-toolbar-button,
+.mail-window .toolbar-action-cluster > .toolbar-cluster-segment,
+.mail-window .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button,
+.mail-window .flag-control .apple-toolbar-button,
+.mail-window .flag-control menubutton.toolbar-menu-button > button {
+  min-width: 27px;
+  min-height: 24px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.mail-window .toolbar-search-control menubutton.search-scope-button > button,
+.mail-window .toolbar-search-control .apple-toolbar-search,
+.mail-window .toolbar-search-control .apple-toolbar-search:focus,
+.mail-window .toolbar-search-control .apple-toolbar-search:focus-within {
+  min-height: 24px;
+}
+
+.mail-window .toolbar-search-control menubutton.search-scope-button > button {
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 9px 0 0 9px;
+}
+
+.mail-window .sidebar-identity {
+  min-height: 36px;
+  margin-top: 1px;
+  margin-bottom: 1px;
+}
+
+.mail-window .mail-sidebar row.mailbox-row {
+  min-height: 30px;
+  border-radius: 9px;
+}
+
+.mail-window .mail-sidebar .mailbox-row-content {
+  min-height: 27px;
+}
+
+.mail-window .mail-sidebar .favorites-header,
+.mail-window .mail-sidebar .follow-up-section > title {
+  min-height: 30px;
+}
+
+.mail-window .message-list-header {
+  min-height: 40px;
+  padding: 6px 11px 5px 15px;
+}
+
+.mail-window .message-list-header .title-3 {
+  font-size: 1.18em;
+}
+
+.mail-window .message-list-header button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 3px;
+  border-radius: 9px;
+}
+
+.mail-window .message-list-items {
+  padding: 4px 4px 10px;
+}
+
+.mail-window .message-list-items > row {
+  margin: 1px 2px;
+  border-radius: 10px;
+}
+
+.mail-window .message-row,
+.mail-window .message-row:hover,
+.mail-window .message-row.selected-message,
+.mail-window .message-row.selected-message:hover,
+.mail-window .message-row:selected,
+.mail-window .message-row:selected:hover,
+.mail-window .message-list-items > row:selected .message-row {
+  min-height: 42px;
+  padding: 6px 9px;
+  border-radius: 9px;
+}
+
+.mail-window .sender-avatar {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.mail-window .message-header {
+  min-height: 44px;
+  padding: 12px 26px 10px;
+}
+
+.mail-window .message-subject {
+  font-size: 1.42em;
+}
+
+.mail-window .conversation-message {
+  margin: 9px 16px 0;
+  border-radius: 13px;
+}
+
+.mail-window .conversation-message .conversation-header-button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 12px 0 0 12px;
+}
+
+.mail-window .conversation-message .conversation-details-button {
+  min-width: 30px;
+  min-height: 30px;
+  margin-right: 7px;
+  padding: 3px;
+  border-radius: 9px;
+}
+
+.mail-window .message-body {
+  padding: 14px 24px 30px;
+  font-size: 1em;
+  line-height: 1.46;
+}
+
+.mail-window .attachment-row {
+  margin: 0 18px 7px;
+  padding: 7px 10px;
+  border-radius: 10px;
+}
+
+.mail-window .reading-pane.narrow-reader .message-header {
+  padding: 11px 16px 9px;
+}
+
+.mail-window .reading-pane.narrow-reader .conversation-message {
+  margin-left: 9px;
+  margin-right: 9px;
+}
+
+.mail-window .reading-pane.narrow-reader .message-body {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+/* Focus never flashes a light entry inside the dark material toolbar. */
+.mail-window.mail-dark .toolbar-search-control:focus-within,
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search,
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search:focus,
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search:focus-within,
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search text,
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search text:focus {
+  color: #eef3f8;
+  background: #263543;
+  border-color: rgba(98, 160, 234, .74);
+}
+
+.mail-window.mail-dark .toolbar-search-control:focus-within {
+  box-shadow: 0 0 0 2px rgba(98, 160, 234, .22), 0 3px 10px rgba(0, 0, 0, .24);
+}
+
+.mail-window.mail-dark .toolbar-search-control .apple-toolbar-search placeholder {
+  color: rgba(238, 243, 248, .48);
+}
+
+.mail-window.mail-dark popover > contents,
+.mail-window.mail-dark .sidebar-add-popover > contents {
+  color: #eef3f8;
+  background: #263442;
+  border: 1px solid rgba(255, 255, 255, .11);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .36);
+}
+
+/* Compact Rules density. The row child owns its internal padding. */
+.rules-hero,
+.rule-editor-hero,
+.rule-editor-section,
+.rule-preview-card,
+.rule-run-scope-card,
+.rules-empty-card {
+  padding: 11px 13px;
+  border-radius: 13px;
+}
+
+.rules-hero-icon,
+.rule-run-hero-icon {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 6px;
+}
+
+.rules-list row.rule-card {
+  margin-bottom: 7px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.rule-flow {
+  margin-top: 2px;
+}
+
+.rule-builder-row {
+  padding: 8px;
+  border-radius: 10px;
+}
+
+.rule-editor-add-row {
+  min-height: 30px;
+}
+
+.rules-action-bar {
+  min-height: 38px;
+}
+
+.rule-run-detail-row {
+  padding: 7px 9px;
+}
+
+.rule-run-notice {
+  padding: 8px 10px;
+}
+
+.rules-empty-card {
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+/* Onboarding and account setup --------------------------------------------
+ * Compact value cards establish trust without turning desktop setup into a
+ * full-screen marketing page. */
+.account-onboarding {
+  min-height: 0;
+  padding: 22px 24px 18px;
+}
+
+.account-onboarding-icon-badge {
+  min-width: 60px;
+  min-height: 60px;
+  margin-bottom: 11px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .11);
+  box-shadow: inset 0 1px alpha(white, .15), 0 5px 16px alpha(black, .07);
+}
+
+.account-onboarding-icon,
+.account-onboarding-value-icon {
+  color: #3584e4;
+}
+
+.account-onboarding-eyebrow {
+  margin-bottom: 5px;
+  color: #3584e4;
+  font-size: .72em;
+  font-weight: 780;
+  letter-spacing: .09em;
+}
+
+.account-onboarding-title {
+  margin-bottom: 6px;
+  font-size: 1.72em;
+  font-weight: 800;
+  letter-spacing: -.025em;
+}
+
+.account-onboarding-description {
+  margin-bottom: 17px;
+  color: alpha(currentColor, .68);
+  font-size: .98em;
+  line-height: 1.38;
+}
+
+.account-onboarding-values {
+  margin: 0 0 16px;
+}
+
+.account-onboarding-values > flowboxchild {
+  padding: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.account-onboarding-value {
+  min-width: 140px;
+  min-height: 76px;
+  padding: 10px 11px;
+  border: 1px solid alpha(currentColor, .09);
+  border-radius: 12px;
+  background: alpha(currentColor, .028);
+  box-shadow: inset 0 1px alpha(white, .11), 0 2px 9px alpha(black, .04);
+}
+
+.account-onboarding-value-title {
+  font-size: .92em;
+  font-weight: 730;
+}
+
+.account-onboarding-value-description {
+  color: alpha(currentColor, .61);
+  font-size: .82em;
+  line-height: 1.28;
+}
+
+.account-onboarding-actions {
+  margin-bottom: 8px;
+}
+
+.account-onboarding-actions button.suggested-action,
+.account-onboarding button.suggested-action {
+  min-width: 190px;
+  min-height: 36px;
+  padding: 3px 18px;
+  border-radius: 11px;
+  color: white;
+  background: #3584e4;
+  border-color: #1c71d8;
+  box-shadow: inset 0 1px alpha(white, .24), 0 3px 10px rgba(28, 113, 216, .20);
+}
+
+.account-onboarding-note {
+  color: alpha(currentColor, .54);
+  font-size: .81em;
+}
+
+.account-setup-intro,
+.online-account-trust {
+  padding: 12px 14px;
+  border: 1px solid rgba(53, 132, 228, .15);
+  border-radius: 13px;
+  background: rgba(53, 132, 228, .055);
+  box-shadow: inset 0 1px alpha(white, .11), 0 3px 12px alpha(black, .045);
+}
+
+.account-setup-intro-badge,
+.online-account-trust-badge {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .12);
+}
+
+.account-setup-intro-title,
+.online-account-trust-title {
+  font-size: 1.06em;
+  font-weight: 760;
+  letter-spacing: -.01em;
+}
+
+.account-setup-intro-description,
+.online-account-trust-description {
+  color: alpha(currentColor, .66);
+  font-size: .88em;
+  line-height: 1.34;
+}
+
+.account-provider-hint {
+  padding: 8px 10px;
+  border: 1px solid rgba(53, 132, 228, .16);
+  border-radius: 10px;
+  color: alpha(currentColor, .78);
+  background: rgba(53, 132, 228, .07);
+}
+
+.account-primary-action-box {
+  margin-top: 3px;
+}
+
+.account-primary-action,
+.online-account-connect {
+  min-height: 36px;
+  padding: 3px 16px;
+  border-radius: 10px;
+}
+
+.account-setup-alternatives-label {
+  margin-top: 6px;
+  color: alpha(currentColor, .56);
+  font-size: .77em;
+  font-weight: 650;
+}
+
+.account-dialog-identity,
+.account-dialog-advanced,
+.account-dialog-actions {
+  margin-bottom: 5px;
+}
+
+.account-connection-status {
+  border: 1px solid alpha(currentColor, .09);
+  border-radius: 11px;
+  background: alpha(currentColor, .032);
+}
+
+.account-validation-message {
+  padding: 7px 9px;
+  border: 1px solid rgba(224, 27, 36, .20);
+  border-radius: 9px;
+  color: #c01c28;
+  background: rgba(224, 27, 36, .075);
+}
+
+.account-auth-badge {
+  padding: 3px 8px;
+  border: 1px solid rgba(53, 132, 228, .17);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .09);
+  font-size: .76em;
+  font-weight: 700;
+}
+
+/* Provider and Online Accounts choices use concise desktop cards. */
+.provider-card-grid {
+  background: transparent;
+}
+
+.provider-card-grid > flowboxchild {
+  padding: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.provider-card {
+  min-height: 66px;
+  padding: 0;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 13px;
+  background: alpha(currentColor, .028);
+  box-shadow: inset 0 1px alpha(white, .11), 0 2px 9px alpha(black, .045);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out;
+}
+
+.provider-card:hover {
+  background: rgba(53, 132, 228, .075);
+  border-color: rgba(53, 132, 228, .30);
+  box-shadow: inset 0 1px alpha(white, .13), 0 4px 14px alpha(black, .065);
+}
+
+.provider-card-content {
+  padding: 10px 12px;
+}
+
+.provider-card-icon-badge {
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid rgba(53, 132, 228, .16);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .10);
+}
+
+.provider-card-title {
+  font-weight: 730;
+}
+
+.provider-card-description {
+  color: alpha(currentColor, .61);
+  font-size: .83em;
+}
+
+.provider-card-chevron {
+  color: alpha(currentColor, .43);
+}
+
+.provider-card:hover .provider-card-chevron {
+  color: #3584e4;
+}
+
+.online-account-row {
+  min-height: 46px;
+}
+
+.online-account-empty {
+  color: alpha(currentColor, .76);
+}
+
+/* Settings shell ---------------------------------------------------------- */
+.settings-headerbar {
+  min-height: 42px;
+  border-bottom: 1px solid alpha(currentColor, .09);
+  box-shadow: 0 3px 12px alpha(black, .06);
+}
+
+.settings-sidebar {
+  padding: 14px 10px 10px;
+  border-right: 1px solid alpha(currentColor, .09);
+  background: rgba(53, 132, 228, .045);
+}
+
+.settings-sidebar-heading {
+  margin: 2px 8px 11px;
+}
+
+.settings-sidebar-eyebrow {
+  color: #3584e4;
+  font-size: .68em;
+  font-weight: 780;
+  letter-spacing: .09em;
+}
+
+.settings-sidebar-title {
+  font-size: 1.34em;
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+
+.settings-sidebar-description {
+  color: alpha(currentColor, .62);
+  font-size: .84em;
+}
+
+.settings-search {
+  min-height: 32px;
+  margin: 0 2px 8px;
+  border: 1px solid alpha(currentColor, .11);
+  border-radius: 10px;
+  background: alpha(currentColor, .035);
+  box-shadow: inset 0 1px 2px alpha(black, .045);
+}
+
+.settings-search:focus-within {
+  border-color: rgba(53, 132, 228, .55);
+  background: alpha(currentColor, .025);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, .13);
+}
+
+.settings-navigation,
+.settings-navigation > row {
+  background: transparent;
+}
+
+.settings-navigation row.settings-nav-row {
+  min-height: 46px;
+  margin: 1px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out;
+}
+
+.settings-navigation row.settings-nav-row:hover:not(:selected) {
+  background: alpha(currentColor, .05);
+  border-color: alpha(currentColor, .05);
+}
+
+.settings-navigation row.settings-nav-row:selected,
+.settings-navigation row.settings-nav-row:selected:hover {
+  color: inherit;
+  background: rgba(53, 132, 228, .14);
+  border-color: rgba(53, 132, 228, .22);
+  box-shadow: inset 3px 0 #3584e4;
+}
+
+.settings-nav-content {
+  padding: 7px 9px;
+}
+
+.settings-nav-icon {
+  min-width: 29px;
+  min-height: 29px;
+  border: 1px solid rgba(53, 132, 228, .13);
+  border-radius: 9px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .08);
+}
+
+.settings-nav-title {
+  font-size: .92em;
+  font-weight: 710;
+}
+
+.settings-nav-description {
+  color: alpha(currentColor, .57);
+  font-size: .78em;
+}
+
+.settings-navigation row.settings-nav-row:selected .settings-nav-description {
+  color: alpha(currentColor, .63);
+}
+
+.settings-sidebar-footer {
+  padding: 9px 8px 2px;
+  border-top: 1px solid alpha(currentColor, .08);
+  color: alpha(currentColor, .55);
+}
+
+.settings-content,
+.settings-page {
+  background: transparent;
+}
+
+.settings-page {
+  padding: 8px 12px 18px;
+}
+
+.settings-current-title {
+  font-weight: 730;
+  letter-spacing: -.01em;
+}
+
+/* Settings content --------------------------------------------------------
+ * The navigation shell and the editable content use related blue-gray
+ * materials without making controls feel promotional.  Every selector is
+ * scoped to the settings classes so mail, compose, and Rules keep their own
+ * density and hierarchy. */
+.settings-content {
+  background: color-mix(in srgb, var(--window-bg-color) 95%, #3584e4);
+}
+
+.settings-page-frame {
+  padding: 6px 13px 17px;
+}
+
+.settings-intro-group {
+  margin-bottom: 1px;
+}
+
+.settings-intro-group .boxed-list,
+.settings-intro-group row {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.settings-page-intro {
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid rgba(53, 132, 228, .17);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--card-bg-color) 94%, #3584e4);
+  box-shadow: inset 0 1px alpha(white, .14), 0 3px 12px alpha(black, .05);
+}
+
+.settings-page-intro-icon-badge {
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid rgba(53, 132, 228, .20);
+  border-radius: 11px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .12);
+  box-shadow: inset 0 1px alpha(white, .16);
+}
+
+.settings-page-intro-icon {
+  color: #3584e4;
+  -gtk-icon-size: 18px;
+}
+
+.settings-page-intro-copy {
+  min-width: 0;
+}
+
+.settings-page-intro-kicker {
+  color: #3584e4;
+  font-size: .67em;
+  font-weight: 780;
+  letter-spacing: .085em;
+}
+
+.settings-page-intro-title {
+  font-size: 1.12em;
+  font-weight: 790;
+  letter-spacing: -.018em;
+}
+
+.settings-page-intro-description {
+  color: alpha(currentColor, .64);
+  font-size: .83em;
+  line-height: 1.28;
+}
+
+.settings-page-intro-status {
+  padding: 3px 8px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .095);
+  font-size: .72em;
+  font-weight: 720;
+}
+
+.settings-state-badge {
+  padding: 3px 8px;
+  border: 1px solid rgba(53, 132, 228, .16);
+  border-radius: 999px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .085);
+  font-size: .74em;
+  font-weight: 700;
+}
+
+.settings-section {
+  margin-top: 1px;
+}
+
+.settings-section .title-4 {
+  color: alpha(currentColor, .82);
+  font-size: .89em;
+  font-weight: 760;
+  letter-spacing: .012em;
+}
+
+.settings-section > box > label.dim-label {
+  color: alpha(currentColor, .56);
+  font-size: .80em;
+  line-height: 1.28;
+}
+
+/* The boxed list is the section card; the group itself stays transparent so
+ * titles never sit inside a second, redundant surface. */
+.settings-section-card .boxed-list,
+.account-settings-list .boxed-list,
+.account-settings-add .boxed-list {
+  border: 1px solid alpha(currentColor, .105);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--card-bg-color) 97%, #3584e4);
+  box-shadow: inset 0 1px alpha(white, .12), 0 3px 11px alpha(black, .045);
+}
+
+.settings-section-card .boxed-list > row,
+.account-settings-list .boxed-list > row,
+.account-settings-add .boxed-list > row {
+  border-color: alpha(currentColor, .075);
+}
+
+.settings-control-row,
+.settings-action-row,
+.settings-state-row,
+.settings-empty-row,
+.account-settings-row,
+.account-settings-add-row,
+.account-settings-empty {
+  min-height: 44px;
+  background: transparent;
+  transition: background-color 130ms ease-out, box-shadow 130ms ease-out;
+}
+
+.settings-control-row:hover,
+.settings-action-row:hover,
+.account-settings-row:hover,
+.account-settings-add-row:hover {
+  background: rgba(53, 132, 228, .045);
+}
+
+.settings-control-row:focus-within,
+.settings-action-row:focus-within,
+.account-settings-row:focus-within,
+.account-settings-add-row:focus-within {
+  background: rgba(53, 132, 228, .075);
+  box-shadow: inset 3px 0 #3584e4;
+}
+
+.settings-control-row .title,
+.settings-action-row .title,
+.account-settings-row .title,
+.account-settings-add-row .title {
+  font-weight: 680;
+}
+
+.settings-control-row .subtitle,
+.settings-action-row .subtitle,
+.settings-state-row .subtitle,
+.settings-empty-row .subtitle,
+.account-settings-row .subtitle,
+.account-settings-add-row .subtitle,
+.account-settings-empty .subtitle {
+  color: alpha(currentColor, .58);
+  font-size: .82em;
+}
+
+.settings-control-icon {
+  min-width: 28px;
+  min-height: 28px;
+  border: 1px solid rgba(53, 132, 228, .14);
+  border-radius: 9px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .085);
+  -gtk-icon-size: 16px;
+}
+
+.settings-action-chevron {
+  color: alpha(currentColor, .38);
+  -gtk-icon-size: 14px;
+  transition: color 130ms ease-out;
+}
+
+.settings-action-row:hover .settings-action-chevron,
+.account-settings-add-row:hover .settings-action-chevron {
+  color: #3584e4;
+}
+
+.settings-state-row,
+.settings-empty-row,
+.account-settings-empty {
+  color: alpha(currentColor, .75);
+  background: alpha(currentColor, .018);
+}
+
+.settings-state-row.error,
+.automation-status.error,
+.account-settings-status.error {
+  color: #c01c28;
+  background: rgba(224, 27, 36, .065);
+  box-shadow: inset 3px 0 #e01b24;
+}
+
+.settings-empty-action {
+  color: #3584e4;
+  font-weight: 690;
+}
+
+.settings-inline-actions,
+.smart-mailbox-actions,
+.vacation-editor-actions {
+  min-height: 38px;
+  padding: 6px 8px;
+  border-top: 1px solid alpha(currentColor, .075);
+}
+
+.settings-primary-action,
+.settings-feature-card-action,
+.settings-empty-action,
+.settings-section button.suggested-action {
+  min-height: 32px;
+  padding: 2px 13px;
+  border-radius: 9px;
+}
+
+.settings-primary-action,
+.settings-feature-card-action,
+.settings-section button.suggested-action {
+  color: white;
+  background: #3584e4;
+  border-color: #1c71d8;
+  box-shadow: inset 0 1px alpha(white, .23), 0 2px 8px rgba(28, 113, 216, .18);
+}
+
+.settings-primary-action:hover,
+.settings-feature-card-action:hover,
+.settings-section button.suggested-action:hover {
+  background: #1c71d8;
+}
+
+.settings-secondary-action,
+.settings-section button:not(.flat):not(.suggested-action) {
+  min-height: 30px;
+  border-radius: 9px;
+}
+
+.settings-feature-card {
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid rgba(53, 132, 228, .18);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-bg-color) 92%, #3584e4);
+  box-shadow: inset 0 1px alpha(white, .14), 0 3px 11px alpha(black, .045);
+}
+
+.settings-feature-card-icon-badge {
+  min-width: 34px;
+  min-height: 34px;
+  border: 1px solid rgba(53, 132, 228, .20);
+  border-radius: 10px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .12);
+}
+
+.settings-feature-card-icon {
+  color: #3584e4;
+  -gtk-icon-size: 17px;
+}
+
+.settings-feature-card-copy {
+  min-width: 0;
+}
+
+.settings-feature-card-title,
+.settings-editor-heading {
+  font-weight: 750;
+  letter-spacing: -.01em;
+}
+
+.settings-feature-card-description,
+.settings-editor-note {
+  color: alpha(currentColor, .60);
+  font-size: .82em;
+  line-height: 1.28;
+}
+
+/* Feature cards and editors already provide their own material. */
+.settings-section-rules .boxed-list {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.settings-editor-card,
+.signature-editor-card {
+  margin: 6px 8px 8px;
+  padding: 9px 10px;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 11px;
+  background: alpha(currentColor, .025);
+  box-shadow: inset 0 1px alpha(white, .09);
+}
+
+.settings-editor-card:focus-within,
+.signature-editor-card:focus-within {
+  border-color: rgba(53, 132, 228, .48);
+  background: rgba(53, 132, 228, .04);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, .11), inset 0 1px alpha(white, .10);
+}
+
+.settings-editor,
+.settings-editor text,
+.settings-editor text:focus,
+.signature-editor-card textview,
+.signature-editor-card textview text,
+.vacation-editor textview,
+.vacation-editor textview text {
+  color: inherit;
+  background: transparent;
+}
+
+.settings-editor-note {
+  padding: 0 2px;
+}
+
+.settings-section entry,
+.settings-section spinbutton,
+.settings-section dropdown,
+.settings-section textview,
+.settings-section scrolledwindow,
+.settings-section button {
+  transition: background-color 130ms ease-out, border-color 130ms ease-out,
+              box-shadow 130ms ease-out;
+}
+
+.settings-section entry:focus,
+.settings-section spinbutton:focus-within,
+.settings-section dropdown:focus-within,
+.settings-section textview:focus,
+.settings-section scrolledwindow:focus-within {
+  border-color: rgba(53, 132, 228, .50);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, .11);
+}
+
+.settings-section switch:checked {
+  background: #3584e4;
+  border-color: #1c71d8;
+}
+
+/* A full-width visual chooser keeps System, Light, and Dark clear without
+ * squeezing them into an action-row suffix. */
+.settings-section-appearance .boxed-list {
+  background: color-mix(in srgb, var(--card-bg-color) 98%, #3584e4);
+}
+
+.appearance-chooser {
+  padding: 8px;
+}
+
+.appearance-options {
+  min-width: 0;
+}
+
+button.appearance-option {
+  min-width: 0;
+  min-height: 90px;
+  padding: 0;
+  color: alpha(currentColor, .78);
+  background: alpha(currentColor, .018);
+  border: 1px solid alpha(currentColor, .11);
+  border-radius: 11px;
+  box-shadow: inset 0 1px alpha(white, .10);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+              box-shadow 140ms ease-out, color 140ms ease-out;
+}
+
+button.appearance-option:hover {
+  color: inherit;
+  background: rgba(53, 132, 228, .055);
+  border-color: rgba(53, 132, 228, .24);
+}
+
+button.appearance-option:checked {
+  color: inherit;
+  background: rgba(53, 132, 228, .105);
+  border-color: rgba(53, 132, 228, .72);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, .13),
+              inset 0 1px alpha(white, .18);
+}
+
+button.appearance-option:focus-visible {
+  outline: 2px solid rgba(53, 132, 228, .70);
+  outline-offset: 2px;
+}
+
+.appearance-option-content {
+  min-width: 0;
+  padding: 6px;
+}
+
+.appearance-option-preview {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid alpha(currentColor, .16);
+  border-radius: 8px;
+  background: #f6f8fb;
+  box-shadow: 0 2px 6px alpha(black, .08);
+}
+
+.appearance-preview-header {
+  min-height: 7px;
+  background: #e6ebf2;
+  border-bottom: 1px solid rgba(28, 43, 58, .10);
+}
+
+.appearance-preview-body {
+  min-height: 25px;
+  background: #fbfcfe;
+}
+
+.appearance-preview-sidebar {
+  min-width: 15px;
+  background: #dce8f4;
+  border-right: 1px solid rgba(28, 43, 58, .08);
+}
+
+.appearance-preview-canvas {
+  padding: 5px 6px;
+}
+
+.appearance-preview-line {
+  min-height: 3px;
+  border-radius: 99px;
+  background: #c5ced8;
+}
+
+.appearance-preview-line-primary {
+  background: #78aeea;
+}
+
+.appearance-option-dark .appearance-option-preview {
+  border-color: rgba(186, 211, 238, .20);
+  background: #162330;
+}
+
+.appearance-option-dark .appearance-preview-header {
+  background: #24384a;
+  border-bottom-color: rgba(212, 229, 247, .10);
+}
+
+.appearance-option-dark .appearance-preview-body {
+  background: #192a39;
+}
+
+.appearance-option-dark .appearance-preview-sidebar {
+  background: #203c56;
+  border-right-color: rgba(212, 229, 247, .09);
+}
+
+.appearance-option-dark .appearance-preview-line {
+  background: #506274;
+}
+
+.appearance-option-dark .appearance-preview-line-primary {
+  background: #4d9af2;
+}
+
+.appearance-option-system .appearance-preview-header {
+  background: linear-gradient(to right, #e6ebf2 0%, #e6ebf2 50%, #24384a 50%, #24384a 100%);
+}
+
+.appearance-option-system .appearance-preview-body {
+  background: linear-gradient(to right, #fbfcfe 0%, #fbfcfe 50%, #192a39 50%, #192a39 100%);
+}
+
+.appearance-option-system .appearance-preview-sidebar {
+  background: linear-gradient(to right, #dce8f4 0%, #dce8f4 50%, #203c56 50%, #203c56 100%);
+}
+
+.appearance-option-system .appearance-preview-line {
+  background: linear-gradient(to right, #c5ced8 0%, #c5ced8 50%, #506274 50%, #506274 100%);
+}
+
+.appearance-option-system .appearance-preview-line-primary {
+  background: linear-gradient(to right, #78aeea 0%, #78aeea 50%, #4d9af2 50%, #4d9af2 100%);
+}
+
+.appearance-option-title {
+  font-size: .84em;
+  font-weight: 750;
+  letter-spacing: -.005em;
+}
+
+.appearance-option-description {
+  min-width: 0;
+  color: alpha(currentColor, .54);
+  font-size: .70em;
+}
+
+.appearance-option-check {
+  color: #3584e4;
+  opacity: 0;
+  -gtk-icon-size: 13px;
+  transition: opacity 120ms ease-out;
+}
+
+button.appearance-option:checked .appearance-option-check {
+  opacity: 1;
+}
+
+.signature-editor-card {
+  min-height: 92px;
+}
+
+.smart-mailbox-editor .boxed-list,
+.vacation-editor .boxed-list {
+  background: rgba(53, 132, 228, .035);
+}
+
+.smart-mailbox-editor .boxed-list:focus-within,
+.vacation-editor .boxed-list:focus-within {
+  border-color: rgba(53, 132, 228, .38);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, .09),
+              inset 0 1px alpha(white, .10), 0 3px 11px alpha(black, .045);
+}
+
+.vacation-status,
+.automation-status,
+.account-settings-status {
+  border-left: 3px solid #3584e4;
+  background: rgba(53, 132, 228, .05);
+}
+
+.quick-step-row,
+.smart-mailbox-row {
+  min-height: 44px;
+}
+
+.quick-step-row button.flat,
+.smart-mailbox-row button.flat,
+.account-settings-row button.flat {
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 9px;
+}
+
+/* Account content follows the same material hierarchy while preserving the
+ * account-specific authentication and destructive actions. */
+.account-settings-page {
+  background: transparent;
+}
+
+.account-summary-group {
+  margin-bottom: 1px;
+}
+
+.account-summary-group .boxed-list,
+.account-summary-group row {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.account-summary-card {
+  padding: 10px 12px;
+  border: 1px solid rgba(53, 132, 228, .17);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--card-bg-color) 95%, #3584e4);
+  box-shadow: inset 0 1px alpha(white, .14), 0 3px 12px alpha(black, .05);
+}
+
+.account-summary-identity {
+  min-width: 210px;
+}
+
+.account-summary-icon-badge {
+  min-width: 34px;
+  min-height: 34px;
+  border: 1px solid rgba(53, 132, 228, .19);
+  border-radius: 10px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .11);
+}
+
+.account-summary-icon {
+  color: #3584e4;
+  -gtk-icon-size: 17px;
+}
+
+.account-summary-copy {
+  min-width: 0;
+}
+
+.account-summary-title {
+  font-size: 1.02em;
+  font-weight: 770;
+  letter-spacing: -.012em;
+}
+
+.account-summary-detail {
+  color: alpha(currentColor, .60);
+  font-size: .80em;
+  line-height: 1.25;
+}
+
+button.account-summary-add {
+  min-height: 34px;
+  padding: 2px 13px;
+  border-radius: 9px;
+  color: white;
+  background: #3584e4;
+  border-color: #1c71d8;
+  box-shadow: inset 0 1px alpha(white, .23), 0 2px 8px rgba(28, 113, 216, .18);
+}
+
+button.account-summary-add:hover {
+  background: #1c71d8;
+}
+
+.account-settings-intro {
+  margin-bottom: 1px;
+}
+
+.account-settings-list,
+.account-settings-add {
+  margin-top: 1px;
+}
+
+.account-settings-list .title-4,
+.account-settings-add .title-4 {
+  color: alpha(currentColor, .82);
+  font-size: .89em;
+  font-weight: 760;
+}
+
+.account-settings-row > box > image,
+.account-settings-add-row > box > image,
+.account-settings-empty > box > image {
+  min-width: 28px;
+  min-height: 28px;
+  border: 1px solid rgba(53, 132, 228, .14);
+  border-radius: 9px;
+  color: #3584e4;
+  background: rgba(53, 132, 228, .085);
+}
+
+.account-settings-add-row {
+  color: inherit;
+}
+
+.account-settings-add-row .title {
+  color: #3584e4;
+}
+
+.account-settings-empty-action {
+  color: #3584e4;
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-headerbar {
+    background: color-mix(in srgb, var(--headerbar-bg-color) 86%, #173452);
+    border-bottom-color: rgba(151, 190, 235, .13);
+    box-shadow: 0 3px 14px alpha(black, .22);
+  }
+
+  .settings-sidebar {
+    background: color-mix(in srgb, var(--window-bg-color) 82%, #173452);
+    border-right-color: rgba(151, 190, 235, .12);
+  }
+
+  .settings-content {
+    background: color-mix(in srgb, var(--window-bg-color) 84%, #132a43);
+  }
+
+  .settings-search,
+  .settings-search:focus-within {
+    color: #edf5ff;
+    background: rgba(31, 52, 73, .82);
+  }
+
+  .settings-search:focus-within {
+    border-color: rgba(91, 159, 244, .72);
+    box-shadow: 0 0 0 2px rgba(53, 132, 228, .20), inset 0 1px alpha(white, .035);
+  }
+
+  .settings-page-intro,
+  .settings-feature-card,
+  .account-summary-card {
+    background: color-mix(in srgb, var(--card-bg-color) 80%, #1c4266);
+    border-color: rgba(111, 170, 239, .22);
+    box-shadow: inset 0 1px alpha(white, .055), 0 4px 14px alpha(black, .16);
+  }
+
+  button.appearance-option {
+    background: rgba(13, 27, 40, .34);
+    border-color: rgba(151, 190, 235, .14);
+    box-shadow: inset 0 1px alpha(white, .035);
+  }
+
+  button.appearance-option:hover {
+    background: rgba(53, 132, 228, .10);
+    border-color: rgba(91, 159, 244, .34);
+  }
+
+  button.appearance-option:checked {
+    background: rgba(53, 132, 228, .17);
+    border-color: rgba(91, 159, 244, .82);
+    box-shadow: 0 0 0 2px rgba(53, 132, 228, .20),
+                inset 0 1px alpha(white, .055);
+  }
+
+  .settings-section-card .boxed-list,
+  .account-settings-list .boxed-list,
+  .account-settings-add .boxed-list {
+    background: color-mix(in srgb, var(--card-bg-color) 90%, #244464);
+    border-color: rgba(151, 190, 235, .13);
+    box-shadow: inset 0 1px alpha(white, .035), 0 4px 13px alpha(black, .15);
+  }
+
+  .settings-control-row:hover,
+  .settings-action-row:hover,
+  .account-settings-row:hover,
+  .account-settings-add-row:hover {
+    background: rgba(76, 143, 222, .085);
+  }
+
+  .settings-control-row:focus-within,
+  .settings-action-row:focus-within,
+  .account-settings-row:focus-within,
+  .account-settings-add-row:focus-within {
+    background: rgba(53, 132, 228, .13);
+  }
+
+  .settings-editor-card,
+  .signature-editor-card {
+    background: rgba(13, 28, 43, .52);
+    border-color: rgba(151, 190, 235, .13);
+    box-shadow: inset 0 1px alpha(white, .025);
+  }
+
+  .settings-editor-card:focus-within,
+  .signature-editor-card:focus-within {
+    background: rgba(19, 45, 69, .70);
+    border-color: rgba(91, 159, 244, .72);
+    box-shadow: 0 0 0 2px rgba(53, 132, 228, .19);
+  }
+
+  .smart-mailbox-editor .boxed-list,
+  .vacation-editor .boxed-list {
+    background: color-mix(in srgb, var(--card-bg-color) 92%, #244d73);
+  }
+
+  .settings-section entry:focus,
+  .settings-section spinbutton:focus-within,
+  .settings-section dropdown:focus-within,
+  .settings-section textview:focus,
+  .settings-section scrolledwindow:focus-within,
+  .settings-editor text,
+  .signature-editor-card textview text,
+  .vacation-editor textview text {
+    color: #edf5ff;
+    background: rgba(15, 31, 47, .78);
+  }
+
+  .settings-section entry placeholder,
+  .settings-editor text placeholder {
+    color: rgba(210, 226, 243, .48);
+  }
+}
+
+/* Final command-bar interaction system ----------------------------------
+ * Toolbar commands are quiet at rest. Every icon keeps the same compact
+ * geometry through hover, press, checked, and keyboard-focus states so the
+ * feedback never turns into a second oversized capsule around the control. */
+.mail-window .mail-header-bar menubutton.apple-toolbar-button,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button,
+.mail-window .mail-header-bar menubutton.app-menu-button {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button,
+.mail-window .mail-header-bar menubutton.app-menu-button > button,
+.mail-window .mail-header-bar .header-back-button,
+.mail-window .mail-header-bar .mail-window-controls button {
+  min-width: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: alpha(currentColor, .78);
+  background: transparent;
+  box-shadow: none;
+  transition: color 110ms ease-out, background-color 110ms ease-out,
+              border-color 110ms ease-out;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button image,
+.mail-window .mail-header-bar menubutton > button image,
+.mail-window .mail-header-bar .header-back-button image,
+.mail-window .mail-header-bar .mail-window-controls button image {
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  opacity: 1;
+  -gtk-icon-size: 16px;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:hover,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button:hover,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button:hover,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button:hover,
+.mail-window .mail-header-bar menubutton.app-menu-button > button:hover,
+.mail-window .mail-header-bar .header-back-button:hover,
+.mail-window .mail-header-bar .mail-window-controls button:hover {
+  color: currentColor;
+  background: alpha(currentColor, .075);
+  border-color: alpha(currentColor, .055);
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:active,
+.mail-window .mail-header-bar .apple-toolbar-button:checked,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button:active,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button:checked,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button:active,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button:checked,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button:active,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button:checked,
+.mail-window .mail-header-bar menubutton.app-menu-button > button:active,
+.mail-window .mail-header-bar menubutton.app-menu-button > button:checked,
+.mail-window .mail-header-bar .header-back-button:active {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .14);
+  border-color: rgba(53, 132, 228, .18);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .16);
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:focus-visible,
+.mail-window .mail-header-bar menubutton > button:focus-visible,
+.mail-window .mail-header-bar .header-back-button:focus-visible,
+.mail-window .mail-header-bar .mail-window-controls button:focus-visible {
+  outline: 2px solid rgba(53, 132, 228, .82);
+  outline-offset: -2px;
+  border-color: transparent;
+}
+
+/* Related commands keep their proximity, without persistent segmented
+ * borders. Individual buttons still receive a complete rounded hover tile. */
+.mail-window .mail-header-bar .apple-toolbar-group,
+.mail-window .mail-header-bar .toolbar-action-cluster,
+.mail-window .mail-header-bar .flag-control {
+  min-height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-action-cluster .apple-toolbar-group .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-action-cluster > .apple-toolbar-button.toolbar-cluster-segment,
+.mail-window .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button,
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button,
+.mail-window .mail-header-bar .flag-control menubutton.toolbar-menu-button > button {
+  min-width: 30px;
+  min-height: 30px;
+  margin: 0 1px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A flag color disclosure is the one true split command: keep the primary
+ * target full-size and make only its arrow segment narrow. */
+.mail-window .mail-header-bar .flag-control > .apple-toolbar-button {
+  margin-right: 0;
+  border-radius: 9px 0 0 9px;
+}
+
+.mail-window .mail-header-bar .flag-control > menubutton.toolbar-menu-button > button {
+  min-width: 18px;
+  margin-left: 0;
+  border-radius: 0 9px 9px 0;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button:hover,
+.mail-window .mail-header-bar .toolbar-action-cluster .apple-toolbar-button:hover,
+.mail-window .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button:hover,
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button:hover,
+.mail-window .mail-header-bar .flag-control menubutton.toolbar-menu-button > button:hover {
+  color: currentColor;
+  background: alpha(currentColor, .075);
+  border-color: alpha(currentColor, .055);
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .flag-control > .apple-toolbar-button:hover {
+  border-radius: 9px 0 0 9px;
+}
+
+.mail-window .mail-header-bar .flag-control > menubutton.toolbar-menu-button > button:hover {
+  border-radius: 0 9px 9px 0;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button:active,
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button:checked,
+.mail-window .mail-header-bar .toolbar-action-cluster .apple-toolbar-button:active,
+.mail-window .mail-header-bar .toolbar-action-cluster .apple-toolbar-button:checked,
+.mail-window .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button:active,
+.mail-window .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button:checked,
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button:active,
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button:checked,
+.mail-window .mail-header-bar .flag-control menubutton.toolbar-menu-button > button:active,
+.mail-window .mail-header-bar .flag-control menubutton.toolbar-menu-button > button:checked {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .14);
+  border-color: rgba(53, 132, 228, .18);
+  border-radius: 9px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .16);
+}
+
+.mail-window .mail-header-bar .flag-control > .apple-toolbar-button:active,
+.mail-window .mail-header-bar .flag-control > .apple-toolbar-button:checked {
+  border-radius: 9px 0 0 9px;
+}
+
+.mail-window .mail-header-bar .flag-control > menubutton.toolbar-menu-button > button:active,
+.mail-window .mail-header-bar .flag-control > menubutton.toolbar-menu-button > button:checked {
+  border-radius: 0 9px 9px 0;
+}
+
+/* Compose remains easy to find, but behaves like a toolbar command rather
+ * than a raised primary-action slab. */
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button,
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .12);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  color: #155fb0;
+  background: rgba(53, 132, 228, .19);
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button:active {
+  color: #ffffff;
+  background: #3584e4;
+  border-color: #3584e4;
+}
+
+/* Search is the one persistent input material. Its scope control stays flat
+ * inside that surface instead of painting a nested pill. */
+.mail-window .mail-header-bar .toolbar-search-control menubutton.search-scope-button,
+.mail-window .mail-header-bar .toolbar-search-control menubutton.search-scope-button > button {
+  min-height: 28px;
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-radius: 8px 0 0 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .toolbar-search-control menubutton.search-scope-button > button {
+  border: 0;
+  border-right: 1px solid alpha(currentColor, .10);
+}
+
+.mail-window .mail-header-bar .toolbar-search-control menubutton.search-scope-button > button:hover {
+  color: currentColor;
+  background: alpha(currentColor, .065);
+  border-right-color: alpha(currentColor, .13);
+}
+
+/* Secondary content headers use the same stable icon-button grammar. */
+.mail-window .message-list-header button,
+.mail-window .reader-subject-action {
+  min-width: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: alpha(currentColor, .70);
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .message-list-header button:hover,
+.mail-window .reader-subject-action:hover {
+  color: currentColor;
+  background: alpha(currentColor, .07);
+  border-color: alpha(currentColor, .055);
+  box-shadow: none;
+}
+
+.mail-window .message-list-header button:checked,
+.mail-window .reader-subject-action:checked {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .14);
+  border-color: rgba(53, 132, 228, .18);
+  box-shadow: none;
+}
+
+/* The identity mark is one quiet circular material around one glyph. This
+ * avoids the former heavy rounded-square around an already boxed envelope. */
+.mail-window .sidebar-identity-badge {
+  min-width: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .12);
+  box-shadow: none;
+}
+
+.mail-window .sidebar-identity-icon {
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  -gtk-icon-size: 16px;
+}
+
+/* Sender-exception pages retain readable copy even under third-party themes,
+ * and the three page names stay compact enough for the narrow dialog. */
+.sender-lists-dialog viewswitcher button {
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  color: alpha(currentColor, .72);
+  font-size: .90em;
+}
+
+.sender-lists-dialog viewswitcher button label {
+  color: inherit;
+  opacity: 1;
+}
+
+.sender-lists-dialog viewswitcher button:checked {
+  color: #1c71d8;
+}
+
+.sender-lists-images-page,
+.sender-lists-images-page .settings-page-intro-title,
+.settings-section-remote-image-senders,
+.settings-section-remote-image-senders .title-4,
+.settings-section-sender-lists .settings-action-row .title {
+  color: alpha(currentColor, .94);
+}
+
+.sender-lists-images-page .settings-page-intro-description,
+.sender-lists-images-page .settings-page-intro-status,
+.settings-section-remote-image-senders > box > label.dim-label,
+.settings-section-remote-image-senders .settings-empty-row .subtitle,
+.settings-section-sender-lists .settings-action-row .subtitle {
+  color: alpha(currentColor, .64);
+}
+
+.settings-section-remote-image-senders .settings-empty-row,
+.settings-section-remote-image-senders .settings-empty-row .title {
+  color: alpha(currentColor, .84);
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button,
+.mail-window.mail-dark .mail-header-bar menubutton > button,
+.mail-window.mail-dark .mail-header-bar .header-back-button,
+.mail-window.mail-dark .mail-header-bar .mail-window-controls button,
+.mail-window.mail-dark .message-list-header button,
+.mail-window.mail-dark .reader-subject-action {
+  color: rgba(238, 243, 248, .78);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button:hover,
+.mail-window.mail-dark .mail-header-bar menubutton > button:hover,
+.mail-window.mail-dark .mail-header-bar .header-back-button:hover,
+.mail-window.mail-dark .mail-header-bar .mail-window-controls button:hover,
+.mail-window.mail-dark .message-list-header button:hover,
+.mail-window.mail-dark .reader-subject-action:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, .10);
+  border-color: rgba(255, 255, 255, .035);
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button:active,
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button:checked,
+.mail-window.mail-dark .mail-header-bar menubutton > button:active,
+.mail-window.mail-dark .mail-header-bar menubutton > button:checked,
+.mail-window.mail-dark .message-list-header button:checked,
+.mail-window.mail-dark .reader-subject-action:checked {
+  color: #b7d7ff;
+  background: rgba(83, 155, 245, .22);
+  border-color: rgba(120, 174, 237, .18);
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button.compose-toolbar-button,
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  color: #b7d7ff;
+  background: rgba(83, 155, 245, .18);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  color: #d6e8ff;
+  background: rgba(83, 155, 245, .27);
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button.compose-toolbar-button:active {
+  color: #ffffff;
+  background: #3584e4;
+  border-color: #62a0ea;
+}
+
+.mail-window.mail-dark .sidebar-identity-badge {
+  color: #99c1f1;
+  background: rgba(83, 155, 245, .16);
+  border: 0;
+  box-shadow: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sender-lists-dialog viewswitcher button {
+    color: rgba(237, 245, 255, .72);
+  }
+
+  .sender-lists-dialog viewswitcher button:checked {
+    color: #b7d7ff;
+  }
+
+  .sender-lists-images-page,
+  .sender-lists-images-page .settings-page-intro-title,
+  .settings-section-remote-image-senders,
+  .settings-section-remote-image-senders .title-4,
+  .settings-section-sender-lists .settings-action-row .title {
+    color: rgba(237, 245, 255, .94);
+  }
+
+  .sender-lists-images-page .settings-page-intro-description,
+  .sender-lists-images-page .settings-page-intro-status,
+  .settings-section-remote-image-senders > box > label.dim-label,
+  .settings-section-remote-image-senders .settings-empty-row .subtitle,
+  .settings-section-sender-lists .settings-action-row .subtitle {
+    color: rgba(210, 226, 243, .66);
+  }
+
+  .settings-section-remote-image-senders .settings-empty-row,
+  .settings-section-remote-image-senders .settings-empty-row .title {
+    color: rgba(237, 245, 255, .86);
+  }
+}
+
+/* Adw.StyleManager can force a dark scheme independently of the desktop
+ * media preference (including the in-app visual QA state). Explicit dialog
+ * classes keep these transient surfaces in the same scheme as their parent. */
+.message-security-dialog.message-security-dark .message-security-summary,
+.message-security-dialog.message-security-dark .message-security-section {
+  color: #edf5fd;
+  border-color: rgba(205, 225, 245, .11);
+  background: #1b2631;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+              0 4px 14px rgba(0, 0, 0, .20);
+}
+
+.message-security-dialog.message-security-dark .message-security-summary.danger {
+  color: #fff1f2;
+  border-color: rgba(255, 123, 130, .27);
+  background: #44282d;
+}
+
+.message-security-dialog.message-security-dark .message-security-summary.warning {
+  color: #fff4e6;
+  border-color: rgba(255, 179, 95, .25);
+  background: #443328;
+}
+
+.message-security-dialog.message-security-dark .message-security-summary.trusted {
+  color: #eafaf1;
+  border-color: rgba(92, 210, 148, .22);
+  background: #203a31;
+}
+
+.message-security-dialog.message-security-dark .message-security-summary.danger .message-security-summary-badge {
+  color: #ffb1b5;
+  background: rgba(255, 123, 130, .15);
+}
+
+.message-security-dialog.message-security-dark .message-security-summary.warning .message-security-summary-badge {
+  color: #ffc487;
+  background: rgba(255, 179, 95, .15);
+}
+
+.message-security-dialog.message-security-dark .message-security-summary.trusted .message-security-summary-badge {
+  color: #9ce5bd;
+  background: rgba(92, 210, 148, .14);
+}
+
+.message-security-dialog.message-security-dark .message-security-eyebrow,
+.message-security-dialog.message-security-dark .message-security-summary-status {
+  color: rgba(231, 240, 249, .66);
+}
+
+.message-security-dialog.message-security-dark .message-security-finding {
+  border-color: rgba(205, 225, 245, .075);
+  background: rgba(205, 225, 245, .045);
+}
+
+.message-security-dialog.message-security-dark .message-security-finding-icon {
+  color: #ffc487;
+}
+
+.message-security-dialog.message-security-dark .message-security-finding-text {
+  color: rgba(226, 238, 250, .88);
+}
+
+.message-security-dialog.message-security-dark .message-security-notice {
+  color: rgba(210, 227, 244, .76);
+  border-color: rgba(120, 174, 237, .16);
+  background: #1b2e40;
+}
+
+.message-security-dialog.message-security-dark .message-security-header-badge {
+  color: rgba(205, 225, 245, .68);
+  background: rgba(205, 225, 245, .08);
+}
+
+.message-security-dialog.message-security-dark .message-security-header-scroller {
+  border-color: rgba(205, 225, 245, .11);
+  background: #101820;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, .30);
+}
+
+.message-security-dialog.message-security-dark .message-security-header-text,
+.message-security-dialog.message-security-dark .message-security-header-text text {
+  color: #d9e6f2;
+  background: #101820;
+}
+
+.compose-security-dialog.compose-security-dark .compose-security-options row {
+  color: #edf5fd;
+  background: #1b2631;
+}
+
+/* Final compact toolbar-customizer contract. PreferencesPage intentionally
+ * clamps its readable column; seven 68px controls fit that column without
+ * forcing the arrangement section below the fold. */
+.toolbar-customization-dialog .toolbar-customization-page {
+  padding: 4px 10px 12px;
+}
+
+.toolbar-customization-dialog .toolbar-customization-intro {
+  padding: 10px 12px;
+}
+
+.toolbar-customization-dialog .toolbar-customization-section {
+  margin-top: 0;
+}
+
+.toolbar-customization-dialog .toolbar-palette {
+  padding: 6px;
+}
+
+.toolbar-customization-dialog .toolbar-palette-item {
+  min-width: 68px;
+  min-height: 50px;
+  padding: 4px 2px;
+  border-radius: 9px;
+  font-size: .88em;
+}
+
+.toolbar-customization-dialog .toolbar-palette-icon-badge {
+  min-width: 27px;
+  min-height: 27px;
+  border-radius: 8px;
+}
+
+.toolbar-customization-dialog .toolbar-preview {
+  padding: 7px;
+}
+
+.toolbar-customization-dialog .toolbar-preview-item {
+  min-width: 88px;
+  min-height: 70px;
+  padding: 6px;
+  border-radius: 10px;
+  font-size: .88em;
+}
+
+.toolbar-customization-dialog .toolbar-preview-icon-badge {
+  min-width: 25px;
+  min-height: 25px;
+  border-radius: 8px;
+}
+
+.toolbar-customization-dialog .toolbar-preview-item button {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 3px;
+  border-radius: 6px;
+}
+
+.toolbar-customization-dialog .toolbar-drop-end {
+  min-width: 70px;
+  min-height: 70px;
+  padding: 6px;
+  border-radius: 10px;
+  font-size: .88em;
+}
+
+.toolbar-customization-dialog .toolbar-reset-row {
+  min-height: 44px;
+  margin-top: 5px;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark toolbarview,
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-page {
+  color: #edf5fd;
+  background: #111922;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark headerbar {
+  color: #f3f7fb;
+  background: #1c2732;
+  border-bottom-color: rgba(205, 225, 245, .10);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-intro {
+  color: #edf5fd;
+  border-color: rgba(120, 174, 237, .20);
+  background: #1b2b3b;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .055),
+              0 4px 14px rgba(0, 0, 0, .18);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-intro-badge {
+  color: #b7d7ff;
+  border-color: rgba(120, 174, 237, .20);
+  background: rgba(83, 155, 245, .16);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .06);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-eyebrow {
+  color: #8fc2ff;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-intro-title,
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-section > box > label.title-4 {
+  color: rgba(239, 246, 253, .96);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-intro-description,
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-section > box > label.dim-label {
+  color: rgba(205, 222, 239, .66);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-palette {
+  color: #edf5fd;
+  border-color: rgba(205, 225, 245, .10);
+  background: #1b2631;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+              0 4px 14px rgba(0, 0, 0, .17);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-palette-item {
+  color: rgba(229, 239, 249, .90);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-palette flowboxchild:hover .toolbar-palette-item,
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-palette-item:hover {
+  color: #d7eaff;
+  border-color: rgba(120, 174, 237, .23);
+  background: rgba(83, 155, 245, .14);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .05);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-palette-icon-badge,
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-icon-badge {
+  color: #b7d7ff;
+  border-color: rgba(120, 174, 237, .18);
+  background: rgba(83, 155, 245, .15);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-scroller {
+  color: #edf5fd;
+  border-color: rgba(205, 225, 245, .10);
+  background: #151f29;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, .22);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-item {
+  color: rgba(229, 239, 249, .91);
+  border-color: rgba(205, 225, 245, .11);
+  background: #202c38;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+              0 3px 9px rgba(0, 0, 0, .18);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-item:hover {
+  border-color: rgba(120, 174, 237, .28);
+  background: #243444;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-controls {
+  border-color: rgba(205, 225, 245, .09);
+  background: rgba(8, 15, 22, .35);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-item button {
+  color: rgba(213, 229, 245, .74);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-preview-item button:hover {
+  color: #d7eaff;
+  background: rgba(83, 155, 245, .18);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-drop-end {
+  color: #9ac7fa;
+  border-color: rgba(120, 174, 237, .30);
+  background: rgba(83, 155, 245, .07);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-reset-row {
+  color: #edf5fd;
+  border-color: rgba(205, 225, 245, .10);
+  background: #1b2631;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-reset-button {
+  color: #b7d7ff;
+  border-color: rgba(120, 174, 237, .18);
+  background: rgba(83, 155, 245, .13);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-reset-button:hover {
+  background: rgba(83, 155, 245, .21);
+}
+
+.toolbar-customization-dialog .toolbar-customization-done {
+  min-width: 58px;
+  min-height: 30px;
+  padding: 1px 12px;
+  border: 1px solid rgba(28, 113, 216, .34);
+  border-radius: 9px;
+  color: #ffffff;
+  background: #3584e4;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .16);
+  font-weight: 700;
+}
+
+.toolbar-customization-dialog .toolbar-customization-done:hover {
+  background: #1c71d8;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-done {
+  color: #ffffff;
+  border-color: rgba(183, 215, 255, .24);
+  background: #3584e4;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .14);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-customization-done:hover {
+  background: #4b94eb;
+}
+
+/* Toolbar editor: two predictable lists replace the clipped icon palette.
+ * Every operation stays visible and the colors inherit the app theme. */
+.toolbar-customization-dialog .toolbar-editor-content {
+  color: var(--window-fg-color);
+  background: transparent;
+}
+
+.toolbar-customization-dialog .toolbar-editor-explanation {
+  color: alpha(currentColor, .72);
+  font-size: .94em;
+}
+
+.toolbar-customization-dialog .toolbar-editor-pane {
+  border: 1px solid alpha(currentColor, .12);
+  border-radius: 13px;
+  background: var(--view-bg-color);
+  box-shadow: 0 2px 9px alpha(black, .07);
+}
+
+.toolbar-customization-dialog .toolbar-editor-pane-heading {
+  min-height: 46px;
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid alpha(currentColor, .10);
+  background: alpha(currentColor, .025);
+}
+
+.toolbar-customization-dialog .toolbar-editor-count {
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: alpha(currentColor, .72);
+  background: alpha(currentColor, .08);
+  font-size: .82em;
+  font-weight: 650;
+}
+
+.toolbar-customization-dialog .toolbar-editor-scroller,
+.toolbar-customization-dialog .toolbar-editor-list {
+  color: inherit;
+  background: transparent;
+}
+
+.toolbar-customization-dialog .toolbar-editor-row {
+  min-height: 48px;
+  padding: 0;
+  border-bottom: 1px solid alpha(currentColor, .075);
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.toolbar-customization-dialog .toolbar-editor-row:hover {
+  background: alpha(currentColor, .045);
+}
+
+.toolbar-customization-dialog .toolbar-editor-icon {
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 9px;
+  color: var(--accent-color);
+  background: alpha(var(--accent-color), .11);
+}
+
+.toolbar-customization-dialog .toolbar-editor-row-action,
+.toolbar-customization-dialog .toolbar-editor-small-button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.toolbar-customization-dialog .toolbar-editor-row-action:not(:disabled) {
+  color: var(--accent-color);
+}
+
+.toolbar-customization-dialog .toolbar-editor-row-controls {
+  border-radius: 8px;
+  background: alpha(currentColor, .035);
+}
+
+.toolbar-customization-dialog .toolbar-editor-row-controls button.destructive-action:not(:hover) {
+  color: alpha(currentColor, .68);
+  background: transparent;
+}
+
+.toolbar-customization-dialog .toolbar-editor-footer {
+  min-height: 34px;
+}
+
+.toolbar-customization-dialog .toolbar-editor-reset {
+  min-height: 32px;
+  padding: 1px 11px;
+  border-radius: 9px;
+}
+
+.toolbar-customization-dialog .toolbar-editor-hint {
+  font-size: .84em;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-editor-content {
+  color: #edf5fd;
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-editor-pane {
+  border-color: rgba(205, 225, 245, .11);
+  background: #18232e;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, .20);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-editor-pane-heading {
+  border-bottom-color: rgba(205, 225, 245, .09);
+  background: rgba(255, 255, 255, .025);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-editor-row {
+  border-bottom-color: rgba(205, 225, 245, .065);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-editor-row:hover {
+  background: rgba(130, 180, 235, .07);
+}
+
+.toolbar-customization-dialog.toolbar-customization-dark .toolbar-editor-icon {
+  color: #b7d7ff;
+  background: rgba(83, 155, 245, .15);
+}
+
+/* Message Security is a compact inspection sheet. The verdict and individual
+ * status icons carry meaning; the surrounding surfaces stay quiet. */
+.message-security-dialog .message-security-content {
+  color: var(--window-fg-color);
+}
+
+.message-security-dialog .message-security-verdict {
+  padding: 12px 13px;
+  border: 1px solid alpha(currentColor, .13);
+  border-radius: 13px;
+  background: var(--card-bg-color);
+}
+
+.message-security-dialog .message-security-verdict.neutral {
+  border-color: alpha(var(--accent-color), .20);
+}
+
+.message-security-dialog .message-security-verdict.trusted {
+  border-color: rgba(38, 162, 105, .25);
+}
+
+.message-security-dialog .message-security-verdict.warning {
+  border-color: rgba(230, 126, 34, .30);
+}
+
+.message-security-dialog .message-security-verdict.danger {
+  border-color: rgba(224, 27, 36, .31);
+}
+
+.message-security-dialog .message-security-verdict-badge {
+  min-width: 38px;
+  min-height: 38px;
+  border-radius: 11px;
+  color: var(--accent-color);
+  background: alpha(var(--accent-color), .11);
+}
+
+.message-security-dialog .message-security-verdict.trusted .message-security-verdict-badge {
+  color: #1f8c59;
+  background: rgba(38, 162, 105, .13);
+}
+
+.message-security-dialog .message-security-verdict.warning .message-security-verdict-badge {
+  color: #b75c00;
+  background: rgba(230, 126, 34, .14);
+}
+
+.message-security-dialog .message-security-verdict.danger .message-security-verdict-badge {
+  color: #c01c28;
+  background: rgba(224, 27, 36, .13);
+}
+
+.message-security-dialog .message-security-eyebrow {
+  color: alpha(currentColor, .60);
+  font-size: .78em;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.message-security-dialog .message-security-verdict-title {
+  font-size: 1.08em;
+  font-weight: 730;
+}
+
+.message-security-dialog .message-security-verdict-description {
+  color: alpha(currentColor, .70);
+  font-size: .88em;
+}
+
+.message-security-dialog .message-security-card {
+  border: 1px solid alpha(currentColor, .12);
+  border-radius: 12px;
+  background: var(--card-bg-color);
+}
+
+.message-security-dialog .message-security-card-heading {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-bottom: 1px solid alpha(currentColor, .09);
+}
+
+.message-security-dialog .message-security-status-pill,
+.message-security-dialog .message-security-header-badge {
+  min-height: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: alpha(currentColor, .66);
+  background: alpha(currentColor, .07);
+  font-size: .76em;
+  font-weight: 620;
+}
+
+.message-security-dialog .message-security-status-pill.passed {
+  color: #18784a;
+  background: rgba(38, 162, 105, .12);
+}
+
+.message-security-dialog .message-security-identity-row {
+  min-height: 30px;
+  padding: 3px 10px;
+}
+
+.message-security-dialog .message-security-identity-row + .message-security-identity-row {
+  border-top: 1px solid alpha(currentColor, .075);
+}
+
+.message-security-dialog .message-security-identity-icon {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 4px;
+  border-radius: 9px;
+  color: var(--accent-color);
+  background: alpha(var(--accent-color), .10);
+}
+
+.message-security-dialog .message-security-protection-row {
+  min-height: 38px;
+  padding: 6px 11px;
+  border-bottom: 1px solid alpha(currentColor, .075);
+}
+
+.message-security-dialog .message-security-protection-icon {
+  color: var(--accent-color);
+}
+
+.message-security-dialog .message-security-protection-status {
+  color: alpha(currentColor, .72);
+  font-size: .86em;
+}
+
+.message-security-dialog .message-security-auth-grid {
+  padding: 6px 9px 5px;
+}
+
+.message-security-dialog .message-security-auth-item {
+  min-height: 34px;
+  padding: 3px 7px;
+  border: 1px solid alpha(currentColor, .09);
+  border-radius: 9px;
+  background: alpha(currentColor, .025);
+}
+
+.message-security-dialog .message-security-auth-icon {
+  color: alpha(currentColor, .58);
+}
+
+.message-security-dialog .message-security-auth-item.passed .message-security-auth-icon,
+.message-security-dialog .message-security-auth-item.passed .message-security-auth-value {
+  color: #1f8c59;
+}
+
+.message-security-dialog .message-security-auth-item.failed .message-security-auth-icon,
+.message-security-dialog .message-security-auth-item.failed .message-security-auth-value {
+  color: #c01c28;
+}
+
+.message-security-dialog .message-security-auth-value {
+  font-size: .90em;
+  font-weight: 680;
+}
+
+.message-security-dialog .message-security-auth-notice {
+  padding: 0 10px 6px;
+  color: alpha(currentColor, .62);
+  font-size: .80em;
+}
+
+.message-security-dialog .message-security-finding-row {
+  padding: 8px 11px;
+  border-bottom: 1px solid alpha(currentColor, .075);
+  color: #b75c00;
+}
+
+.message-security-dialog .message-security-finding-row label {
+  color: var(--window-fg-color);
+  font-size: .88em;
+}
+
+.message-security-dialog .message-security-details-button {
+  min-height: 50px;
+  padding: 5px 10px;
+  border-radius: 11px;
+  color: inherit;
+  background: transparent;
+}
+
+.message-security-dialog .message-security-details-button:hover,
+.message-security-dialog .message-security-details-button:checked {
+  background: alpha(currentColor, .045);
+}
+
+.message-security-dialog .message-security-advanced .message-security-header-scroller {
+  min-height: 180px;
+  margin: 0 10px 10px;
+  border-radius: 9px;
+}
+
+.message-security-dialog.message-security-dark .message-security-surface,
+.message-security-dialog.message-security-dark .message-security-page {
+  color: #edf5fd;
+  background: #111922;
+}
+
+.message-security-dialog.message-security-dark .message-security-headerbar,
+.message-security-dialog.message-security-dark .message-security-action-bar {
+  color: #f3f7fb;
+  background: #1c2732;
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict,
+.message-security-dialog.message-security-dark .message-security-card {
+  color: #edf5fd;
+  background: #18232e;
+  border-color: rgba(205, 225, 245, .11);
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.neutral {
+  border-color: rgba(120, 174, 237, .22);
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.trusted {
+  border-color: rgba(92, 210, 148, .22);
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.warning {
+  border-color: rgba(255, 179, 95, .25);
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.danger {
+  border-color: rgba(255, 123, 130, .27);
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.trusted .message-security-verdict-badge,
+.message-security-dialog.message-security-dark .message-security-auth-item.passed .message-security-auth-icon,
+.message-security-dialog.message-security-dark .message-security-auth-item.passed .message-security-auth-value,
+.message-security-dialog.message-security-dark .message-security-status-pill.passed {
+  color: #9ce5bd;
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.warning .message-security-verdict-badge,
+.message-security-dialog.message-security-dark .message-security-finding-row {
+  color: #ffc487;
+}
+
+.message-security-dialog.message-security-dark .message-security-verdict.danger .message-security-verdict-badge,
+.message-security-dialog.message-security-dark .message-security-auth-item.failed .message-security-auth-icon,
+.message-security-dialog.message-security-dark .message-security-auth-item.failed .message-security-auth-value {
+  color: #ffb1b5;
+}
+
+.message-security-dialog.message-security-dark .message-security-card-heading,
+.message-security-dialog.message-security-dark .message-security-protection-row,
+.message-security-dialog.message-security-dark .message-security-finding-row,
+.message-security-dialog.message-security-dark .message-security-identity-row + .message-security-identity-row {
+  border-color: rgba(205, 225, 245, .075);
+}
+
+.message-security-dialog.message-security-dark .message-security-auth-item {
+  border-color: rgba(205, 225, 245, .085);
+  background: rgba(205, 225, 245, .035);
+}
+
+.message-security-dialog.message-security-dark .message-security-finding-row label {
+  color: #edf5fd;
+}
+
+/* Compose, Reply, Reply All, and Forward share one calm palette. These final
+ * scoped rules deliberately replace the older charcoal/settings-form layers. */
+window.compose-window,
+window.compose-window.background,
+window.compose-window > contents,
+.compose-window toolbarview,
+.compose-window .compose-root {
+  color: #26384a;
+  background-color: #f7f9fc;
+}
+
+.compose-window .compose-header-bar,
+.compose-window headerbar {
+  min-height: 44px;
+  padding: 4px 8px;
+  color: #203246;
+  background-color: #edf3f8;
+  border-bottom: 1px solid rgba(44, 73, 104, .11);
+  box-shadow: 0 2px 8px rgba(31, 55, 80, .06);
+}
+
+.compose-window headerbar button.compose-cancel-button,
+.compose-window headerbar button.compose-send-later-button {
+  color: rgba(32, 50, 70, .78);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.compose-window headerbar button.compose-cancel-button:hover,
+.compose-window headerbar button.compose-send-later-button:hover {
+  color: #203246;
+  background: rgba(44, 73, 104, .075);
+}
+
+.compose-window .compose-header-fields {
+  padding: 4px 8px 3px;
+  color: #26384a;
+  background: #f7f9fc;
+  border-bottom: 1px solid rgba(44, 73, 104, .09);
+}
+
+.compose-window .compose-field-row {
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.compose-window .compose-field-row:focus-within {
+  background: transparent;
+}
+
+.compose-window .compose-field-label {
+  min-width: 44px;
+  color: rgba(50, 72, 94, .62);
+  font-size: .88em;
+  font-weight: 600;
+}
+
+.compose-window .compose-line-entry,
+.compose-window .compose-line-entry:focus,
+.compose-window .compose-line-entry:focus-within {
+  min-height: 34px;
+  padding: 0 3px;
+  color: #26384a;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+.compose-window .compose-line-entry.error {
+  background: rgba(224, 27, 36, .055);
+  box-shadow: inset 0 0 0 1px rgba(224, 27, 36, .36);
+}
+
+.compose-window .compose-subject-entry {
+  font-size: 1em;
+  font-weight: 620;
+}
+
+.compose-window .compose-field-separator {
+  margin-left: 66px;
+  margin-right: 10px;
+  color: rgba(44, 73, 104, .18);
+  opacity: 1;
+}
+
+.compose-window .compose-from-selector button,
+.compose-window .compose-from-selector button:focus,
+.compose-window .compose-from-selector button:focus-visible {
+  min-height: 34px;
+  padding: 0 3px;
+  color: #26384a;
+  background: transparent;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+.compose-window .compose-from-selector button:hover {
+  background: rgba(44, 73, 104, .055);
+}
+
+.compose-window .compose-recipient-actions {
+  margin-left: 4px;
+}
+
+.compose-window .compose-recipient-reveal {
+  min-width: 30px;
+  min-height: 28px;
+  margin: 0 1px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 7px;
+  color: #1c71d8;
+  background: transparent;
+  box-shadow: none;
+}
+
+.compose-window .compose-recipient-reveal:hover,
+.compose-window .compose-recipient-reveal:active,
+.compose-window .compose-recipient-reveal:checked {
+  color: #155fb4;
+  background: rgba(53, 132, 228, .09);
+  box-shadow: none;
+}
+
+.compose-window .compose-editor-scroller,
+.compose-window .compose-editor-scroller > viewport,
+.compose-window .compose-body,
+.compose-window .compose-body text {
+  color: #26384a;
+  background-color: #ffffff;
+}
+
+.compose-window .compose-body {
+  min-height: 240px;
+  padding: 20px 24px 42px;
+  font-size: 1.01em;
+  line-height: 1.45;
+}
+
+.compose-window .compose-body-placeholder {
+  margin-top: 20px;
+  margin-left: 28px;
+  color: rgba(50, 72, 94, .42);
+  font-size: 1.01em;
+}
+
+.compose-window .compose-actions {
+  min-height: 36px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(44, 73, 104, .10);
+  background: transparent;
+}
+
+.compose-window .compose-actions .linked {
+  min-height: 32px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.compose-window .compose-actions .linked > button,
+.compose-window .compose-actions .linked > menubutton > button {
+  min-width: 32px;
+  min-height: 30px;
+  margin: 0 1px;
+  padding: 4px;
+  border: 0;
+  border-radius: 7px;
+  color: rgba(50, 72, 94, .72);
+  background: transparent;
+  box-shadow: none;
+}
+
+.compose-window .compose-actions .linked > button:first-child,
+.compose-window .compose-actions .linked > button:last-child,
+.compose-window .compose-actions .linked > menubutton:last-child > button {
+  border-radius: 7px;
+}
+
+.compose-window .compose-actions .linked > button:hover,
+.compose-window .compose-actions .linked > menubutton > button:hover {
+  color: #203246;
+  background: rgba(44, 73, 104, .075);
+}
+
+.compose-window .compose-security-button.security-enabled {
+  color: #1c71d8;
+  background: rgba(53, 132, 228, .10);
+}
+
+window.compose-window.compose-dark,
+window.compose-window.compose-dark.background,
+window.compose-window.compose-dark > contents,
+.compose-window.compose-dark toolbarview,
+.compose-window.compose-dark .compose-root {
+  color: #edf5fd;
+  background-color: #111922;
+}
+
+.compose-window.compose-dark .compose-header-bar,
+.compose-window.compose-dark headerbar {
+  color: #f3f7fb;
+  background-color: #1c2732;
+  border-bottom-color: rgba(205, 225, 245, .10);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .20);
+}
+
+.compose-window.compose-dark headerbar button.compose-cancel-button,
+.compose-window.compose-dark headerbar button.compose-send-later-button {
+  color: rgba(222, 234, 246, .78);
+  background: transparent;
+}
+
+.compose-window.compose-dark headerbar button.compose-cancel-button:hover,
+.compose-window.compose-dark headerbar button.compose-send-later-button:hover {
+  color: #f3f7fb;
+  background: rgba(205, 225, 245, .08);
+}
+
+.compose-window.compose-dark .compose-header-fields {
+  color: #edf5fd;
+  background: #16212c;
+  border-bottom-color: rgba(205, 225, 245, .09);
+}
+
+.compose-window.compose-dark .compose-field-label {
+  color: rgba(205, 222, 239, .61);
+}
+
+.compose-window.compose-dark .compose-line-entry,
+.compose-window.compose-dark .compose-line-entry:focus,
+.compose-window.compose-dark .compose-line-entry:focus-within,
+.compose-window.compose-dark .compose-from-selector button,
+.compose-window.compose-dark .compose-from-selector button:focus,
+.compose-window.compose-dark .compose-from-selector button:focus-visible {
+  color: #edf5fd;
+  background: transparent;
+  box-shadow: none;
+}
+
+.compose-window.compose-dark .compose-line-entry.error {
+  background: rgba(255, 123, 130, .07);
+  box-shadow: inset 0 0 0 1px rgba(255, 123, 130, .38);
+}
+
+.compose-window.compose-dark .compose-field-separator {
+  color: rgba(205, 225, 245, .10);
+}
+
+.compose-window.compose-dark .compose-from-selector button:hover,
+.compose-window.compose-dark .compose-recipient-reveal:hover,
+.compose-window.compose-dark .compose-recipient-reveal:active,
+.compose-window.compose-dark .compose-recipient-reveal:checked {
+  background: rgba(120, 174, 237, .10);
+}
+
+.compose-window.compose-dark .compose-recipient-reveal {
+  color: #8fc2ff;
+}
+
+.compose-window.compose-dark .compose-editor-scroller,
+.compose-window.compose-dark .compose-editor-scroller > viewport,
+.compose-window.compose-dark .compose-body,
+.compose-window.compose-dark .compose-body text {
+  color: #edf5fd;
+  background-color: #111922;
+}
+
+.compose-window.compose-dark .compose-body-placeholder {
+  color: rgba(205, 222, 239, .40);
+}
+
+.compose-window.compose-dark .compose-actions {
+  border-top-color: rgba(205, 225, 245, .09);
+}
+
+.compose-window.compose-dark .compose-actions .linked > button,
+.compose-window.compose-dark .compose-actions .linked > menubutton > button {
+  color: rgba(213, 229, 245, .72);
+}
+
+.compose-window.compose-dark .compose-actions .linked > button:hover,
+.compose-window.compose-dark .compose-actions .linked > menubutton > button:hover {
+  color: #edf5fd;
+  background: rgba(205, 225, 245, .08);
+}
+
+.compose-window.compose-dark .compose-security-button.security-enabled {
+  color: #9ac7fa;
+  background: rgba(83, 155, 245, .13);
 }

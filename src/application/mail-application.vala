@@ -308,6 +308,21 @@ public class MailApplication : Adw.Application {
             new ProviderChooserDialog ().present (window);
         string? qa_preferences = Environment.get_variable ("MAILFICIENT_QA_PREFERENCES");
         if (qa_preferences != null && qa_preferences != "" && qa_preferences != "0") window.show_preferences ();
+        if (Environment.get_variable ("MAILFICIENT_QA_RULES") == "1") {
+            try {
+                if (cache.list_mail_rules ().size == 0) {
+                    cache.add_mail_rule ("File build reports", "", MailRuleField.SUBJECT,
+                        "build report", MailRuleAction.LABEL, "Builds");
+                    var follow_up = new MailRule (0, "Flag messages from VIPs", "",
+                        MailRuleField.SENDER, "@example.com", MailRuleAction.FLAG);
+                    follow_up.exceptions.add (new MailRuleCondition (
+                        MailRuleField.SUBJECT, "newsletter"));
+                    follow_up.stop_processing = true;
+                    cache.save_mail_rule (follow_up);
+                }
+            } catch (Error error) { warning ("Could not prepare QA rules: %s", error.message); }
+            window.show_rules ();
+        }
     }
 
     private void show_startup_error (Error error) {

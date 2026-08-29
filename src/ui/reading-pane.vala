@@ -11,6 +11,8 @@ public class ReadingPane : Gtk.Box {
     public signal void calendar_action_completed (string message);
     public signal void calendar_action_failed (Error error);
     public signal void add_account_requested ();
+    public signal void retry_requested ();
+    public signal void account_settings_requested ();
     private Gtk.Box content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
     private Gtk.ScrolledWindow scroller = new Gtk.ScrolledWindow ();
     private ReceivedAttachmentService attachment_service;
@@ -34,6 +36,7 @@ public class ReadingPane : Gtk.Box {
     private int constrained_width;
     private bool shutting_down;
     private bool suspended;
+    private Gtk.Widget? recovery_notice;
 
     public ReadingPane (ReceivedAttachmentService attachment_service,
                         RemoteContentPolicy remote_content_policy,
@@ -100,10 +103,12 @@ public class ReadingPane : Gtk.Box {
         calendar_cancellable = new Cancellable ();
         var header = new Gtk.Box (Gtk.Orientation.VERTICAL, 7); header.hexpand = true; header.halign = Gtk.Align.FILL; header.add_css_class ("message-header");
         var subject_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8); subject_line.hexpand = true; subject_line.halign = Gtk.Align.FILL;
+        subject_line.add_css_class ("reader-subject-line");
         var subject = new Gtk.Label (message.subject); subject.xalign = 0; subject.wrap = true; subject.hexpand = true; subject.add_css_class ("message-subject"); subject_line.append (subject);
         var vip = new Gtk.ToggleButton (); vip.icon_name = sender_is_vip ? "starred-symbolic" : "non-starred-symbolic";
         vip.active = sender_is_vip; vip.tooltip_text = sender_is_vip ? "Remove sender from VIPs" : "Add sender to VIPs";
         Accessibility.label (vip, vip.tooltip_text); vip.add_css_class ("flat");
+        vip.add_css_class ("reader-subject-action");
         weak Gtk.ToggleButton weak_vip = vip;
         vip.toggled.connect (() => {
             if (weak_vip == null) return;
@@ -113,6 +118,7 @@ public class ReadingPane : Gtk.Box {
         });
         var create_meeting = new Gtk.Button.from_icon_name ("appointment-new-symbolic");
         create_meeting.add_css_class ("flat");
+        create_meeting.add_css_class ("reader-subject-action");
         create_meeting.tooltip_text = "Create Meeting from Email";
         Accessibility.label (create_meeting, "Create meeting from this email");
         create_meeting.clicked.connect (() =>
@@ -203,8 +209,11 @@ public class ReadingPane : Gtk.Box {
 
     private void append_conversation_message (Message message, bool expanded) {
         var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); card.hexpand = true; card.halign = Gtk.Align.FILL; card.add_css_class ("conversation-message");
+        card.add_css_class (expanded ? "conversation-expanded" : "conversation-collapsed");
         var header_button = new Gtk.Button (); header_button.hexpand = true; header_button.halign = Gtk.Align.FILL; header_button.add_css_class ("flat");
+        header_button.add_css_class ("conversation-header-button");
         var sender_line = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+        sender_line.add_css_class ("conversation-sender-line");
         sender_line.hexpand = true; sender_line.halign = Gtk.Align.FILL;
         var sender_avatar = new Gtk.Button.with_label (message.initials ());
         sender_avatar.set_size_request (36, 36);
@@ -214,8 +223,11 @@ public class ReadingPane : Gtk.Box {
         sender_avatar.can_target = false;
         sender_avatar.add_css_class ("sender-avatar");
         sender_avatar.add_css_class ("circular");
+        sender_avatar.add_css_class ("avatar-tone-%u".printf (
+            str_hash (message.sender_address) % 6));
         sender_line.append (sender_avatar);
         var sender_text = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); sender_text.hexpand = true;
+        sender_text.add_css_class ("conversation-sender-meta");
         var primary = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
         var sender = new Gtk.Label (message.sender_name);
         sender.xalign = 0; sender.hexpand = true;
@@ -237,15 +249,18 @@ public class ReadingPane : Gtk.Box {
         header_button.child = sender_line; header_button.tooltip_text = expanded ? "Message details" : "Expand message";
         Accessibility.label (header_button, "%s message from %s".printf (expanded ? "Message details" : "Expand", message.sender_name));
         var header_actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 2);
+        header_actions.add_css_class ("conversation-header-actions");
         header_actions.hexpand = true; header_actions.append (header_button);
         var details_button = new Gtk.Button.from_icon_name ("security-high-symbolic");
         details_button.add_css_class ("flat"); details_button.valign = Gtk.Align.CENTER;
+        details_button.add_css_class ("conversation-details-button");
         details_button.tooltip_text = "Message security and raw headers";
         Accessibility.label (details_button, "View message security and raw headers");
-        details_button.clicked.connect (() => show_security_details.begin (message));
+        details_button.clicked.connect (() => show_security_details (message));
         header_actions.append (details_button); card.append (header_actions);
         var revealer = new Gtk.Revealer (); revealer.hexpand = true; revealer.halign = Gtk.Align.FILL; revealer.reveal_child = expanded; revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
-        var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); message_content.hexpand = true; message_content.halign = Gtk.Align.FILL; revealer.child = message_content;
+        var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); message_content.hexpand = true; message_content.halign = Gtk.Align.FILL;
+        message_content.add_css_class ("conversation-content"); revealer.child = message_content;
         bool content_loaded = false;
         if (expanded) {
             populate_message_content (message, message_content);
@@ -352,7 +367,10 @@ public class ReadingPane : Gtk.Box {
     public void show_empty () {
         if (shutting_down) return;
         current = null; clear ();
-        var empty = new Adw.StatusPage (); empty.icon_name = "mail-read-symbolic"; empty.title = "Select a Message"; empty.description = "Choose a message from the list to read it."; empty.vexpand = true; empty.add_css_class ("empty-state"); content.append (empty);
+        var empty = new Adw.StatusPage (); empty.icon_name = "mail-read-symbolic";
+        empty.title = "No Message Selected";
+        empty.description = "Messages you select will appear here.";
+        empty.vexpand = true; empty.add_css_class ("empty-state"); content.append (empty);
     }
 
     // The workspace stack hides the reader while tasks are open. Preserve the
@@ -391,6 +409,8 @@ public class ReadingPane : Gtk.Box {
         current = null; clear ();
         var status = new Adw.StatusPage (); status.title = "Loading Message";
         status.description = "Opening the cached message content…"; status.vexpand = true;
+        status.accessible_role = Gtk.AccessibleRole.STATUS;
+        status.update_state (Gtk.AccessibleState.BUSY, true, -1);
         var spinner = new Gtk.Spinner (); spinner.spinning = true; spinner.set_size_request (32, 32);
         status.child = spinner; content.append (status);
     }
@@ -426,16 +446,38 @@ public class ReadingPane : Gtk.Box {
 
     public void show_error (UserFacingError error) {
         if (shutting_down) return;
+        if (current != null) {
+            if (recovery_notice != null && recovery_notice.get_parent () == content)
+                content.remove (recovery_notice);
+            var banner = new Adw.Banner (error.title);
+            banner.button_label = "Try Again"; banner.revealed = true;
+            banner.accessible_role = Gtk.AccessibleRole.ALERT;
+            banner.update_property (Gtk.AccessibleProperty.DESCRIPTION,
+                "%s %s".printf (error.description, error.suggestion), -1);
+            banner.button_clicked.connect (() => {
+                banner.revealed = false; recovery_notice = null; retry_requested ();
+            });
+            recovery_notice = banner; content.prepend (banner);
+            return;
+        }
         current = null; clear ();
         var status = new Adw.StatusPage (); status.icon_name = "dialog-warning-symbolic";
         status.title = error.title; status.description = "%s\n%s".printf (error.description, error.suggestion);
-        status.vexpand = true; status.add_css_class ("error-state");
+        status.vexpand = true; status.add_css_class ("error-state"); status.accessible_role = Gtk.AccessibleRole.ALERT;
+        var controls = new Gtk.Box (Gtk.Orientation.VERTICAL, 10); controls.halign = Gtk.Align.CENTER;
+        var actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8); actions.halign = Gtk.Align.CENTER;
+        var settings_button = new Gtk.Button.with_label ("Account Settings");
+        settings_button.clicked.connect (() => account_settings_requested ());
+        var retry = new Gtk.Button.with_label ("Try Again"); retry.add_css_class ("suggested-action");
+        retry.clicked.connect (() => retry_requested ());
+        actions.append (settings_button); actions.append (retry); controls.append (actions);
         if (error.technical_detail != "") {
             var details = new Gtk.Expander ("Technical Details");
             details.halign = Gtk.Align.CENTER;
             var label = new Gtk.Label (error.technical_detail); label.selectable = true; label.wrap = true;
-            details.child = label; status.child = details;
+            details.child = label; controls.append (details);
         }
+        status.child = controls;
         content.append (status);
     }
     private void clear () {
@@ -459,6 +501,7 @@ public class ReadingPane : Gtk.Box {
         html_views.clear ();
         html_layout_handlers.clear ();
         html_link_handlers.clear ();
+        recovery_notice = null;
         while (content.get_first_child () != null)
             content.remove ((Gtk.Widget) content.get_first_child ());
     }
@@ -554,7 +597,7 @@ public class ReadingPane : Gtk.Box {
         var actions = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6); actions.halign = Gtk.Align.START;
         var details = new Gtk.Button.with_mnemonic ("_Security Details");
         Accessibility.label (details, "View message security details and raw headers");
-        details.clicked.connect (() => show_security_details.begin (message)); actions.append (details);
+        details.clicked.connect (() => show_security_details (message)); actions.append (details);
         var report = new Gtk.Button.with_mnemonic ("Report _Phishing"); report.add_css_class ("destructive-action");
         Accessibility.label (report, "Report this message as phishing");
         report.clicked.connect (() => phishing_report_requested (message)); actions.append (report);
@@ -580,45 +623,446 @@ public class ReadingPane : Gtk.Box {
         target.append (card);
     }
 
-    private async void show_security_details (Message message) {
-        var parent = get_root () as Gtk.Window; if (parent == null) return;
-        bool safe = sender_is_safe (message); var assessment = message_security.assess (message, safe);
-        var content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 10);
-        var summary = new Gtk.Label (assessment.title); summary.xalign = 0; summary.wrap = true;
-        summary.add_css_class ("heading"); content_box.append (summary);
-        foreach (var finding in assessment.findings) {
-            var label = new Gtk.Label ("• " + finding); label.xalign = 0; label.wrap = true;
-            label.selectable = true; content_box.append (label);
+    private void show_security_details (Message message) {
+        var parent = get_root () as Gtk.Window;
+        if (parent == null) return;
+        bool safe = sender_is_safe (message);
+        var assessment = message_security.assess (message, safe);
+
+        var dialog = new Adw.Dialog ();
+        dialog.title = "Message Security";
+        dialog.presentation_mode = Adw.DialogPresentationMode.FLOATING;
+        dialog.content_width = 700;
+        dialog.content_height = 560;
+        dialog.set_size_request (520, 480);
+        dialog.add_css_class ("message-security-dialog");
+        sync_security_dialog_theme (dialog);
+        Adw.StyleManager.get_default ().notify["dark"].connect (() =>
+            sync_security_dialog_theme (dialog));
+
+        var toolbar = new Adw.ToolbarView ();
+        toolbar.add_css_class ("message-security-surface");
+        var header = new Adw.HeaderBar ();
+        header.show_start_title_buttons = false;
+        header.show_end_title_buttons = false;
+        header.add_css_class ("message-security-headerbar");
+        var window_title = new Adw.WindowTitle (
+            "Message Security", "Sender and authentication checks");
+        header.title_widget = window_title;
+        var done = new Gtk.Button.with_mnemonic ("_Done");
+        done.add_css_class ("suggested-action");
+        done.add_css_class ("message-security-done");
+        done.tooltip_text = "Close message security";
+        Accessibility.label (done, "Close message security");
+        done.clicked.connect (() => dialog.close ());
+        header.pack_end (done);
+        toolbar.add_top_bar (header);
+
+        var content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
+        content_box.add_css_class ("message-security-content");
+
+        string level_class;
+        string verdict_label;
+        string verdict_detail;
+        if (assessment.level == MessageThreatLevel.DANGER) {
+            level_class = "danger";
+            verdict_label = "Authentication failed";
+            verdict_detail = "Treat links, attachments, and requests in this message with caution.";
+        } else if (assessment.level == MessageThreatLevel.CAUTION) {
+            level_class = "warning";
+            verdict_label = "Review before acting";
+            verdict_detail = "One or more sender or authentication details need your attention.";
+        } else if (safe) {
+            level_class = "trusted";
+            verdict_label = safe ? "Known sender" : "No obvious warning signs";
+            verdict_detail = "This address is on your Safe Senders list. Still review unexpected requests.";
+        } else {
+            level_class = "neutral";
+            verdict_label = "No obvious warning signs";
+            verdict_detail = "Mailficient did not find an obvious identity or authentication warning.";
         }
-        var caveat = new Gtk.Label (assessment.authentication_reported ?
-            "Authentication results are reported by the receiving mail system. A pass is useful context, not an instruction to trust links or attachments." :
-            "No SPF, DKIM, or DMARC result was retained for this message. Inspect the headers and sender before acting on sensitive requests.");
-        caveat.xalign = 0; caveat.wrap = true; caveat.add_css_class ("dim-label"); content_box.append (caveat);
-        var heading = new Gtk.Label ("Raw message headers (bounded to 64 KiB)");
-        heading.xalign = 0; heading.add_css_class ("heading"); content_box.append (heading);
-        var headers = new Gtk.TextView (); headers.editable = false; headers.cursor_visible = false;
-        headers.monospace = true; headers.wrap_mode = Gtk.WrapMode.NONE;
-        headers.buffer.text = MessageSecurityService.headers_for_display (message);
+
+        var verdict = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
+        verdict.add_css_class ("message-security-verdict");
+        verdict.add_css_class (level_class);
+        var verdict_badge = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        verdict_badge.halign = Gtk.Align.CENTER;
+        verdict_badge.valign = Gtk.Align.CENTER;
+        verdict_badge.add_css_class ("message-security-verdict-badge");
+        string verdict_icon_name;
+        if (assessment.level >= MessageThreatLevel.CAUTION)
+            verdict_icon_name = "dialog-warning-symbolic";
+        else if (safe)
+            verdict_icon_name = "security-high-symbolic";
+        else
+            verdict_icon_name = "dialog-information-symbolic";
+        var verdict_icon = new Gtk.Image.from_icon_name (verdict_icon_name);
+        verdict_badge.append (verdict_icon);
+        verdict.append (verdict_badge);
+        var verdict_copy = new Gtk.Box (Gtk.Orientation.VERTICAL, 2);
+        verdict_copy.hexpand = true;
+        var verdict_eyebrow = new Gtk.Label (
+            assessment.level >= MessageThreatLevel.CAUTION ? "Needs attention" : "Security review");
+        verdict_eyebrow.xalign = 0;
+        verdict_eyebrow.add_css_class ("message-security-eyebrow");
+        var verdict_title = new Gtk.Label (verdict_label);
+        verdict_title.xalign = 0;
+        verdict_title.wrap = true;
+        verdict_title.add_css_class ("message-security-verdict-title");
+        var verdict_description = new Gtk.Label (verdict_detail);
+        verdict_description.xalign = 0;
+        verdict_description.wrap = true;
+        verdict_description.add_css_class ("message-security-verdict-description");
+        verdict_copy.append (verdict_eyebrow);
+        verdict_copy.append (verdict_title);
+        verdict_copy.append (verdict_description);
+        verdict.append (verdict_copy);
+        content_box.append (verdict);
+
+        var identity = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        identity.add_css_class ("message-security-card");
+        var identity_heading = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        identity_heading.add_css_class ("message-security-card-heading");
+        var identity_title = new Gtk.Label ("Sender Identity");
+        identity_title.xalign = 0;
+        identity_title.hexpand = true;
+        identity_title.add_css_class ("heading");
+        identity_heading.append (identity_title);
+        var safe_status = new Gtk.Label (safe ? "Safe Sender" : "Not marked safe");
+        safe_status.add_css_class ("message-security-status-pill");
+        if (safe) safe_status.add_css_class ("passed");
+        identity_heading.append (safe_status);
+        identity.append (identity_heading);
+
+        var sender_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+        sender_row.add_css_class ("message-security-identity-row");
+        var sender_icon = new Gtk.Image.from_icon_name ("avatar-default-symbolic");
+        sender_icon.add_css_class ("message-security-identity-icon");
+        sender_row.append (sender_icon);
+        var sender_copy = new Gtk.Box (Gtk.Orientation.VERTICAL, 1);
+        sender_copy.hexpand = true;
+        var sender_name = new Gtk.Label (
+            message.sender_name.strip () == "" ? message.sender_address : message.sender_name);
+        sender_name.xalign = 0;
+        sender_name.ellipsize = Pango.EllipsizeMode.END;
+        var sender_address = new Gtk.Label (message.sender_address);
+        sender_address.xalign = 0;
+        sender_address.ellipsize = Pango.EllipsizeMode.MIDDLE;
+        sender_address.selectable = true;
+        sender_address.add_css_class ("caption");
+        sender_address.add_css_class ("dim-label");
+        sender_copy.append (sender_name);
+        sender_copy.append (sender_address);
+        sender_row.append (sender_copy);
+        identity.append (sender_row);
+
+        if (message.reply_to.strip () != "" &&
+            message.reply_to.strip ().down () != message.sender_address.strip ().down ()) {
+            var reply_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+            reply_row.add_css_class ("message-security-identity-row");
+            var reply_label = new Gtk.Label ("Replies go to");
+            reply_label.xalign = 0;
+            reply_label.add_css_class ("dim-label");
+            var reply_value = new Gtk.Label (message.reply_to);
+            reply_value.xalign = 1;
+            reply_value.hexpand = true;
+            reply_value.ellipsize = Pango.EllipsizeMode.MIDDLE;
+            reply_value.selectable = true;
+            reply_row.append (reply_label);
+            reply_row.append (reply_value);
+            identity.append (reply_row);
+        }
+        content_box.append (identity);
+
+        var authentication = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        authentication.add_css_class ("message-security-card");
+        var auth_heading = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        auth_heading.add_css_class ("message-security-card-heading");
+        var auth_title = new Gtk.Label ("Email Authentication");
+        auth_title.xalign = 0;
+        auth_title.hexpand = true;
+        auth_title.add_css_class ("heading");
+        auth_heading.append (auth_title);
+        var auth_source = new Gtk.Label (
+            assessment.authentication_reported ? "Results found in message headers" : "No results retained");
+        auth_source.add_css_class ("caption");
+        auth_source.add_css_class ("dim-label");
+        auth_heading.append (auth_source);
+        authentication.append (auth_heading);
+        if (message.security_status.strip () != "") {
+            var protection_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+            protection_row.add_css_class ("message-security-protection-row");
+            var protection_icon = new Gtk.Image.from_icon_name ("security-high-symbolic");
+            protection_icon.add_css_class ("message-security-protection-icon");
+            protection_row.append (protection_icon);
+            var protection_label = new Gtk.Label ("Message protection");
+            protection_label.xalign = 0;
+            protection_label.hexpand = true;
+            protection_row.append (protection_label);
+            var protection_status = new Gtk.Label (message.security_status);
+            protection_status.xalign = 1;
+            protection_status.wrap = true;
+            protection_status.selectable = true;
+            protection_status.add_css_class ("message-security-protection-status");
+            protection_row.append (protection_status);
+            authentication.append (protection_row);
+        }
+        var auth_grid = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        auth_grid.homogeneous = true;
+        auth_grid.add_css_class ("message-security-auth-grid");
+        auth_grid.append (build_authentication_item (
+            "SPF", authentication_result (message.authentication_results, "spf")));
+        auth_grid.append (build_authentication_item (
+            "DKIM", authentication_result (message.authentication_results, "dkim")));
+        auth_grid.append (build_authentication_item (
+            "DMARC", authentication_result (message.authentication_results, "dmarc")));
+        authentication.append (auth_grid);
+        var auth_notice = new Gtk.Label (
+            "Header results help identify where mail came from; they do not make links or attachments safe.");
+        auth_notice.xalign = 0;
+        auth_notice.wrap = true;
+        auth_notice.add_css_class ("message-security-auth-notice");
+        authentication.append (auth_notice);
+        content_box.append (authentication);
+
+        int notable_findings = 0;
+        foreach (var finding in assessment.findings) {
+            if (finding != "Your mail server reports at least one passing authentication check.")
+                notable_findings++;
+        }
+        if (notable_findings > 0) {
+            var findings = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            findings.add_css_class ("message-security-card");
+            var findings_heading = new Gtk.Label (
+                notable_findings == 1 ? "What Needs Attention" : "What Needs Attention (%d)".printf (notable_findings));
+            findings_heading.xalign = 0;
+            findings_heading.add_css_class ("heading");
+            findings_heading.add_css_class ("message-security-card-heading");
+            findings.append (findings_heading);
+            foreach (var finding in assessment.findings) {
+                if (finding == "Your mail server reports at least one passing authentication check.")
+                    continue;
+                var finding_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+                finding_row.add_css_class ("message-security-finding-row");
+                var finding_icon = new Gtk.Image.from_icon_name ("dialog-warning-symbolic");
+                finding_icon.valign = Gtk.Align.START;
+                var finding_label = new Gtk.Label (finding);
+                finding_label.xalign = 0;
+                finding_label.wrap = true;
+                finding_label.hexpand = true;
+                finding_label.selectable = true;
+                finding_row.append (finding_icon);
+                finding_row.append (finding_label);
+                findings.append (finding_row);
+            }
+            content_box.append (findings);
+        }
+
+        string raw_headers = MessageSecurityService.headers_for_display (message);
+        var headers = new Gtk.TextView ();
+        headers.editable = false;
+        headers.cursor_visible = false;
+        headers.monospace = true;
+        headers.wrap_mode = Gtk.WrapMode.NONE;
+        headers.buffer.text = raw_headers;
+        headers.add_css_class ("message-security-header-text");
         Accessibility.label (headers, "Raw message headers");
-        var scroller = new Gtk.ScrolledWindow (); scroller.child = headers;
-        scroller.set_policy (Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC);
-        scroller.set_size_request (680, 300); scroller.add_css_class ("card"); content_box.append (scroller);
-        var dialog = new Adw.AlertDialog ("Message Security", "Review identity signals and original header fields.");
-        dialog.extra_child = content_box; dialog.add_response ("close", "Close");
-        dialog.add_response ("copy", "Copy Headers");
-        if (RecipientParser.is_valid_address (message.sender_address))
-            dialog.add_response ("safe", safe ? "Remove Safe Sender" : "Add Safe Sender");
-        dialog.add_response ("phishing", "Report Phishing");
-        dialog.set_response_appearance ("phishing", Adw.ResponseAppearance.DESTRUCTIVE);
-        dialog.default_response = "close"; dialog.close_response = "close";
-        string response = yield dialog.choose (parent, null);
-        if (response == "copy") get_clipboard ().set_text (headers.buffer.text);
-        else if (response == "safe") {
-            try {
-                cache.set_safe_sender (message.sender_address, !safe);
-                safe_sender_changed (message.sender_address, !safe);
-            } catch (Error error) { remote_content_failed (error); }
-        } else if (response == "phishing") phishing_report_requested (message);
+        var headers_scroller = new Gtk.ScrolledWindow ();
+        headers_scroller.child = headers;
+        headers_scroller.set_policy (Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC);
+        headers_scroller.set_min_content_height (180);
+        headers_scroller.add_css_class ("message-security-header-scroller");
+
+        var advanced = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        advanced.add_css_class ("message-security-card");
+        advanced.add_css_class ("message-security-advanced");
+        var details_button = new Gtk.ToggleButton ();
+        details_button.has_frame = false;
+        details_button.add_css_class ("message-security-details-button");
+        var details_content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 9);
+        var details_icon = new Gtk.Image.from_icon_name ("go-next-symbolic");
+        var details_copy = new Gtk.Box (Gtk.Orientation.VERTICAL, 1);
+        details_copy.hexpand = true;
+        var details_title = new Gtk.Label ("Technical Details");
+        details_title.xalign = 0;
+        details_title.add_css_class ("heading");
+        var details_subtitle = new Gtk.Label ("View the original message headers");
+        details_subtitle.xalign = 0;
+        details_subtitle.add_css_class ("caption");
+        details_subtitle.add_css_class ("dim-label");
+        details_copy.append (details_title);
+        details_copy.append (details_subtitle);
+        var details_bound = new Gtk.Label ("64 KiB maximum");
+        details_bound.add_css_class ("message-security-header-badge");
+        details_content.append (details_icon);
+        details_content.append (details_copy);
+        details_content.append (details_bound);
+        details_button.child = details_content;
+        advanced.append (details_button);
+        var headers_revealer = new Gtk.Revealer ();
+        headers_revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
+        headers_revealer.child = headers_scroller;
+        details_button.toggled.connect (() => {
+            headers_revealer.reveal_child = details_button.active;
+            details_icon.set_from_icon_name (
+                details_button.active ? "go-down-symbolic" : "go-next-symbolic");
+            details_subtitle.label = details_button.active ?
+                "Hide the original message headers" : "View the original message headers";
+        });
+        advanced.append (headers_revealer);
+        content_box.append (advanced);
+
+        var clamp = new Adw.Clamp ();
+        clamp.maximum_size = 660;
+        clamp.child = content_box;
+        clamp.margin_start = 16;
+        clamp.margin_end = 16;
+        clamp.margin_top = 10;
+        clamp.margin_bottom = 10;
+        var page_scroller = new Gtk.ScrolledWindow ();
+        page_scroller.set_policy (Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
+        page_scroller.child = clamp;
+        page_scroller.add_css_class ("message-security-page");
+        toolbar.content = page_scroller;
+
+        var action_bar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        action_bar.margin_start = 12;
+        action_bar.margin_end = 12;
+        action_bar.margin_top = 8;
+        action_bar.margin_bottom = 8;
+        action_bar.add_css_class ("message-security-action-bar");
+        var report = new Gtk.Button.with_label ("Report Phishing");
+        report.add_css_class ("destructive-action");
+        report.tooltip_text = "Report this message as a phishing attempt";
+        Accessibility.label (report, "Report this message as phishing");
+        report.clicked.connect (() => {
+            dialog.close ();
+            phishing_report_requested (message);
+        });
+        action_bar.append (report);
+        var action_space = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        action_space.hexpand = true;
+        action_bar.append (action_space);
+        var copy = new Gtk.Button.with_label ("Copy Headers");
+        copy.tooltip_text = "Copy the original message headers";
+        Accessibility.label (copy, "Copy original message headers");
+        copy.clicked.connect (() => {
+            get_clipboard ().set_text (raw_headers);
+            copy.label = "Copied";
+            Timeout.add (1600, () => {
+                if (copy.get_root () != null) copy.label = "Copy Headers";
+                return Source.REMOVE;
+            });
+        });
+        action_bar.append (copy);
+        if (RecipientParser.is_valid_address (message.sender_address)) {
+            var safe_button = new Gtk.Button.with_label (
+                safe ? "Remove Safe Sender" : "Add Safe Sender");
+            safe_button.clicked.connect (() => {
+                try {
+                    safe = !safe;
+                    cache.set_safe_sender (message.sender_address, safe);
+                    safe_sender_changed (message.sender_address, safe);
+                    safe_button.label = safe ? "Remove Safe Sender" : "Add Safe Sender";
+                    safe_status.label = safe ? "Safe Sender" : "Not marked safe";
+                    if (safe) safe_status.add_css_class ("passed");
+                    else safe_status.remove_css_class ("passed");
+                    if (assessment.level < MessageThreatLevel.CAUTION) {
+                        verdict.remove_css_class (safe ? "neutral" : "trusted");
+                        verdict.add_css_class (safe ? "trusted" : "neutral");
+                        verdict_title.label = safe ? "Known sender" : "No obvious warning signs";
+                        verdict_description.label = safe ?
+                            "This address is on your Safe Senders list. Still review unexpected requests." :
+                            "Mailficient did not find an obvious identity or authentication warning.";
+                        verdict_icon.set_from_icon_name (safe ?
+                            "security-high-symbolic" : "dialog-information-symbolic");
+                    }
+                } catch (Error error) {
+                    safe = !safe;
+                    remote_content_failed (error);
+                }
+            });
+            action_bar.append (safe_button);
+        }
+        toolbar.add_bottom_bar (action_bar);
+        dialog.child = toolbar;
+        dialog.default_widget = done;
+        dialog.present (parent);
+    }
+
+    private void sync_security_dialog_theme (Adw.Dialog dialog) {
+        if (Adw.StyleManager.get_default ().dark)
+            dialog.add_css_class ("message-security-dark");
+        else
+            dialog.remove_css_class ("message-security-dark");
+    }
+
+    private string authentication_result (string raw, string mechanism) {
+        string normalized = raw.replace ("\r\n", " ").replace ("\n", " ")
+            .replace ("\r", " ").down ();
+        try {
+            var expression = new Regex ("(?:^|[;\\s])" + Regex.escape_string (mechanism) +
+                "\\s*=\\s*([a-z0-9_-]+)", RegexCompileFlags.CASELESS);
+            MatchInfo match;
+            if (expression.match (normalized, 0, out match))
+                return match.fetch (1).down ();
+        } catch (RegexError error) { }
+        return "";
+    }
+
+    private Gtk.Widget build_authentication_item (string mechanism, string result) {
+        bool passed = result == "pass";
+        bool failed = result == "fail" || result == "softfail" ||
+            result == "temperror" || result == "permerror";
+        string status;
+        string detail;
+        string icon_name;
+        string level_class;
+        if (passed) {
+            status = "Passed";
+            detail = "Verified";
+            icon_name = "emblem-ok-symbolic";
+            level_class = "passed";
+        } else if (failed) {
+            status = result == "softfail" ? "Soft fail" :
+                (result == "temperror" ? "Temporary error" :
+                (result == "permerror" ? "Error" : "Failed"));
+            detail = "Needs review";
+            icon_name = "dialog-warning-symbolic";
+            level_class = "failed";
+        } else if (result != "") {
+            status = result.substring (0, 1).up () + result.substring (1);
+            detail = "Inconclusive";
+            icon_name = "dialog-information-symbolic";
+            level_class = "unknown";
+        } else {
+            status = "Not reported";
+            detail = "No result";
+            icon_name = "dialog-information-symbolic";
+            level_class = "unknown";
+        }
+        var item = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+        item.add_css_class ("message-security-auth-item");
+        item.add_css_class (level_class);
+        var icon = new Gtk.Image.from_icon_name (icon_name);
+        icon.add_css_class ("message-security-auth-icon");
+        item.append (icon);
+        var copy = new Gtk.Box (Gtk.Orientation.VERTICAL, 1);
+        copy.hexpand = true;
+        var name = new Gtk.Label (mechanism);
+        name.xalign = 0;
+        name.add_css_class ("caption");
+        name.add_css_class ("dim-label");
+        var value = new Gtk.Label (status);
+        value.xalign = 0;
+        value.ellipsize = Pango.EllipsizeMode.END;
+        value.add_css_class ("message-security-auth-value");
+        copy.append (name);
+        copy.append (value);
+        item.append (copy);
+        item.tooltip_text = "%s: %s — %s".printf (mechanism, status, detail);
+        Accessibility.label (item, "%s authentication: %s".printf (mechanism, status));
+        return item;
     }
 
     private async void choose_unsubscribe (Message message, Gee.List<UnsubscribeTarget> targets) {

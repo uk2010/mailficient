@@ -2,6 +2,8 @@ namespace Mailficient {
 public class AccountManagerDialog : Adw.PreferencesDialog {
     public signal void account_saved (AccountSettings account);
     public signal void accounts_changed ();
+    public signal void setup_completed (AccountSettings account);
+    public signal void setup_deferred ();
 
     private CacheDatabase cache;
     private MailSettingsStore settings;
@@ -12,8 +14,10 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
     private AccountSyncService? sync_service;
     private OnlineAccountService online_accounts;
     private Adw.PreferencesGroup accounts_group = new Adw.PreferencesGroup ();
+    private Adw.PreferencesGroup status_group = new Adw.PreferencesGroup ();
     private Adw.ActionRow status = new Adw.ActionRow ();
     private Gee.ArrayList<Gtk.Widget> account_rows = new Gee.ArrayList<Gtk.Widget> ();
+    private bool onboarding;
 
     public AccountManagerDialog (CacheDatabase cache, CredentialStore credentials,
                                  CredentialCleanupService credential_cleanup,
@@ -25,57 +29,108 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
         this.account_provisioner = account_provisioner;
         this.engine = engine; this.sync_service = sync_service;
         this.online_accounts = online_accounts;
+        this.onboarding = onboarding;
         title = onboarding ? "Welcome to Mailficient" : "Mail Accounts";
-        content_width = 680; content_height = 360;
+        content_width = onboarding ? 660 : 640; content_height = onboarding ? 520 : 400;
         var page = new Adw.PreferencesPage ();
         page.title = "Accounts"; page.icon_name = "avatar-default-symbolic";
-        accounts_group.title = "Configured Accounts";
-        accounts_group.description = "Passwords stay in Secret Service; OAuth tokens are requested from GNOME Online Accounts and are never saved in the mail database.";
-        page.add (accounts_group);
 
-        var add_group = new Adw.PreferencesGroup ();
-        var icloud_row = new Adw.ActionRow ();
-        icloud_row.title = "iCloud Mail";
-        icloud_row.subtitle = "Connect using your Apple Account email and an app-specific password";
-        icloud_row.add_prefix (new Gtk.Image.from_icon_name ("folder-remote-symbolic"));
-        icloud_row.activatable = true; icloud_row.activated.connect (open_icloud_dialog);
-        var icloud_button = new Gtk.Button.with_label ("Add iCloud");
-        icloud_button.valign = Gtk.Align.CENTER;
-        icloud_button.add_css_class ("suggested-action");
-        icloud_button.clicked.connect (open_icloud_dialog);
-        icloud_row.add_suffix (icloud_button); add_group.add (icloud_row);
+        if (onboarding) {
+            var welcome_group = new Adw.PreferencesGroup ();
+            var welcome = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            welcome.add_css_class ("account-onboarding");
 
-        var add_row = new Adw.ActionRow ();
-        add_row.title = "Other Mail Provider";
-        add_row.subtitle = "Google, Microsoft, Yahoo, AOL, or custom IMAP/SMTP";
-        add_row.add_prefix (new Gtk.Image.from_icon_name ("list-add-symbolic"));
-        add_row.activatable = true;
-        add_row.activated.connect (open_add_dialog);
-        var add_button = new Gtk.Button.with_label ("Choose Provider");
-        add_button.valign = Gtk.Align.CENTER;
-        add_button.clicked.connect (open_add_dialog); add_row.add_suffix (add_button);
-        add_group.add (add_row);
-        var online_row = new Adw.ActionRow ();
-        online_row.title = "Add from GNOME Online Accounts";
-        online_row.subtitle = "Use an existing Google or Microsoft OAuth authorization";
-        online_row.add_prefix (new Gtk.Image.from_icon_name ("network-server-symbolic"));
-        online_row.activatable = true; online_row.activated.connect (open_online_dialog);
-        var online_button = new Gtk.Button.with_label ("Choose Account");
-        online_button.valign = Gtk.Align.CENTER; online_button.clicked.connect (open_online_dialog);
-        online_row.add_suffix (online_button); add_group.add (online_row);
-        var profile_row = new Adw.ActionRow ();
-        profile_row.title = "Import Apple Configuration Profile";
-        profile_row.subtitle = "Use mail settings from a downloaded .mobileconfig file";
-        profile_row.add_prefix (new Gtk.Image.from_icon_name ("document-open-symbolic"));
-        profile_row.activatable = true; profile_row.activated.connect (() => import_profile.begin ());
-        var profile_button = new Gtk.Button.with_label ("Import Profile");
-        profile_button.valign = Gtk.Align.CENTER;
-        profile_button.clicked.connect (() => import_profile.begin ());
-        profile_row.add_suffix (profile_button); add_group.add (profile_row);
+            var icon_badge = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+            icon_badge.add_css_class ("account-onboarding-icon-badge");
+            icon_badge.halign = Gtk.Align.CENTER;
+            var welcome_icon = new Gtk.Image.from_icon_name ("mail-unread-symbolic");
+            welcome_icon.add_css_class ("account-onboarding-icon");
+            welcome_icon.pixel_size = 42;
+            welcome_icon.halign = Gtk.Align.CENTER; welcome_icon.valign = Gtk.Align.CENTER;
+            icon_badge.append (welcome_icon); welcome.append (icon_badge);
+
+            var eyebrow = new Gtk.Label ("WELCOME TO MAILFICIENT");
+            eyebrow.add_css_class ("account-onboarding-eyebrow");
+            eyebrow.halign = Gtk.Align.CENTER; welcome.append (eyebrow);
+
+            var welcome_title = new Gtk.Label ("Your inbox, made calmer.");
+            welcome_title.add_css_class ("account-onboarding-title");
+            welcome_title.wrap = true; welcome_title.justify = Gtk.Justification.CENTER;
+            welcome.append (welcome_title);
+
+            var welcome_description = new Gtk.Label (
+                "Bring every account, folder, and rule into one focused place—without giving up control of how your mail works.");
+            welcome_description.add_css_class ("account-onboarding-description");
+            welcome_description.wrap = true; welcome_description.justify = Gtk.Justification.CENTER;
+            welcome_description.max_width_chars = 52; welcome_description.halign = Gtk.Align.CENTER;
+            welcome.append (welcome_description);
+
+            var values = new Gtk.FlowBox ();
+            values.add_css_class ("account-onboarding-values");
+            values.selection_mode = Gtk.SelectionMode.NONE; values.homogeneous = true;
+            values.min_children_per_line = 1; values.max_children_per_line = 3;
+            values.column_spacing = 8; values.row_spacing = 8;
+            values.insert (welcome_value ("mail-unread-symbolic", "Every inbox",
+                "See accounts together or keep them separate."), -1);
+            values.insert (welcome_value ("security-high-symbolic", "Private by design",
+                "Credentials stay protected on this device."), -1);
+            values.insert (welcome_value ("folder-symbolic", "Folders and rules",
+                "Organize mail your way from the start."), -1);
+            welcome.append (values);
+
+            var welcome_actions = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
+            welcome_actions.add_css_class ("account-onboarding-actions");
+            welcome_actions.halign = Gtk.Align.CENTER;
+            var begin = new Gtk.Button.with_label ("Add Mail Account");
+            begin.add_css_class ("suggested-action"); begin.add_css_class ("pill");
+            begin.clicked.connect (open_add_dialog);
+            var later = new Gtk.Button.with_label ("Not Now"); later.add_css_class ("flat");
+            later.clicked.connect (() => { setup_deferred (); close (); });
+            welcome_actions.append (begin); welcome_actions.append (later);
+            welcome.append (welcome_actions);
+
+            var privacy_note = new Gtk.Label ("Setup takes about a minute · Nothing changes until the account connects");
+            privacy_note.add_css_class ("account-onboarding-note");
+            privacy_note.wrap = true; privacy_note.justify = Gtk.Justification.CENTER;
+            welcome.append (privacy_note);
+            welcome_group.add (welcome); page.add (welcome_group);
+        } else {
+            accounts_group.title = "Mail Accounts";
+            accounts_group.description = "Choose an account to review its connection or remove it from this device.";
+            page.add (accounts_group);
+
+            var add_group = new Adw.PreferencesGroup (); add_group.title = "Add an Account";
+            var add_row = new Adw.ActionRow ();
+            add_row.title = "Add Mail Account";
+            add_row.subtitle = "iCloud, Google, Microsoft, Yahoo, AOL, or another provider";
+            add_row.add_prefix (new Gtk.Image.from_icon_name ("list-add-symbolic"));
+            add_row.add_suffix (new Gtk.Image.from_icon_name ("go-next-symbolic"));
+            add_row.activatable = true; add_row.activated.connect (open_add_dialog);
+            add_group.add (add_row);
+            page.add (add_group);
+        }
+
         status.add_prefix (new Gtk.Image.from_icon_name ("dialog-warning-symbolic"));
-        status.visible = false; add_group.add (status);
-        page.add (add_group); add (page);
+        status.visible = false; status.accessible_role = Gtk.AccessibleRole.ALERT;
+        status_group.visible = false; status_group.add (status); page.add (status_group); add (page);
         reload ();
+    }
+
+    private static Gtk.Widget welcome_value (string icon_name, string title, string description) {
+        var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 6);
+        card.add_css_class ("account-onboarding-value");
+        card.set_size_request (140, -1);
+        var icon = new Gtk.Image.from_icon_name (icon_name);
+        icon.add_css_class ("account-onboarding-value-icon"); icon.halign = Gtk.Align.CENTER;
+        var heading = new Gtk.Label (title); heading.wrap = true;
+        heading.max_width_chars = 18;
+        heading.justify = Gtk.Justification.CENTER; heading.add_css_class ("account-onboarding-value-title");
+        var detail = new Gtk.Label (description); detail.wrap = true;
+        detail.max_width_chars = 16;
+        detail.justify = Gtk.Justification.CENTER; detail.add_css_class ("account-onboarding-value-description");
+        card.append (icon); card.append (heading); card.append (detail);
+        Accessibility.label (card, "%s. %s".printf (title, description));
+        return card;
     }
 
     private void reload () {
@@ -86,7 +141,7 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
             if (accounts.size == 0) {
                 var empty = new Adw.ActionRow ();
                 empty.title = "No connected accounts";
-                empty.subtitle = "Add a standard IMAP/SMTP account or choose a GNOME Online Account.";
+                empty.subtitle = "Add an account to start receiving and sending mail.";
                 empty.add_prefix (new Gtk.Image.from_icon_name ("mail-unread-symbolic"));
                 accounts_group.add (empty); account_rows.add (empty);
             } else {
@@ -103,10 +158,9 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
         var row = new Adw.ActionRow ();
         row.title = account.display_name;
         string authentication = account.authentication == AuthenticationMode.GNOME_ONLINE_ACCOUNTS ?
-            "GNOME Online Accounts OAuth" : "Password / app password";
-        row.subtitle = "%s\n%s · IMAP %s · SMTP %s".printf (account.email, authentication,
-            account.incoming_host, account.outgoing_host);
-        row.subtitle_lines = 2; row.add_prefix (new Gtk.Image.from_icon_name ("avatar-default-symbolic"));
+            "Secure sign-in" : "Password protected";
+        row.subtitle = "%s · %s".printf (account.email, authentication);
+        row.add_prefix (new Gtk.Image.from_icon_name ("avatar-default-symbolic"));
         var edit = new Gtk.Button.from_icon_name ("document-edit-symbolic");
         edit.valign = Gtk.Align.CENTER; edit.add_css_class ("flat"); edit.tooltip_text = "Edit account";
         Accessibility.label (edit, "Edit %s".printf (account.display_name));
@@ -119,36 +173,20 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
     }
 
     private void open_add_dialog () {
-        var dialog = new ProviderChooserDialog ();
-        dialog.provider_selected.connect (open_provider);
+        var dialog = new AccountSetupDialog (cache, account_provisioner, online_accounts);
+        dialog.account_saved.connect (finish_account_setup);
+        dialog.import_requested.connect (() => import_profile.begin ());
         dialog.present (this);
     }
 
-    private void open_icloud_dialog () {
-        open_provider (MailProvider.ICLOUD);
-    }
-
-    private void open_provider (MailProvider provider) {
-        if (provider == MailProvider.GOOGLE || provider == MailProvider.MICROSOFT) {
-            var online = new OnlineAccountDialog (cache, account_provisioner, online_accounts, provider);
-            online.account_saved.connect ((account) => { reload (); account_saved (account); });
-            online.present (this);
-            return;
-        }
-        var manual = new AccountDialog (account_provisioner, null, provider);
-        manual.account_saved.connect ((account) => { reload (); account_saved (account); });
-        manual.present (this);
+    private void finish_account_setup (AccountSettings account) {
+        reload (); account_saved (account);
+        if (onboarding) { setup_completed (account); close (); }
     }
 
     private void open_edit_dialog (AccountSettings account) {
         var dialog = new AccountDialog (account_provisioner, account);
         dialog.account_saved.connect ((saved) => { reload (); account_saved (saved); });
-        dialog.present (this);
-    }
-
-    private void open_online_dialog () {
-        var dialog = new OnlineAccountDialog (cache, account_provisioner, online_accounts);
-        dialog.account_saved.connect ((account) => { reload (); account_saved (account); });
         dialog.present (this);
     }
 
@@ -183,7 +221,7 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
             if (selected == null) return;
             var account_dialog = new AccountDialog (
                 account_provisioner, null, MailProvider.OTHER, selected);
-            account_dialog.account_saved.connect ((account) => { reload (); account_saved (account); });
+            account_dialog.account_saved.connect (finish_account_setup);
             account_dialog.present (this);
             status.visible = false;
         } catch (Error error) {
@@ -212,7 +250,7 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
     private void show_profile_error (Error error) {
         status.title = "Could not import configuration profile";
         status.subtitle = error.message;
-        status.visible = true;
+        status.visible = true; status_group.visible = true;
     }
 
     private async void remove_account (AccountSettings account) {
@@ -252,7 +290,7 @@ public class AccountManagerDialog : Adw.PreferencesDialog {
     private void show_error (UserFacingError error) {
         status.title = error.title;
         status.subtitle = "%s %s".printf (error.description, error.suggestion);
-        status.visible = true;
+        status.visible = true; status_group.visible = true;
     }
 }
 }

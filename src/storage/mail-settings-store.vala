@@ -64,13 +64,28 @@ public class MailSettingsStore : Object {
     }
 
     public double mailbox_pane_width {
-        get { return clamp_double (get_double ("mailbox-pane-width", 282), 190, 420); }
-        set { set_double ("mailbox-pane-width", clamp_double (value, 190, 420)); }
+        get {
+            double value = get_double ("mailbox-pane-width", 238);
+            // Migrate the former shipped default without overwriting a user's
+            // genuinely customized width.
+            if (value >= 281.5 && value <= 282.5) value = 238;
+            return clamp_double (value, 190, 320);
+        }
+        set { set_double ("mailbox-pane-width", clamp_double (value, 190, 320)); }
     }
 
     public double message_pane_width {
-        get { return clamp_double (get_double ("message-pane-width", 558), 300, 620); }
-        set { set_double ("message-pane-width", clamp_double (value, 300, 620)); }
+        get {
+            double value = get_double ("message-pane-width", 340);
+            if (value >= 557.5 && value <= 558.5) value = 340;
+            return clamp_double (value, 300, 520);
+        }
+        set { set_double ("message-pane-width", clamp_double (value, 300, 520)); }
+    }
+
+    public bool compact_pane_widths_migrated {
+        get { return get_bool ("compact-pane-widths-migrated", false); }
+        set { set_bool ("compact-pane-widths-migrated", value); }
     }
 
     public int window_width {
@@ -148,7 +163,15 @@ public class MailSettingsStore : Object {
 
     public string toolbar_layout {
         owned get {
-            return get_string ("toolbar-layout", ToolbarLayout.DEFAULT_LAYOUT);
+            string value = get_string ("toolbar-layout", ToolbarLayout.DEFAULT_LAYOUT);
+            // Earlier releases shipped a crowded, spacer-heavy default. Move
+            // only that exact layout to the calmer default; genuine user
+            // customizations remain untouched.
+            if (ToolbarLayout.is_legacy_default (value)) {
+                set_string ("toolbar-layout", ToolbarLayout.DEFAULT_LAYOUT);
+                return ToolbarLayout.DEFAULT_LAYOUT;
+            }
+            return value;
         }
         set {
             set_string ("toolbar-layout",

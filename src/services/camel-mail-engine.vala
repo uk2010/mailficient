@@ -1254,6 +1254,17 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
 
     private static void collect_mailboxes (Camel.FolderInfo? node, string account_id,
                                            Gee.ArrayList<Mailbox> output) {
+        // Resolve provider-advertised roles across the complete inventory
+        // before considering name fallbacks.  A normal user folder named
+        // "Drafts" must not become a second Drafts mailbox merely because it
+        // is visited before the provider's SPECIAL-USE folder.
+        var claimed_roles = new Gee.HashSet<int> ();
+        collect_explicit_mailbox_roles (node, claimed_roles);
+        collect_mailboxes_with_roles (node, account_id, output, claimed_roles);
+    }
+
+    private static void collect_explicit_mailbox_roles (Camel.FolderInfo? node,
+                                                        Gee.HashSet<int> claimed_roles) {
         for (var current = node; current != null; current = current.next) {
             // Evolution exposes local search/vfolder aliases such as
             // .#evolution/Junk alongside the provider's real server folder.
@@ -1261,23 +1272,60 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
             bool local_virtual = current.full_name != null &&
                 current.full_name.has_prefix (".#evolution/");
             if (!local_virtual && (current.flags & Camel.FolderInfoFlags.NOSELECT) == 0) {
-                var role = role_for_folder (current.flags, current.display_name, current.full_name);
+                bool has_explicit_type;
+                var role = explicit_role_for_folder (current.flags, out has_explicit_type);
+                if (has_explicit_type && role != MailboxRole.CUSTOM)
+                    claimed_roles.add ((int) role);
+            }
+            if (current.child != null)
+                collect_explicit_mailbox_roles (current.child, claimed_roles);
+        }
+    }
+
+    private static void collect_mailboxes_with_roles (Camel.FolderInfo? node,
+                                                       string account_id,
+                                                       Gee.ArrayList<Mailbox> output,
+                                                       Gee.HashSet<int> claimed_roles) {
+        for (var current = node; current != null; current = current.next) {
+            bool local_virtual = current.full_name != null &&
+                current.full_name.has_prefix (".#evolution/");
+            if (!local_virtual && (current.flags & Camel.FolderInfoFlags.NOSELECT) == 0) {
+                bool has_explicit_type;
+                var role = explicit_role_for_folder (current.flags, out has_explicit_type);
+                if (!has_explicit_type) {
+                    role = inferred_role_for_folder (current.display_name, current.full_name);
+                    if (role != MailboxRole.CUSTOM) {
+                        if (claimed_roles.contains ((int) role))
+                            role = MailboxRole.CUSTOM;
+                        else
+                            claimed_roles.add ((int) role);
+                    }
+                }
                 var mailbox = new Mailbox (mailbox_id (account_id, current.full_name), current.display_name,
                     icon_for_role (role), role, (uint) int.max (0, current.unread), account_id, current.full_name);
                 output.add (mailbox);
             }
             if (current.child != null)
-                collect_mailboxes (current.child, account_id, output);
+                collect_mailboxes_with_roles (current.child, account_id, output, claimed_roles);
         }
     }
 
     internal static MailboxRole role_for_folder (Camel.FolderInfoFlags flags,
                                                   string? display_name,
                                                   string? full_name) {
+        bool has_explicit_type;
+        var role = explicit_role_for_folder (flags, out has_explicit_type);
+        if (has_explicit_type) return role;
+        return inferred_role_for_folder (display_name, full_name);
+    }
+
+    private static MailboxRole explicit_role_for_folder (Camel.FolderInfoFlags flags,
+                                                         out bool has_explicit_type) {
         // Camel stores the folder type in a masked numeric field. The TYPE_*
         // values are not independent flags, so testing them with "!= 0"
         // misclassifies types whose numeric values share bits.
         int folder_type = ((int) flags) & (0x3f << 10);
+        has_explicit_type = folder_type != (int) Camel.FolderInfoFlags.TYPE_NORMAL;
         if (folder_type == (int) Camel.FolderInfoFlags.TYPE_INBOX) return MailboxRole.INBOX;
         if (folder_type == (int) Camel.FolderInfoFlags.TYPE_DRAFTS) return MailboxRole.DRAFTS;
         if (folder_type == (int) Camel.FolderInfoFlags.TYPE_SENT) return MailboxRole.SENT;
@@ -1286,9 +1334,11 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
         if (folder_type == (int) Camel.FolderInfoFlags.TYPE_ARCHIVE ||
             folder_type == (int) Camel.FolderInfoFlags.TYPE_ALL) return MailboxRole.ARCHIVE;
 
-        // Only infer a role for an otherwise normal folder. Explicit provider
-        // types (contacts, calendars, tasks, and so on) remain authoritative.
-        if (folder_type != (int) Camel.FolderInfoFlags.TYPE_NORMAL) return MailboxRole.CUSTOM;
+        return MailboxRole.CUSTOM;
+    }
+
+    private static MailboxRole inferred_role_for_folder (string? display_name,
+                                                          string? full_name) {
         var inferred = role_for_folder_name (display_name);
         if (inferred != MailboxRole.CUSTOM) return inferred;
         return role_for_folder_name (leaf_folder_name (full_name));
@@ -2271,10 +2321,34 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
     }
 
     private static string? find_role_folder (Camel.FolderInfo? node, MailboxRole role) {
+        // Prefer a provider-advertised SPECIAL-USE folder even when a normal
+        // same-named user folder appears earlier in the LIST response.
+        string? explicit_match = find_role_folder_by_type (node, role, true);
+        if (explicit_match != null) return explicit_match;
+        // Older servers may not advertise SPECIAL-USE. Preserve the existing
+        // conservative name fallback for those inventories.
+        return find_role_folder_by_type (node, role, false);
+    }
+
+    private static string? find_role_folder_by_type (Camel.FolderInfo? node,
+                                                      MailboxRole role,
+                                                      bool explicit_only) {
         for (var current = node; current != null; current = current.next) {
-            if (role_for_folder (current.flags, current.display_name, current.full_name) == role)
-                return current.full_name;
-            string? child = find_role_folder (current.child, role); if (child != null) return child;
+            bool local_virtual = current.full_name != null &&
+                current.full_name.has_prefix (".#evolution/");
+            if (!local_virtual && (current.flags & Camel.FolderInfoFlags.NOSELECT) == 0) {
+                bool has_explicit_type;
+                var candidate = explicit_role_for_folder (
+                    current.flags, out has_explicit_type);
+                if (explicit_only ?
+                    (has_explicit_type && candidate == role) :
+                    (!has_explicit_type && inferred_role_for_folder (
+                        current.display_name, current.full_name) == role))
+                    return current.full_name;
+            }
+            string? child = find_role_folder_by_type (
+                current.child, role, explicit_only);
+            if (child != null) return child;
         }
         return null;
     }

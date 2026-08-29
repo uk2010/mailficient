@@ -523,12 +523,17 @@ public class CacheDatabase : Object, AccountStore {
     private static void validate_rule_operations (Gee.List<MailRuleOperation> operations) throws MailError {
         bool terminal_transfer_seen = false;
         foreach (var operation in operations) {
-            if ((operation.action == MailRuleAction.LABEL || operation.action == MailRuleAction.MOVE ||
+            if ((operation.action == MailRuleAction.LABEL ||
+                 operation.action == MailRuleAction.REMOVE_LABEL ||
+                 operation.action == MailRuleAction.SET_FLAG_COLOR ||
+                 operation.action == MailRuleAction.MOVE ||
                  operation.action == MailRuleAction.COPY) && operation.value.strip () == "")
-                throw new MailError.STORAGE ("Label, move, and copy actions require a destination");
+                throw new MailError.STORAGE ("This action requires a value or destination");
             bool terminal_transfer = operation.action == MailRuleAction.ARCHIVE ||
                 operation.action == MailRuleAction.TRASH ||
-                operation.action == MailRuleAction.MOVE;
+                operation.action == MailRuleAction.MOVE ||
+                operation.action == MailRuleAction.MARK_JUNK ||
+                operation.action == MailRuleAction.MARK_NOT_JUNK;
             if (terminal_transfer && terminal_transfer_seen)
                 throw new MailError.STORAGE (
                     "A rule or Quick Step can move a message only once");
@@ -585,6 +590,83 @@ public class CacheDatabase : Object, AccountStore {
             throw new MailError.STORAGE ("Could not prepare mail-rule deletion");
         statement.bind_int64 (1, id);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not delete the mail rule");
+    }
+
+    public int automation_mailbox_reference_count (string mailbox_id) throws MailError {
+        Sqlite.Statement statement;
+        const string sql = "SELECT " +
+            "(SELECT COUNT(*) FROM mail_rule_actions WHERE action IN (?,?) AND value=?) + " +
+            "(SELECT COUNT(*) FROM quick_step_actions WHERE action IN (?,?) AND value=?) + " +
+            "(SELECT COUNT(*) FROM mail_rule_conditions WHERE field=? AND pattern=?) + " +
+            "(SELECT COUNT(*) FROM mail_rules r WHERE NOT EXISTS(" +
+                "SELECT 1 FROM mail_rule_actions a WHERE a.rule_id=r.id) " +
+                "AND r.action IN (?,?) AND r.value=?) + " +
+            "(SELECT COUNT(*) FROM mail_rules r WHERE NOT EXISTS(" +
+                "SELECT 1 FROM mail_rule_conditions c WHERE c.rule_id=r.id) " +
+                "AND r.field=? AND r.pattern=?)";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect mailbox automation references");
+        int binding = 1;
+        foreach (var unused in new int[] { 0, 1 }) {
+            statement.bind_int (binding++, (int) MailRuleAction.MOVE);
+            statement.bind_int (binding++, (int) MailRuleAction.COPY);
+            statement.bind_text (binding++, mailbox_id);
+        }
+        statement.bind_int (binding++, (int) MailRuleField.MAILBOX);
+        statement.bind_text (binding++, mailbox_id);
+        statement.bind_int (binding++, (int) MailRuleAction.MOVE);
+        statement.bind_int (binding++, (int) MailRuleAction.COPY);
+        statement.bind_text (binding++, mailbox_id);
+        statement.bind_int (binding++, (int) MailRuleField.MAILBOX);
+        statement.bind_text (binding++, mailbox_id);
+        if (statement.step () != Sqlite.ROW)
+            throw new MailError.STORAGE ("Could not inspect mailbox automation references");
+        return statement.column_int (0);
+    }
+
+    public void replace_automation_mailbox_reference (string old_id,
+                                                       string new_id) throws MailError {
+        if (old_id == new_id || old_id == "" || new_id == "") return;
+        execute ("BEGIN IMMEDIATE");
+        try {
+            Sqlite.Statement statement;
+            foreach (var table in new string[] { "mail_rule_actions", "quick_step_actions" }) {
+                string sql = "UPDATE %s SET value=? WHERE action IN (?,?) AND value=?".printf (table);
+                if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+                    throw new MailError.STORAGE ("Could not prepare mailbox automation repair");
+                statement.bind_text (1, new_id);
+                statement.bind_int (2, (int) MailRuleAction.MOVE);
+                statement.bind_int (3, (int) MailRuleAction.COPY);
+                statement.bind_text (4, old_id);
+                if (statement.step () != Sqlite.DONE)
+                    throw new MailError.STORAGE ("Could not repair mailbox automation");
+            }
+            if (database.prepare_v2 (
+                    "UPDATE mail_rule_conditions SET pattern=? WHERE field=? AND pattern=?",
+                    -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare mailbox condition repair");
+            statement.bind_text (1, new_id);
+            statement.bind_int (2, (int) MailRuleField.MAILBOX);
+            statement.bind_text (3, old_id);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not repair mailbox conditions");
+            if (database.prepare_v2 (
+                    "UPDATE mail_rules SET value=CASE WHEN action IN (?,?) AND value=? THEN ? ELSE value END," +
+                    "pattern=CASE WHEN field=? AND pattern=? THEN ? ELSE pattern END",
+                    -1, out statement) != Sqlite.OK)
+                throw new MailError.STORAGE ("Could not prepare legacy mailbox automation repair");
+            statement.bind_int (1, (int) MailRuleAction.MOVE);
+            statement.bind_int (2, (int) MailRuleAction.COPY);
+            statement.bind_text (3, old_id); statement.bind_text (4, new_id);
+            statement.bind_int (5, (int) MailRuleField.MAILBOX);
+            statement.bind_text (6, old_id); statement.bind_text (7, new_id);
+            if (statement.step () != Sqlite.DONE)
+                throw new MailError.STORAGE ("Could not repair legacy mailbox automation");
+            execute ("COMMIT");
+        } catch (MailError error) {
+            try { execute ("ROLLBACK"); } catch (MailError ignored) { }
+            throw error;
+        }
     }
 
     public Gee.ArrayList<QuickStep> list_quick_steps () throws MailError {
@@ -3442,6 +3524,21 @@ public class CacheDatabase : Object, AccountStore {
         return result;
     }
 
+    public bool cached_folder_available (string folder_id, string account_id) throws MailError {
+        if (folder_id.strip () == "" || account_id.strip () == "") return false;
+        Sqlite.Statement statement;
+        const string sql = "SELECT 1 FROM cached_mailboxes " +
+            "WHERE id=? AND account_id=? LIMIT 1";
+        if (database.prepare_v2 (sql, -1, out statement) != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not inspect a rule destination folder");
+        statement.bind_text (1, folder_id);
+        statement.bind_text (2, account_id);
+        int row = statement.step ();
+        if (row != Sqlite.ROW && row != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not inspect a rule destination folder");
+        return row == Sqlite.ROW;
+    }
+
     public Gee.ArrayList<Message> list_cached_messages (string mailbox_id,
                                                         int limit = DEFAULT_MESSAGE_PAGE_SIZE,
                                                         int offset = 0,
@@ -4595,13 +4692,19 @@ public class CacheDatabase : Object, AccountStore {
     public Gee.List<Message> search_messages (SearchQuery query,
                                               int limit = DEFAULT_MESSAGE_PAGE_SIZE,
                                               int offset = 0,
-                                              MessageSortMode sort_mode = MessageSortMode.NEWEST) throws MailError {
+                                              MessageSortMode sort_mode = MessageSortMode.NEWEST,
+                                              string mailbox_scope = "",
+                                              string account_scope = "") throws MailError {
         var sql = new StringBuilder ("SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
         var values = new Gee.ArrayList<string> ();
+        append_search_scope (sql, values, mailbox_scope, account_scope);
         append_search_predicates (sql, query, values);
+        string grouping = mailbox_scope != "" && is_grouped_smart_mailbox (mailbox_scope) ?
+            " GROUP BY m.account_id,COALESCE(NULLIF(m.internet_message_id,''),m.id)" : "";
         int bounded_limit = int.max (0, limit);
         int bounded_offset = int.max (0, offset);
-        sql.append_printf (" ORDER BY %s LIMIT %d OFFSET %d", message_order (sort_mode), bounded_limit, bounded_offset);
+        sql.append_printf ("%s ORDER BY %s LIMIT %d OFFSET %d", grouping,
+            message_order (sort_mode), bounded_limit, bounded_offset);
         Sqlite.Statement statement;
         if (database.prepare_v2 (sql.str, -1, out statement) != Sqlite.OK) throw new MailError.STORAGE ("Could not prepare cached-mail search");
         for (int index = 0; index < values.size; index++) statement.bind_text (index + 1, values[index]);
@@ -4612,16 +4715,37 @@ public class CacheDatabase : Object, AccountStore {
         return result;
     }
 
-    public int count_search_messages (SearchQuery query) throws MailError {
+    public int count_search_messages (SearchQuery query, string mailbox_scope = "",
+                                      string account_scope = "") throws MailError {
         var sql = new StringBuilder ("SELECT COUNT(*) FROM cached_messages m JOIN message_fts f ON f.id=m.id LEFT JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE 1=1");
         var values = new Gee.ArrayList<string> ();
+        append_search_scope (sql, values, mailbox_scope, account_scope);
         append_search_predicates (sql, query, values);
+        string prepared_sql = sql.str;
+        if (mailbox_scope != "" && is_grouped_smart_mailbox (mailbox_scope)) {
+            var grouped = new StringBuilder ("SELECT COUNT(*) FROM (");
+            grouped.append (sql.str.replace ("SELECT COUNT(*)", "SELECT 1"));
+            grouped.append (" GROUP BY m.account_id,COALESCE(NULLIF(m.internet_message_id,''),m.id))");
+            prepared_sql = grouped.str;
+        }
         Sqlite.Statement statement;
-        if (database.prepare_v2 (sql.str, -1, out statement) != Sqlite.OK)
+        if (database.prepare_v2 (prepared_sql, -1, out statement) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not prepare cached-mail search counting");
         for (int index = 0; index < values.size; index++) statement.bind_text (index + 1, values[index]);
         if (statement.step () != Sqlite.ROW) throw new MailError.STORAGE ("Could not count cached-mail search results");
         return statement.column_int (0);
+    }
+
+    private static void append_search_scope (StringBuilder sql, Gee.ArrayList<string> values,
+                                              string mailbox_scope, string account_scope) {
+        if (mailbox_scope != "") {
+            bool bind_mailbox = false;
+            string predicate = cached_mailbox_predicate (mailbox_scope, out bind_mailbox);
+            sql.append (" AND ("); sql.append (predicate); sql.append (")");
+            if (bind_mailbox) values.add (mailbox_scope);
+        } else if (account_scope != "") {
+            sql.append (" AND m.account_id=?"); values.add (account_scope);
+        }
     }
 
     private static void append_search_predicates (StringBuilder sql, SearchQuery query,

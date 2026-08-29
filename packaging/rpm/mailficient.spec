@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Fri Aug 28 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.0-1
+- Add provider-backed folder and subfolder management, a dedicated advanced
+  Rules window, and a compact adaptive interface across mail and settings.
+
 * Thu Aug 27 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.3.2-1
 - Make foreground sending reliable, make Undo Send optional and move it to a
   bottom-window action, and fix stale conversation and unread indicators.
