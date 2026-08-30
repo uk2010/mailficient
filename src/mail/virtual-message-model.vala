@@ -4,6 +4,7 @@ internal delegate Gee.List<Message> MessagePageLoader (int limit, int offset);
 // Represents the entire logical mailbox while retaining only a few database
 // pages. Gtk.ListView independently recycles visible row widgets.
 internal class VirtualMessageModel : Object, GLib.ListModel {
+    internal static int qa_live_instances;
     // Load a small first page so switching from an empty smart mailbox can
     // paint the Inbox promptly. Additional rows are fetched as the user
     // scrolls, while the bounded page cache still keeps scrolling smooth.
@@ -17,8 +18,13 @@ internal class VirtualMessageModel : Object, GLib.ListModel {
     internal int cached_page_count { get { return pages.size; } }
 
     public VirtualMessageModel (int item_count, owned MessagePageLoader loader) {
+        qa_live_instances++;
         this.item_count = (uint) int.max (0, item_count);
         this.loader = (owned) loader;
+    }
+
+    ~VirtualMessageModel () {
+        qa_live_instances--;
     }
 
     public Object? get_item (uint position) {

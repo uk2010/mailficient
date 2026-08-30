@@ -1,3 +1,19 @@
+# Mailficient 0.4.2
+
+Mailficient 0.4.2 keeps favorite navigation fast and memory usage bounded
+during long mail-triage sessions.
+
+Highlights:
+
+- Releases obsolete virtual mailbox models instead of retaining one for every
+  rapid favorite switch
+- Tears down recycled message-row controllers and reader actions so old
+  selections and full message bodies are no longer retained
+- Removes the multi-second action-menu stall when switching from a populated
+  favorite to an empty favorite
+- Adds repeatable favorite-switch stress checks with live bounds for mailbox
+  models, message rows, and reader action trees
+
 # Mailficient 0.4.1
 
 Mailficient 0.4.1 brings Apple-style toolbar customization and whole-app color

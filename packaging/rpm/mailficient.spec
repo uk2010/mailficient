@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Sun Aug 30 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.2-1
+- Bound memory during repeated favorite switching and remove populated-to-empty
+  favorite navigation stalls.
+
 * Sun Aug 30 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.1-1
 - Add drag-and-drop toolbar customization and whole-app color selection, and
   fix adaptive styling, toolbar responsiveness, and retained memory.

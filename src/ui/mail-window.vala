@@ -83,6 +83,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private SimpleAction? group_messages_action;
     private SimpleAction? always_show_images_action;
     private SimpleAction? full_html_formatting_action;
+    private bool message_action_map_initialized;
     private Gtk.MenuButton sort_button = new Gtk.MenuButton ();
     private Gtk.Box customizable_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
     private Gtk.ScrolledWindow mail_toolbar_scroller = new Gtk.ScrolledWindow ();
@@ -789,11 +790,25 @@ public class MailWindow : Adw.ApplicationWindow {
         if (Environment.get_variable ("MAILFICIENT_QA_EMPTY_JUNK_STRESS") == "1")
             Timeout.add (900, () => {
                 int stress_step = 0;
-                Timeout.add (80, () => {
+                int stress_steps = 40;
+                int stress_interval_ms = 80;
+                string stress_message = Environment.get_variable (
+                    "MAILFICIENT_QA_EMPTY_JUNK_STRESS_MESSAGE") ?? "3";
+                if (stress_message == "") stress_message = "3";
+                string requested_steps = Environment.get_variable (
+                    "MAILFICIENT_QA_EMPTY_JUNK_STRESS_STEPS") ?? "";
+                string requested_interval = Environment.get_variable (
+                    "MAILFICIENT_QA_EMPTY_JUNK_STRESS_INTERVAL_MS") ?? "";
+                int parsed = 0;
+                if (int.try_parse (requested_steps, out parsed) && parsed > 0)
+                    stress_steps = parsed;
+                if (int.try_parse (requested_interval, out parsed) && parsed > 0)
+                    stress_interval_ms = parsed;
+                Timeout.add (stress_interval_ms, () => {
                     bool loaded = false;
                     if (stress_step % 2 == 0) {
                         loaded = sidebar.select_mailbox ("inbox") &&
-                            message_list.select_message ("3");
+                            message_list.select_message (stress_message);
                     } else {
                         loaded = sidebar.select_mailbox ("junk");
                     }
@@ -801,7 +816,16 @@ public class MailWindow : Adw.ApplicationWindow {
                         critical ("Empty Junk stress could not complete navigation step %d",
                             stress_step);
                     stress_step++;
-                    return stress_step < 40 ? Source.CONTINUE : Source.REMOVE;
+                    if (stress_step % 100 == 0)
+                        qa_assert_favorite_switch_bounds (stress_step);
+                    if (stress_step >= stress_steps) {
+                        if (stress_step % 100 != 0)
+                            qa_assert_favorite_switch_bounds (stress_step);
+                        DebugTrace.log ("qa", "empty_junk_stress_complete transitions=%d".printf (
+                            stress_steps));
+                        return Source.REMOVE;
+                    }
+                    return Source.CONTINUE;
                 });
                 return Source.REMOVE;
             });
@@ -3473,6 +3497,16 @@ public class MailWindow : Adw.ApplicationWindow {
         junk_button.sensitive = server_messages; move_button.sensitive = server_messages;
         flag_button.sensitive = selected; flag_color_button.sensitive = selected;
         update_flag_button_color ();
+
+        // Disabling each presented GAction synchronously fans out through all
+        // menu observers and can block the GTK main loop for several seconds.
+        // The visible controls above are already insensitive, and every
+        // message command revalidates action_messages() before doing work.
+        // Preserve the last menu-action state while there is no selection;
+        // a real selection refreshes it normally. The first call is allowed
+        // through so an empty startup still initializes the actions correctly.
+        if (!selected && message_action_map_initialized) return;
+        message_action_map_initialized = true;
         foreach (var name in new string[] { "reply", "reply-all", "forward" }) {
             var action = lookup_action (name) as SimpleAction; if (action != null) action.set_enabled (single);
         }
@@ -3878,7 +3912,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var dialog = new Adw.AboutDialog ();
         dialog.add_css_class ("about-dialog");
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.4.1"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.4.2"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -3934,6 +3968,22 @@ public class MailWindow : Adw.ApplicationWindow {
     private static bool is_task_mailbox (string id) {
         return id == CachedMailRepository.TASK_TODAY_ID ||
             id == CachedMailRepository.TASK_PLANNED_ID;
+    }
+
+    private void qa_assert_favorite_switch_bounds (int transitions) {
+        DebugTrace.log ("qa", "favorite_switch_live transitions=%d rows=%d models=%d reader_actions=%d".printf (
+            transitions, MessageRow.qa_live_instances,
+            VirtualMessageModel.qa_live_instances,
+            ReadingPane.qa_live_message_actions));
+        if (VirtualMessageModel.qa_live_instances > 3)
+            critical ("Favorite switching retained %d virtual message models after %d transitions",
+                VirtualMessageModel.qa_live_instances, transitions);
+        if (MessageRow.qa_live_instances > 64)
+            critical ("Favorite switching retained %d message rows after %d transitions",
+                MessageRow.qa_live_instances, transitions);
+        if (ReadingPane.qa_live_message_actions > 1)
+            critical ("Favorite switching retained %d reader action trees after %d transitions",
+                ReadingPane.qa_live_message_actions, transitions);
     }
 
     private void create_task_from_selected_message () {

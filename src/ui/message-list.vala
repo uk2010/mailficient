@@ -32,6 +32,7 @@ public class MessageList : Gtk.Box {
     private Gee.HashMap<string, MessageRow> bound_rows = new Gee.HashMap<string, MessageRow> ();
     private bool suppress_unread_filter_reload;
     private uint unread_filter_reload_source;
+    private uint selection_install_source;
     private bool refresh_deferred_until_shown;
 
     public MessageList (MailRepository repository, MailSearchService search_service) {
@@ -498,6 +499,15 @@ public class MessageList : Gtk.Box {
     private void configure_selection (bool select_first = false, string preserve_id = "",
                                       bool announce = false) {
         if (model == null) return;
+        // Only the newest mailbox can ever be installed.  A busy WebKit frame
+        // loop can starve idle callbacks; queueing one owned model per switch
+        // then retains every obsolete virtual page until the UI becomes idle.
+        // Removing the previous source also runs its closure destroy notifier,
+        // releasing that model and selection immediately.
+        if (selection_install_source != 0) {
+            Source.remove (selection_install_source);
+            selection_install_source = 0;
+        }
         var next_model = model;
         var next_selection = new Gtk.MultiSelection (next_model);
         selection = next_selection;
@@ -514,7 +524,11 @@ public class MessageList : Gtk.Box {
         // Keep the currently painted rows until next_selection is ready to be
         // installed. Assigning the replacement directly in the idle callback
         // makes the model change atomic from the frame clock's perspective.
-        Idle.add (() => {
+        // Use normal event priority: this remains deferred out of the current
+        // GTK callback but cannot be starved by a continuous stream of input,
+        // frame, or WebKit events at the same priority.
+        selection_install_source = Idle.add_full (Priority.DEFAULT, () => {
+            selection_install_source = 0;
             if (model != next_model || selection != next_selection) return Source.REMOVE;
             list.model = next_selection;
             suppress_selection = !announce;

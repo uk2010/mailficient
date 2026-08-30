@@ -1,5 +1,6 @@
 namespace Mailficient {
 public class ReadingPane : Gtk.Box {
+    internal static int qa_live_message_actions;
     public signal void vip_toggled (Message message, bool vip);
     public signal void attachment_saved (string filename);
     public signal void attachment_failed (Error error);
@@ -146,12 +147,17 @@ public class ReadingPane : Gtk.Box {
             Accessibility.label (weak_vip, weak_vip.tooltip_text); vip_toggled (message, weak_vip.active);
         });
         var create_meeting = new Gtk.Button.from_icon_name ("appointment-new-symbolic");
+        qa_live_message_actions++;
+        create_meeting.weak_ref ((object) => qa_live_message_actions--);
         create_meeting.add_css_class ("flat");
         create_meeting.add_css_class ("reader-subject-action");
         create_meeting.tooltip_text = "Create Meeting from Email";
         Accessibility.label (create_meeting, "Create meeting from this email");
-        create_meeting.clicked.connect (() =>
-            create_meeting_from_email.begin (message, create_meeting));
+        weak Gtk.Button weak_create_meeting = create_meeting;
+        create_meeting.clicked.connect (() => {
+            if (weak_create_meeting != null)
+                create_meeting_from_email.begin (message, weak_create_meeting);
+        });
         subject_line.append (create_meeting);
         subject_line.append (vip); header.append (subject_line);
         if (message.labels.size > 0) {
@@ -371,11 +377,12 @@ public class ReadingPane : Gtk.Box {
             load.add_css_class ("suggested-action");
             load.set_margin_top (8);
             Accessibility.label (load, "Load remote images in this message");
+            weak Gtk.Box weak_notice_box = notice_box;
             load.clicked.connect (() => {
                 if (html_view != null)
                     html_view.display (message.body_html, true, message.attachments,
                         full_html_formatting, print_header (message));
-                notice_box.visible = false;
+                if (weak_notice_box != null) weak_notice_box.visible = false;
             });
             notice_box.append (notice_text);
             notice_box.append (load);
@@ -390,7 +397,8 @@ public class ReadingPane : Gtk.Box {
                     if (html_view != null)
                         html_view.display (message.body_html, true, message.attachments,
                             full_html_formatting, print_header (message));
-                    notice_box.visible = false; remote_sender_trusted (message.sender_address);
+                    if (weak_notice_box != null) weak_notice_box.visible = false;
+                    remote_sender_trusted (message.sender_address);
                 } catch (Error error) { remote_content_failed (error); }
             });
             notice_box.append (trust); message_content.append (notice_box);

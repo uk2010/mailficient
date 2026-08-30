@@ -1,5 +1,6 @@
 namespace Mailficient {
 public class MessageRow : Gtk.Box {
+    internal static int qa_live_instances;
     public const string DRAG_PAYLOAD_PREFIX = "mailficient-message-ids:\n";
     public signal void reopen_requested (Message message);
     public Message message { get; construct; }
@@ -17,11 +18,17 @@ public class MessageRow : Gtk.Box {
     private Gtk.Widget? unread_dot;
     private Gtk.Image? flag_icon;
     private Gtk.CheckButton? selection_checkbox;
+    private ulong selection_checkbox_handler;
+    private Gtk.GestureClick? context_click;
+    private Gtk.DragSource? drag_source;
+    private Gtk.GestureClick? primary_click;
+    private Gtk.PopoverMenu? context_popover;
     private bool syncing_selection_checkbox;
 
     public MessageRow (Message message, Gtk.SelectionModel? context_selection = null,
                        Gtk.ListItem? context_item = null, bool multiple = false) {
         Object (message: message, orientation: Gtk.Orientation.VERTICAL);
+        qa_live_instances++;
         this.context_selection = context_selection;
         this.context_item = context_item;
         add_css_class ("message-row");
@@ -44,7 +51,7 @@ public class MessageRow : Gtk.Box {
             weak Gtk.SelectionModel? row_selection = context_selection;
             weak Gtk.CheckButton weak_selector = selector;
             weak MessageRow weak_row = this;
-            selector.toggled.connect (() => {
+            selection_checkbox_handler = selector.toggled.connect (() => {
                 if (weak_row == null || weak_row.syncing_selection_checkbox ||
                     row_selection == null || weak_selector == null) return;
                 uint row_position = weak_row.current_position ();
@@ -177,8 +184,10 @@ public class MessageRow : Gtk.Box {
         output.append ("Export Message…", "win.export-message");
         output.append ("Print…", "win.print-message");
         menu.append_section (null, output);
-        var popover = new Gtk.PopoverMenu.from_model (menu); popover.set_parent (this); popover.has_arrow = false;
-        var context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
+        var popover = new Gtk.PopoverMenu.from_model (menu);
+        context_popover = popover;
+        popover.set_parent (this); popover.has_arrow = false;
+        context_click = new Gtk.GestureClick (); context_click.button = Gdk.BUTTON_SECONDARY;
         weak Gtk.SelectionModel? row_selection = context_selection;
         weak MessageRow weak_row = this;
         context_click.pressed.connect ((count, x, y) => {
@@ -192,12 +201,13 @@ public class MessageRow : Gtk.Box {
             // Refresh the action label from the row's current state before
             // showing the menu. This also covers a row whose read state was
             // changed while its popover was not open.
-            update_unread_style ();
+            if (weak_row == null) return;
+            weak_row.update_unread_style ();
             popover.pointing_to = { (int) x, (int) y, 1, 1 }; popover.popup ();
         });
         add_controller (context_click);
 
-        var drag_source = new Gtk.DragSource ();
+        drag_source = new Gtk.DragSource ();
         drag_source.actions = Gdk.DragAction.MOVE | Gdk.DragAction.COPY;
         drag_source.propagation_phase = Gtk.PropagationPhase.CAPTURE;
         drag_source.prepare.connect ((x, y) => {
@@ -229,22 +239,39 @@ public class MessageRow : Gtk.Box {
         });
         add_controller (drag_source);
 
-        var primary_click = new Gtk.GestureClick (); primary_click.button = Gdk.BUTTON_PRIMARY;
+        primary_click = new Gtk.GestureClick (); primary_click.button = Gdk.BUTTON_PRIMARY;
         primary_click.released.connect ((count, x, y) => {
             // Gtk does not emit selection-changed when the already-selected
             // row is clicked again. That is the normal way to reopen a
             // message that was manually marked unread.
             uint row_position = weak_row == null ? Gtk.INVALID_LIST_POSITION :
                 weak_row.current_position ();
-            if (!multiple && context_selection != null &&
+            if (weak_row != null && !multiple && row_selection != null &&
                 row_position != Gtk.INVALID_LIST_POSITION &&
-                context_selection.is_selected (row_position))
-                reopen_requested (message);
+                row_selection.is_selected (row_position))
+                weak_row.reopen_requested (message);
         });
         add_controller (primary_click);
     }
 
     public void unbind_selection () {
+        // Each controller's signal closure shares Vala's constructor capture
+        // block, which includes this row.  A widget owns its controllers, so
+        // leaving those handlers connected forms row -> controller -> row and
+        // retains the old selection model and virtual message pages after a
+        // mailbox switch.  Factory unbind is the deterministic teardown edge.
+        if (selection_checkbox_handler != 0 && selection_checkbox != null)
+            selection_checkbox.disconnect (selection_checkbox_handler);
+        selection_checkbox_handler = 0;
+        if (context_click != null) remove_controller (context_click);
+        if (drag_source != null) remove_controller (drag_source);
+        if (primary_click != null) remove_controller (primary_click);
+        context_click = null;
+        drag_source = null;
+        primary_click = null;
+        if (context_popover != null && context_popover.get_parent () != null)
+            context_popover.unparent ();
+        context_popover = null;
         if (selection_handler != 0 && context_selection != null)
             context_selection.disconnect (selection_handler);
         selection_handler = 0;
@@ -279,6 +306,7 @@ public class MessageRow : Gtk.Box {
     }
 
     ~MessageRow () {
+        qa_live_instances--;
         if (position_handler != 0 && context_item != null)
             context_item.disconnect (position_handler);
         if (unread_handler != 0) message.disconnect (unread_handler);
