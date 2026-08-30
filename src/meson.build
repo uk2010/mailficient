@@ -1,6 +1,7 @@
 sources = files(
   'main.vala',
   'application/mail-application.vala',
+  'application/color-theme-controller.vala',
   'models/account.vala',
   'models/mailbox.vala',
   'models/toolbar-layout.vala',

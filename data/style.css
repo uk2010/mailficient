@@ -5298,8 +5298,7 @@ button.account-summary-add:hover {
 .mail-window .mail-header-bar menubutton.toolbar-menu-button > button,
 .mail-window .mail-header-bar menubutton.sort-toolbar-button > button,
 .mail-window .mail-header-bar menubutton.app-menu-button > button,
-.mail-window .mail-header-bar .header-back-button,
-.mail-window .mail-header-bar .mail-window-controls button {
+.mail-window .mail-header-bar .header-back-button {
   min-width: 30px;
   min-height: 30px;
   margin: 0;
@@ -5315,8 +5314,7 @@ button.account-summary-add:hover {
 
 .mail-window .mail-header-bar .apple-toolbar-button image,
 .mail-window .mail-header-bar menubutton > button image,
-.mail-window .mail-header-bar .header-back-button image,
-.mail-window .mail-header-bar .mail-window-controls button image {
+.mail-window .mail-header-bar .header-back-button image {
   margin: 0;
   padding: 0;
   color: inherit;
@@ -5329,8 +5327,7 @@ button.account-summary-add:hover {
 .mail-window .mail-header-bar menubutton.toolbar-menu-button > button:hover,
 .mail-window .mail-header-bar menubutton.sort-toolbar-button > button:hover,
 .mail-window .mail-header-bar menubutton.app-menu-button > button:hover,
-.mail-window .mail-header-bar .header-back-button:hover,
-.mail-window .mail-header-bar .mail-window-controls button:hover {
+.mail-window .mail-header-bar .header-back-button:hover {
   color: currentColor;
   background: alpha(currentColor, .075);
   border-color: alpha(currentColor, .055);
@@ -5356,8 +5353,7 @@ button.account-summary-add:hover {
 
 .mail-window .mail-header-bar .apple-toolbar-button:focus-visible,
 .mail-window .mail-header-bar menubutton > button:focus-visible,
-.mail-window .mail-header-bar .header-back-button:focus-visible,
-.mail-window .mail-header-bar .mail-window-controls button:focus-visible {
+.mail-window .mail-header-bar .header-back-button:focus-visible {
   outline: 2px solid rgba(53, 132, 228, .82);
   outline-offset: -2px;
   border-color: transparent;
@@ -5596,7 +5592,6 @@ button.account-summary-add:hover {
 .mail-window.mail-dark .mail-header-bar .apple-toolbar-button,
 .mail-window.mail-dark .mail-header-bar menubutton > button,
 .mail-window.mail-dark .mail-header-bar .header-back-button,
-.mail-window.mail-dark .mail-header-bar .mail-window-controls button,
 .mail-window.mail-dark .message-list-header button,
 .mail-window.mail-dark .reader-subject-action {
   color: rgba(238, 243, 248, .78);
@@ -5608,7 +5603,6 @@ button.account-summary-add:hover {
 .mail-window.mail-dark .mail-header-bar .apple-toolbar-button:hover,
 .mail-window.mail-dark .mail-header-bar menubutton > button:hover,
 .mail-window.mail-dark .mail-header-bar .header-back-button:hover,
-.mail-window.mail-dark .mail-header-bar .mail-window-controls button:hover,
 .mail-window.mail-dark .message-list-header button:hover,
 .mail-window.mail-dark .reader-subject-action:hover {
   color: #ffffff;
@@ -6690,3 +6684,693 @@ window.compose-window.compose-dark > contents,
   color: #9ac7fa;
   background: rgba(83, 155, 245, .13);
 }
+
+/* Final Apple Mail-style toolbar and live customizer -----------------------
+ *
+ * This is the authoritative cascade for the main command bar and the
+ * in-window customization sheet.  The customizer deliberately lives in the
+ * mail window instead of an Adw.Dialog: the toolbar remains a real drop
+ * target while the palette is open.  All artwork continues to come from the
+ * application's existing icon names. */
+
+/* A single, lightly layered titlebar material keeps the separate command
+ * groups readable without making every icon look like a raised push button. */
+.mail-window .mail-header-bar {
+  min-height: 52px;
+  padding: 7px 11px;
+  border: 0;
+  border-bottom: 1px solid alpha(currentColor, .11);
+  border-radius: 0;
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--headerbar-bg-color) 93%, var(--window-bg-color)),
+    color-mix(in srgb, var(--headerbar-bg-color) 82%, var(--window-bg-color)));
+  box-shadow: inset 0 1px alpha(white, .28),
+              0 2px 10px alpha(black, .075);
+}
+
+.mail-window .mail-header-bar .apple-toolbar {
+  min-height: 34px;
+  padding: 0;
+  background: transparent;
+}
+
+.mail-window .mail-header-bar menubutton.apple-toolbar-button,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button,
+.mail-window .mail-header-bar menubutton.app-menu-button {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button,
+.mail-window .mail-header-bar menubutton.app-menu-button > button,
+.mail-window .mail-header-bar .header-back-button {
+  min-width: 34px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid alpha(currentColor, .105);
+  border-radius: 10px;
+  color: alpha(currentColor, .82);
+  background: alpha(currentColor, .045);
+  box-shadow: inset 0 1px alpha(white, .25),
+              0 1px 2px alpha(black, .035);
+  transition: color 110ms ease-out, background-color 110ms ease-out,
+              border-color 110ms ease-out, box-shadow 110ms ease-out,
+              opacity 110ms ease-out;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button image,
+.mail-window .mail-header-bar menubutton > button image,
+.mail-window .mail-header-bar .header-back-button image {
+  color: inherit;
+  opacity: 1;
+  -gtk-icon-size: 16px;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:hover,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button:hover,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button:hover,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button:hover,
+.mail-window .mail-header-bar menubutton.app-menu-button > button:hover,
+.mail-window .mail-header-bar .header-back-button:hover {
+  color: currentColor;
+  border-color: alpha(currentColor, .16);
+  background: alpha(currentColor, .09);
+  box-shadow: inset 0 1px alpha(white, .30),
+              0 2px 5px alpha(black, .07);
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:active,
+.mail-window .mail-header-bar .apple-toolbar-button:checked,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button:active,
+.mail-window .mail-header-bar menubutton.apple-toolbar-button > button:checked,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button:active,
+.mail-window .mail-header-bar menubutton.toolbar-menu-button > button:checked,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button:active,
+.mail-window .mail-header-bar menubutton.sort-toolbar-button > button:checked,
+.mail-window .mail-header-bar menubutton.app-menu-button > button:active,
+.mail-window .mail-header-bar menubutton.app-menu-button > button:checked,
+.mail-window .mail-header-bar .header-back-button:active {
+  color: var(--accent-color);
+  border-color: alpha(var(--accent-bg-color), .32);
+  background: alpha(var(--accent-bg-color), .15);
+  box-shadow: inset 0 1px 2px alpha(black, .09);
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:disabled,
+.mail-window .mail-header-bar menubutton > button:disabled,
+.mail-window .mail-header-bar .header-back-button:disabled {
+  opacity: .42;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button:focus-visible,
+.mail-window .mail-header-bar menubutton > button:focus-visible,
+.mail-window .mail-header-bar .header-back-button:focus-visible {
+  outline: 2px solid alpha(var(--accent-bg-color), .82);
+  outline-offset: -2px;
+}
+
+/* Related actions form the compact glass segments used in Mail.  The outer
+ * capsule supplies the material; children only paint their interactive state. */
+.mail-window .mail-header-bar .apple-toolbar-group,
+.mail-window .mail-header-bar .toolbar-action-cluster,
+.mail-window .mail-header-bar .flag-control {
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid alpha(currentColor, .105);
+  border-radius: 10px;
+  background: alpha(currentColor, .045);
+  box-shadow: inset 0 1px alpha(white, .24),
+              0 1px 2px alpha(black, .035);
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-action-cluster .apple-toolbar-group .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-action-cluster > .apple-toolbar-button.toolbar-cluster-segment,
+.mail-window .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button,
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button,
+.mail-window .mail-header-bar .flag-control menubutton.toolbar-menu-button > button {
+  min-width: 34px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid alpha(currentColor, .09);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button:first-child,
+.mail-window .mail-header-bar .toolbar-action-cluster > :first-child,
+.mail-window .mail-header-bar .flag-control > :first-child {
+  border-radius: 9px 0 0 9px;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button:last-child,
+.mail-window .mail-header-bar .toolbar-action-cluster > :last-child,
+.mail-window .mail-header-bar .flag-control > :last-child,
+.mail-window .mail-header-bar .flag-control > menubutton.toolbar-menu-button > button {
+  border-right: 0;
+  border-radius: 0 9px 9px 0;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-group .apple-toolbar-button:hover,
+.mail-window .mail-header-bar .toolbar-action-cluster .apple-toolbar-button:hover,
+.mail-window .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button:hover,
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button:hover,
+.mail-window .mail-header-bar .flag-control menubutton.toolbar-menu-button > button:hover {
+  color: currentColor;
+  border-color: alpha(currentColor, .09);
+  background: alpha(currentColor, .08);
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .flag-control > .apple-toolbar-button {
+  border-radius: 9px 0 0 9px;
+}
+
+.mail-window .mail-header-bar .flag-control > menubutton.toolbar-menu-button > button {
+  min-width: 19px;
+  padding-left: 3px;
+  padding-right: 3px;
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button,
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  color: var(--accent-color);
+  border-color: alpha(var(--accent-bg-color), .20);
+  background: alpha(var(--accent-bg-color), .10);
+  box-shadow: inset 0 1px alpha(white, .26),
+              0 1px 3px alpha(var(--accent-bg-color), .10);
+}
+
+.mail-window .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  border-color: alpha(var(--accent-bg-color), .31);
+  background: alpha(var(--accent-bg-color), .16);
+}
+
+.mail-window .mail-header-bar .toolbar-search-control {
+  min-height: 32px;
+  border: 1px solid alpha(currentColor, .11);
+  border-radius: 18px;
+  background: alpha(currentColor, .075);
+  box-shadow: inset 0 1px alpha(white, .18),
+              inset 0 -1px alpha(black, .035);
+}
+
+.mail-window .mail-header-bar .toolbar-search-control:focus-within {
+  border-color: alpha(var(--accent-bg-color), .54);
+  background: alpha(currentColor, .09);
+  box-shadow: 0 0 0 3px alpha(var(--accent-bg-color), .12),
+              inset 0 1px alpha(white, .20);
+}
+
+.mail-window .mail-header-bar .toolbar-search-control .apple-toolbar-search,
+.mail-window .mail-header-bar .toolbar-search-control .apple-toolbar-search:focus,
+.mail-window .mail-header-bar .toolbar-search-control .apple-toolbar-search:focus-within {
+  min-height: 32px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border: 0;
+  border-radius: 17px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .toolbar-search-control .apple-toolbar-search text,
+.mail-window .mail-header-bar .toolbar-search-control .apple-toolbar-search text:focus {
+  color: inherit;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window .mail-header-bar .toolbar-search-control .apple-toolbar-search placeholder {
+  color: alpha(currentColor, .58);
+}
+
+/* The overlay covers mail content, while the header remains visually present
+ * as the live destination for toolbar drags. */
+.mail-window .toolbar-customization-overlay {
+  color: var(--window-fg-color);
+  background: alpha(black, .16);
+}
+
+.mail-window .toolbar-customization-sheet {
+  min-height: 270px;
+  margin-top: 4px;
+  padding: 8px 14px 8px;
+  border: 1px solid alpha(currentColor, .14);
+  border-radius: 14px;
+  color: var(--window-fg-color);
+  background: #f4f6f8;
+  box-shadow: inset 0 1px alpha(white, .46),
+              0 -10px 36px alpha(black, .18);
+}
+
+.mail-window .toolbar-customization-surface {
+  background: #f4f6f8;
+}
+
+.mail-window .toolbar-customization-intro-row {
+  min-height: 19px;
+}
+
+.mail-window .toolbar-customization-heading {
+  color: alpha(currentColor, .94);
+  font-size: 1em;
+  font-weight: 720;
+}
+
+.mail-window .toolbar-customization-intro-description {
+  font-size: .82em;
+}
+
+.mail-window .toolbar-customization-palette {
+  min-height: 134px;
+  padding: 2px 1px 3px;
+  border: 0;
+  border-bottom: 1px solid alpha(currentColor, .09);
+  background: transparent;
+}
+
+.mail-window .toolbar-customization-palette flowboxchild {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.mail-window .toolbar-customization-tile {
+  min-width: 64px;
+  min-height: 42px;
+  margin: 0;
+  padding: 2px 3px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: alpha(currentColor, .86);
+  background: transparent;
+  box-shadow: none;
+  transition: color 110ms ease-out, background-color 110ms ease-out,
+              border-color 110ms ease-out, opacity 110ms ease-out;
+}
+
+.mail-window .toolbar-customization-tile:hover,
+.mail-window .toolbar-customization-palette flowboxchild:hover .toolbar-customization-tile {
+  color: var(--accent-color);
+  border-color: alpha(var(--accent-bg-color), .18);
+  background: alpha(var(--accent-bg-color), .075);
+}
+
+.mail-window .toolbar-customization-tile:active {
+  border-color: alpha(var(--accent-bg-color), .30);
+  background: alpha(var(--accent-bg-color), .13);
+}
+
+.mail-window .toolbar-customization-tile:focus-visible,
+.mail-window .toolbar-customization-default-strip:focus-visible,
+.mail-window .toolbar-customization-show:focus-visible,
+.mail-window .toolbar-customization-done:focus-visible {
+  outline: 2px solid alpha(var(--accent-bg-color), .80);
+  outline-offset: -2px;
+}
+
+.mail-window .toolbar-customization-tile-icon {
+  min-width: 28px;
+  min-height: 22px;
+  padding: 0 5px;
+  border: 1px solid alpha(currentColor, .10);
+  border-radius: 7px;
+  color: inherit;
+  background: alpha(currentColor, .045);
+  box-shadow: inset 0 1px alpha(white, .26);
+  -gtk-icon-size: 14px;
+}
+
+/* Installed singletons remain legible enough to explain their state, but
+ * cannot be mistaken for another draggable source. Spaces intentionally do
+ * not receive this class because the toolbar may contain several of them. */
+.mail-window .toolbar-customization-tile-installed {
+  opacity: .38;
+}
+
+.mail-window .toolbar-customization-tile-installed:hover,
+.mail-window .toolbar-customization-palette flowboxchild:hover .toolbar-customization-tile-installed {
+  color: alpha(currentColor, .76);
+  border-color: transparent;
+  background: transparent;
+}
+
+.mail-window .toolbar-customization-default-label {
+  margin-top: 1px;
+  color: alpha(currentColor, .65);
+  font-size: .80em;
+  font-weight: 600;
+}
+
+.mail-window .toolbar-customization-default-strip {
+  min-height: 34px;
+  margin-top: 2px;
+  padding: 3px 7px;
+  border: 1px solid alpha(currentColor, .13);
+  border-radius: 9px;
+  color: alpha(currentColor, .82);
+  background: alpha(var(--view-bg-color), .72);
+  box-shadow: inset 0 1px alpha(white, .30),
+              0 2px 7px alpha(black, .045);
+  transition: background-color 110ms ease-out, border-color 110ms ease-out,
+              box-shadow 110ms ease-out, opacity 110ms ease-out;
+}
+
+.mail-window .toolbar-customization-default-strip:hover {
+  border-color: alpha(var(--accent-bg-color), .28);
+  background: color-mix(in srgb, var(--view-bg-color) 92%, var(--accent-bg-color));
+  box-shadow: inset 0 1px alpha(white, .34),
+              0 3px 10px alpha(black, .065);
+}
+
+.mail-window .toolbar-customization-default-item {
+  min-width: 22px;
+  min-height: 24px;
+  margin: 0 1px;
+  padding: 0 4px;
+  border: 1px solid alpha(currentColor, .08);
+  border-radius: 7px;
+  color: inherit;
+  background: alpha(currentColor, .04);
+  -gtk-icon-size: 13px;
+}
+
+.mail-window .toolbar-customization-footer {
+  min-height: 28px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid alpha(currentColor, .09);
+}
+
+.mail-window .toolbar-customization-show,
+.mail-window .toolbar-customization-show > button,
+.mail-window .toolbar-customization-show button {
+  min-height: 28px;
+  border-radius: 8px;
+}
+
+.mail-window .toolbar-customization-show > button,
+.mail-window .toolbar-customization-show button {
+  padding: 0 10px;
+  border: 1px solid alpha(currentColor, .13);
+  color: alpha(currentColor, .84);
+  background: alpha(currentColor, .045);
+  box-shadow: inset 0 1px alpha(white, .24);
+}
+
+.mail-window .toolbar-customization-show > button:hover,
+.mail-window .toolbar-customization-show button:hover {
+  border-color: alpha(currentColor, .18);
+  color: currentColor;
+  background: alpha(currentColor, .085);
+}
+
+.mail-window .toolbar-customization-done {
+  min-width: 62px;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid #1c71d8;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #3584e4;
+  box-shadow: inset 0 1px alpha(white, .22),
+              0 1px 3px alpha(var(--accent-bg-color), .20);
+  font-weight: 700;
+}
+
+.mail-window .toolbar-customization-done:hover {
+  background: #4b94eb;
+  box-shadow: inset 0 1px alpha(white, .28),
+              0 2px 6px alpha(var(--accent-bg-color), .25);
+}
+
+.mail-window .toolbar-customization-done:active {
+  background: #1c71d8;
+  box-shadow: inset 0 1px 2px alpha(black, .14);
+}
+
+/* Drop feedback belongs to live toolbar item hosts.  Inset edges avoid a
+ * layout jump while still giving the pointer a precise insertion landmark. */
+.mail-window .mail-header-bar .toolbar-drop-before {
+  box-shadow: inset 3px 0 var(--accent-bg-color),
+              -3px 0 9px alpha(var(--accent-bg-color), .28);
+}
+
+.mail-window .mail-header-bar .toolbar-drop-after {
+  box-shadow: inset -3px 0 var(--accent-bg-color),
+              3px 0 9px alpha(var(--accent-bg-color), .28);
+}
+
+.mail-window .mail-header-bar .toolbar-dragging,
+.mail-window .toolbar-customization-sheet .toolbar-dragging {
+  opacity: .34;
+}
+
+.mail-window .mail-header-bar .toolbar-drop-end-target {
+  min-width: 18px;
+  min-height: 32px;
+  border-radius: 7px;
+}
+
+.mail-window .mail-header-bar .toolbar-item-host,
+.mail-window .mail-header-bar .toolbar-drag-host {
+  min-width: 0;
+  min-height: 32px;
+}
+
+/* The last responsive stage keeps the same 34px-tall command surface while
+ * reducing icon-only tiles from 52px to 34px wide. This leaves the native
+ * window controls fully visible at the supported 480px window minimum. */
+.mail-window .mail-header-bar .toolbar-minimal .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-minimal menubutton.apple-toolbar-button > button,
+.mail-window .mail-header-bar .toolbar-minimal menubutton.toolbar-menu-button > button,
+.mail-window .mail-header-bar .toolbar-minimal menubutton.sort-toolbar-button > button {
+  min-width: 22px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+.mail-window .mail-header-bar.mail-header-minimal {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.mail-window .mail-header-bar.mail-header-minimal menubutton.app-menu-button > button,
+.mail-window .mail-header-bar.mail-header-minimal .header-back-button {
+  min-width: 22px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+.mail-window .mail-header-bar .toolbar-customizing .toolbar-drag-host {
+  padding-left: 3px;
+  padding-right: 3px;
+}
+
+.mail-window .mail-header-bar .toolbar-item-content {
+  min-width: 0;
+}
+
+.mail-window .mail-header-bar .toolbar-item-label {
+  font-size: .72em;
+  font-weight: 520;
+}
+
+.mail-window .mail-header-bar .toolbar-display-icons-text .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-display-icons-text menubutton.toolbar-menu-button > button,
+.mail-window .mail-header-bar .toolbar-display-icons-text menubutton.sort-toolbar-button > button {
+  min-height: 44px;
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.mail-window .mail-header-bar .toolbar-display-text .apple-toolbar-button,
+.mail-window .mail-header-bar .toolbar-display-text menubutton.toolbar-menu-button > button,
+.mail-window .mail-header-bar .toolbar-display-text menubutton.sort-toolbar-button > button {
+  min-width: 0;
+  padding-left: 9px;
+  padding-right: 9px;
+}
+
+/* Forced dark appearance is mirrored onto the window by the application, so
+ * this remains correct even when it differs from the desktop-wide scheme. */
+.mail-window.mail-dark .mail-header-bar {
+  color: #edf5fd;
+  border-bottom-color: rgba(205, 225, 245, .10);
+  background: linear-gradient(to bottom, #24313d, #1e2934);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .055),
+              0 3px 14px rgba(0, 0, 0, .24);
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button,
+.mail-window.mail-dark .mail-header-bar menubutton.apple-toolbar-button > button,
+.mail-window.mail-dark .mail-header-bar menubutton.toolbar-menu-button > button,
+.mail-window.mail-dark .mail-header-bar menubutton.sort-toolbar-button > button,
+.mail-window.mail-dark .mail-header-bar menubutton.app-menu-button > button,
+.mail-window.mail-dark .mail-header-bar .header-back-button,
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-group,
+.mail-window.mail-dark .mail-header-bar .toolbar-action-cluster,
+.mail-window.mail-dark .mail-header-bar .flag-control {
+  color: rgba(237, 245, 253, .86);
+  border-color: rgba(205, 225, 245, .12);
+  background: rgba(205, 225, 245, .055);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .055),
+              0 1px 3px rgba(0, 0, 0, .15);
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-group .apple-toolbar-button,
+.mail-window.mail-dark .mail-header-bar .toolbar-action-cluster .apple-toolbar-button,
+.mail-window.mail-dark .mail-header-bar .toolbar-action-cluster > menubutton.toolbar-cluster-segment > button,
+.mail-window.mail-dark .mail-header-bar .flag-control .apple-toolbar-button,
+.mail-window.mail-dark .mail-header-bar .flag-control menubutton.toolbar-menu-button > button {
+  color: rgba(237, 245, 253, .86);
+  border-color: rgba(205, 225, 245, .085);
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-button:hover,
+.mail-window.mail-dark .mail-header-bar menubutton > button:hover,
+.mail-window.mail-dark .mail-header-bar .header-back-button:hover,
+.mail-window.mail-dark .mail-header-bar .apple-toolbar-group .apple-toolbar-button:hover,
+.mail-window.mail-dark .mail-header-bar .toolbar-action-cluster .apple-toolbar-button:hover,
+.mail-window.mail-dark .mail-header-bar .flag-control .apple-toolbar-button:hover {
+  color: #ffffff;
+  border-color: rgba(225, 239, 252, .15);
+  background: rgba(225, 239, 252, .105);
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .toolbar-search-control {
+  color: #edf5fd;
+  border-color: rgba(225, 236, 247, .11);
+  background: rgba(5, 9, 13, .56);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .32),
+              inset 0 1px rgba(255, 255, 255, .045);
+}
+
+.mail-window.mail-dark .mail-header-bar .toolbar-search-control:focus-within {
+  border-color: rgba(120, 174, 237, .60);
+  background: rgba(4, 8, 12, .72);
+  box-shadow: 0 0 0 3px rgba(83, 155, 245, .16),
+              inset 0 1px rgba(255, 255, 255, .05);
+}
+
+.mail-window.mail-dark .mail-header-bar .toolbar-search-control .apple-toolbar-search text,
+.mail-window.mail-dark .mail-header-bar .toolbar-search-control .apple-toolbar-search text:focus {
+  color: #edf5fd;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mail-window.mail-dark .mail-header-bar .toolbar-search-control .apple-toolbar-search placeholder {
+  color: rgba(237, 245, 253, .58);
+}
+
+.mail-window.mail-dark .toolbar-customization-overlay {
+  color: #edf5fd;
+  background: rgba(0, 0, 0, .38);
+}
+
+.mail-window.mail-dark .toolbar-customization-sheet {
+  color: #edf5fd;
+  border-color: rgba(205, 225, 245, .13);
+  background: #1b2631;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .06),
+              0 -12px 40px rgba(0, 0, 0, .36);
+}
+
+.mail-window.mail-dark .toolbar-customization-surface {
+  background: #1b2631;
+}
+
+.mail-window.mail-dark .toolbar-customization-tile,
+.mail-window.mail-dark .toolbar-customization-default-label {
+  color: rgba(225, 237, 249, .78);
+}
+
+.mail-window.mail-dark .toolbar-customization-tile-icon,
+.mail-window.mail-dark .toolbar-customization-default-item {
+  border-color: rgba(205, 225, 245, .11);
+  background: rgba(205, 225, 245, .055);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045);
+}
+
+.mail-window.mail-dark .toolbar-customization-tile:hover,
+.mail-window.mail-dark .toolbar-customization-palette flowboxchild:hover .toolbar-customization-tile {
+  color: #b7d7ff;
+  border-color: rgba(120, 174, 237, .23);
+  background: rgba(83, 155, 245, .13);
+}
+
+.mail-window.mail-dark .toolbar-customization-tile-installed:hover,
+.mail-window.mail-dark .toolbar-customization-palette flowboxchild:hover .toolbar-customization-tile-installed {
+  color: rgba(225, 237, 249, .72);
+  border-color: transparent;
+  background: transparent;
+}
+
+.mail-window.mail-dark .toolbar-customization-palette,
+.mail-window.mail-dark .toolbar-customization-footer {
+  border-color: rgba(205, 225, 245, .09);
+}
+
+.mail-window.mail-dark .toolbar-customization-default-strip {
+  color: rgba(229, 239, 249, .86);
+  border-color: rgba(205, 225, 245, .13);
+  background: #151f29;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045),
+              0 2px 8px rgba(0, 0, 0, .20);
+}
+
+.mail-window.mail-dark .toolbar-customization-default-strip:hover {
+  border-color: rgba(120, 174, 237, .30);
+  background: #1b2d3e;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .055),
+              0 3px 11px rgba(0, 0, 0, .24);
+}
+
+.mail-window.mail-dark .toolbar-customization-show > button,
+.mail-window.mail-dark .toolbar-customization-show button {
+  color: rgba(229, 239, 249, .86);
+  border-color: rgba(205, 225, 245, .13);
+  background: rgba(205, 225, 245, .06);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045);
+}
+
+.mail-window.mail-dark .toolbar-customization-show > button:hover,
+.mail-window.mail-dark .toolbar-customization-show button:hover {
+  color: #ffffff;
+  border-color: rgba(225, 239, 252, .18);
+  background: rgba(225, 239, 252, .11);
+}
+
+/* The selected flag color belongs to the toolbar button, so it survives
+ * icons-only/icons-and-text rebuilding. Target the descendant image directly
+ * to outrank the toolbar's inherited foreground in every color family. */
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-orange image { color: #ff9f0a; }
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-red image { color: #ff453a; }
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-purple image { color: #6e7cff; }
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-blue image { color: #32d4e9; }
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-yellow image { color: #ffd60a; }
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-green image { color: #30d158; }
+.mail-window .mail-header-bar .flag-control .apple-toolbar-button.flag-gray image { color: #9a9a9e; }

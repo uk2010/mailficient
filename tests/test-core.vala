@@ -1987,6 +1987,10 @@ private void test_settings_store () {
         settings.undo_send_seconds = 24;
         assert (settings.appearance == "system");
         settings.appearance = "dark";
+        assert (settings.color_theme == "blue");
+        assert (settings.app_color == "#3584e4");
+        settings.color_theme = "gray";
+        assert (settings.app_color == "#70767d");
         var reopened = new MailSettingsStore (new CacheDatabase (path));
         assert (!reopened.notifications_enabled); assert (reopened.signature_enabled ("account-1"));
         assert (reopened.signature ("account-1") == "Alex Morgan\nDesign Team");
@@ -2009,13 +2013,21 @@ private void test_settings_store () {
         assert (!reopened.undo_send_enabled);
         assert (reopened.undo_send_seconds == 24);
         assert (reopened.appearance == "dark");
+        assert (reopened.color_theme == "gray");
+        assert (reopened.app_color == "#70767d");
+        reopened.app_color = "#C04fED";
+        assert (reopened.color_theme == "custom");
+        assert (reopened.app_color == "#c04fed");
+        var color_reopened = new MailSettingsStore (new CacheDatabase (path));
+        assert (color_reopened.color_theme == "custom");
+        assert (color_reopened.app_color == "#c04fed");
         reopened.save_window_state (1920, 1080, true);
         var maximized = new MailSettingsStore (new CacheDatabase (path));
         assert (maximized.window_maximized);
         assert (maximized.window_width == 1480); assert (maximized.window_height == 910);
         maximized.window_width = 10; maximized.window_height = 9999;
         maximized.mailbox_pane_width = 2; maximized.message_pane_width = 9999;
-        assert (maximized.window_width == 640); assert (maximized.window_height == 2160);
+        assert (maximized.window_width == 480); assert (maximized.window_height == 2160);
         assert (maximized.mailbox_pane_width == 190); assert (maximized.message_pane_width == 520);
         maximized.sync_interval_minutes = 1;
         assert (maximized.sync_interval_minutes == 1);
@@ -2025,6 +2037,9 @@ private void test_settings_store () {
         assert (maximized.preferences_page == "general");
         maximized.appearance = "invalid";
         assert (maximized.appearance == "system");
+        maximized.color_theme = "invalid";
+        assert (maximized.color_theme == "blue");
+        assert (maximized.app_color == "#3584e4");
         maximized.undo_send_seconds = 1;
         assert (maximized.undo_send_seconds == 5);
         maximized.undo_send_seconds = 60;
@@ -2042,6 +2057,160 @@ private void test_settings_store () {
         assert (!chooser_reopened.file_dialog_initial_folder ().equal (
             File.new_for_path (chooser_folder)));
     } catch (Error caught) { GLib.error ("settings store test failed: %s", caught.message); }
+    FileUtils.unlink (path);
+}
+
+private void test_toolbar_display_mode_settings () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-toolbar-display-%s.sqlite".printf (Uuid.string_random ()));
+    try {
+        var cache = new CacheDatabase (path);
+        var settings = new MailSettingsStore (cache);
+        assert (settings.toolbar_display_mode == "icons");
+
+        settings.toolbar_display_mode = "icons-text";
+        var reopened = new MailSettingsStore (new CacheDatabase (path));
+        assert (reopened.toolbar_display_mode == "icons-text");
+
+        reopened.toolbar_display_mode = "text";
+        var text_reopened = new MailSettingsStore (new CacheDatabase (path));
+        assert (text_reopened.toolbar_display_mode == "text");
+
+        // The getter must remain safe if an older or external writer stores a
+        // value this version does not understand.
+        cache.set_preference ("toolbar-display-mode", "unsupported-mode");
+        var invalid_reopened = new MailSettingsStore (new CacheDatabase (path));
+        assert (invalid_reopened.toolbar_display_mode == "icons");
+
+        // The public setter also canonicalizes invalid input before it reaches
+        // durable storage.
+        invalid_reopened.toolbar_display_mode = "pictures-and-labels";
+        var canonical_reopened = new MailSettingsStore (new CacheDatabase (path));
+        assert (canonical_reopened.toolbar_display_mode == "icons");
+        assert (cache.preference ("toolbar-display-mode") == "icons");
+    } catch (Error caught) {
+        GLib.error ("toolbar display mode settings test failed: %s", caught.message);
+    }
+    FileUtils.unlink (path);
+}
+
+private void test_toolbar_settings_do_not_wait_for_database_writer () {
+    string path = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-toolbar-contention-%s.sqlite".printf (Uuid.string_random ())) ;
+    try {
+        var cache = new CacheDatabase (path);
+        cache.set_preference ("toolbar-layout", "sidebar,compose,flex,search");
+        cache.set_preference ("toolbar-display-mode", "icons");
+        cache.set_preference ("toolbar-layout-percentages-migrated", "false");
+        var settings = new MailSettingsStore (cache);
+
+        // Model the installed background sender owning SQLite's single WAL
+        // writer while Done publishes the toolbar's final in-memory state.
+        Sqlite.Database blocker;
+        assert (Sqlite.Database.open (path, out blocker) == Sqlite.OK);
+        string? detail = null;
+        assert (blocker.exec ("PRAGMA busy_timeout=0;BEGIN IMMEDIATE", null,
+            out detail) == Sqlite.OK);
+
+        // Also occupy this CacheDatabase object's primary SQLite handle. The
+        // toolbar preference connection and all cached getters must remain
+        // independent while a sync-style write is waiting on that handle's
+        // five-second busy timeout.
+        Mutex writer_mutex = Mutex ();
+        Cond writer_ready = Cond ();
+        bool writer_started = false;
+        bool writer_finished = false;
+        string writer_error = "";
+        var primary_writer = new Thread<bool> (
+            "mailficient-toolbar-primary-writer", () => {
+                writer_mutex.lock ();
+                writer_started = true;
+                writer_ready.signal ();
+                writer_mutex.unlock ();
+                try {
+                    cache.set_preference ("shared-handle-write", "saved");
+                } catch (Error error) {
+                    writer_error = error.message;
+                }
+                writer_mutex.lock ();
+                writer_finished = true;
+                writer_mutex.unlock ();
+                return writer_error == "";
+            });
+        writer_mutex.lock ();
+        while (!writer_started) writer_ready.wait (writer_mutex);
+        writer_mutex.unlock ();
+        Thread.usleep (100 * 1000);
+
+        int changes = 0;
+        settings.changed.connect ((key) => {
+            if (key == "toolbar-layout" || key == "toolbar-display-mode" ||
+                key == "toolbar-layout-percentages-migrated")
+                changes++;
+        });
+        int64 started = GLib.get_monotonic_time ();
+        for (int iteration = 0; iteration < 250; iteration++) {
+            assert (settings.toolbar_layout == "sidebar,compose,flex,search");
+            assert (settings.toolbar_display_mode == "icons");
+            assert (!settings.toolbar_layout_percentages_migrated);
+        }
+        settings.toolbar_layout = "refresh,flex,compose";
+        settings.toolbar_display_mode = "icons-text";
+        // A second selection before the retry must replace the staged value,
+        // rather than eventually overwriting the user's latest choice.
+        settings.toolbar_display_mode = "text";
+        settings.toolbar_layout_percentages_migrated = true;
+        for (int iteration = 0; iteration < 250; iteration++) {
+            assert (settings.toolbar_layout == "refresh,flex,compose");
+            assert (settings.toolbar_display_mode == "text");
+            assert (settings.toolbar_layout_percentages_migrated);
+        }
+        int64 elapsed = GLib.get_monotonic_time () - started;
+
+        assert (elapsed < 1000000);
+        assert (changes == 4);
+        writer_mutex.lock ();
+        bool finished_before_release = writer_finished;
+        writer_mutex.unlock ();
+        assert (!finished_before_release);
+
+        assert (blocker.exec ("COMMIT", null, out detail) == Sqlite.OK);
+        assert (primary_writer.join ());
+        assert (writer_error == "");
+        bool persisted = false;
+        bool timed_out = false;
+        var loop = new MainLoop ();
+        uint watchdog = Timeout.add_seconds (2, () => {
+            timed_out = true;
+            loop.quit ();
+            return Source.REMOVE;
+        });
+        Timeout.add (10, () => {
+            try {
+                persisted =
+                    cache.preference ("toolbar-layout") ==
+                        "refresh,flex,compose" &&
+                    cache.preference ("toolbar-display-mode") == "text" &&
+                    cache.preference (
+                        "toolbar-layout-percentages-migrated") == "true" &&
+                    cache.preference ("shared-handle-write") == "saved";
+            } catch (Error error) {
+                GLib.error ("Could not inspect retried toolbar setting: %s",
+                    error.message);
+            }
+            if (persisted) loop.quit ();
+            return persisted ? Source.REMOVE : Source.CONTINUE;
+        });
+        loop.run ();
+        if (!timed_out) Source.remove (watchdog);
+        assert (!timed_out);
+        assert (persisted);
+        // Persistence is silent because observers already consumed the staged
+        // values; a second signal would rebuild the toolbar again.
+        assert (changes == 4);
+    } catch (Error caught) {
+        GLib.error ("toolbar setting contention test failed: %s", caught.message);
+    }
     FileUtils.unlink (path);
 }
 
@@ -5338,7 +5507,7 @@ private void test_account_provisioning_quiesces_main_sync () {
     }
 }
 
-private void test_toolbar_layout () {
+private void test_toolbar_layout_parsing_and_defaults () {
     var layout = ToolbarLayout.parse (
         "sidebar,refresh,invalid,sidebar,flex,space,flex,archive");
     assert (layout.size == 6);
@@ -5353,13 +5522,101 @@ private void test_toolbar_layout () {
     assert (ToolbarLayout.is_repeatable ("space"));
     assert (!ToolbarLayout.is_repeatable ("archive"));
     assert (ToolbarLayout.is_flexible_space ("flex:25"));
+    assert (!ToolbarLayout.is_flexible_space ("flex:"));
+    assert (!ToolbarLayout.is_flexible_space ("flex:-1"));
+    assert (!ToolbarLayout.is_flexible_space (
+        "flex:999999999999999999999999999999999999999"));
     assert (ToolbarLayout.flexible_space_percentage ("flex:25") == 25);
     assert (ToolbarLayout.flexible_space_id (25) == "flex:25");
     assert (ToolbarLayout.is_legacy_pixel_space ("flex:101"));
     assert (ToolbarLayout.migrate_pixel_spaces ("sidebar,flex:200,flex:20,sort", 1000) ==
         "sidebar,flex:20,flex:2,sort");
-    assert (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT).size > 0);
+
+    assert (ToolbarLayout.DEFAULT_LAYOUT ==
+        "sidebar,compose,flex,refresh,space,reply-group,mail-actions,move,flag,flex,search,sort");
+    assert (ToolbarLayout.serialize (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT)) ==
+        ToolbarLayout.DEFAULT_LAYOUT);
+    assert (ToolbarLayout.is_legacy_default (ToolbarLayout.LEGACY_DEFAULT_LAYOUT));
+    assert (ToolbarLayout.is_legacy_default (ToolbarLayout.PREVIOUS_DEFAULT_LAYOUT));
+    assert (ToolbarLayout.is_legacy_default (ToolbarLayout.RECENT_DEFAULT_LAYOUT));
+    assert (ToolbarLayout.is_legacy_default (
+        " sidebar, compose, refresh, flex, mail-actions, reply, move, flex, search, sort "));
+    assert (!ToolbarLayout.is_legacy_default (ToolbarLayout.DEFAULT_LAYOUT));
+    assert (!ToolbarLayout.is_legacy_default (
+        "sidebar,compose,refresh,flex,mail-actions,reply,move,flag,flex,search,sort"));
+
+    var palette = new Gee.HashSet<string> ();
+    foreach (string id in ToolbarLayout.palette_items ()) palette.add (id);
+    foreach (string id in ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT))
+        assert (palette.contains (id));
+    assert (palette.contains ("refresh"));
+    assert (palette.contains ("sort"));
+    assert (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT).contains ("refresh"));
+    assert (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT).contains ("sort"));
+    assert (ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT).contains ("space"));
+
+    // Current icon mappings remain the source of truth for the new layout.
+    assert (ToolbarLayout.icon_name ("sidebar") == "sidebar-show-symbolic");
+    assert (ToolbarLayout.icon_name ("compose") == "document-edit-symbolic");
+    assert (ToolbarLayout.icon_name ("reply-group") == "mail-reply-sender-symbolic");
+    assert (ToolbarLayout.icon_name ("mail-actions") == "package-x-generic-symbolic");
     assert (ToolbarLayout.icon_name ("junk") == "dialog-warning-symbolic");
+    assert (ToolbarLayout.icon_name ("move") == "folder-symbolic");
+    assert (ToolbarLayout.icon_name ("flag") == "mailficient-flag-symbolic");
+    assert (ToolbarLayout.icon_name ("search") == "system-search-symbolic");
+}
+
+private void test_toolbar_layout_mutations () {
+    assert (ToolbarLayout.insert_item ("compose,search", "sidebar", 0) ==
+        "sidebar,compose,search");
+    assert (ToolbarLayout.insert_item ("sidebar,search", "compose", 1) ==
+        "sidebar,compose,search");
+    assert (ToolbarLayout.insert_item ("sidebar,compose", "search", 2) ==
+        "sidebar,compose,search");
+
+    // Singleton controls cannot be inserted twice, while either kind of
+    // spacer can be repeated.
+    assert (ToolbarLayout.insert_item ("sidebar,compose", "sidebar", 2) ==
+        "sidebar,compose");
+    assert (ToolbarLayout.insert_item ("sidebar,space", "space", 1) ==
+        "sidebar,space,space");
+    assert (ToolbarLayout.insert_item ("sidebar,flex", "flex", 1) ==
+        "sidebar,flex,flex");
+    assert (ToolbarLayout.insert_item ("sidebar,flex:25", "flex:25", 1) ==
+        "sidebar,flex:25,flex:25");
+
+    // Unsafe input is rejected, but the existing value is still canonicalized.
+    assert (ToolbarLayout.insert_item (" sidebar,invalid,compose,sidebar ",
+        "not-a-control", 1) == "sidebar,compose");
+    assert (ToolbarLayout.insert_item ("sidebar,compose", "search", -1) ==
+        "sidebar,compose");
+    assert (ToolbarLayout.insert_item ("sidebar,compose", "search", 3) ==
+        "sidebar,compose");
+
+    assert (ToolbarLayout.remove_item ("sidebar,space,space,compose", 1) ==
+        "sidebar,space,compose");
+    assert (ToolbarLayout.remove_item ("sidebar,compose,search", 0) ==
+        "compose,search");
+    assert (ToolbarLayout.remove_item ("sidebar,compose,search", 2) ==
+        "sidebar,compose");
+    assert (ToolbarLayout.remove_item ("sidebar,compose", -1) ==
+        "sidebar,compose");
+    assert (ToolbarLayout.remove_item ("sidebar,compose", 2) ==
+        "sidebar,compose");
+
+    // Move destinations are final-array indices in both directions.
+    assert (ToolbarLayout.move_item ("sidebar,compose,move,flag", 1, 3) ==
+        "sidebar,move,flag,compose");
+    assert (ToolbarLayout.move_item ("sidebar,compose,move,flag", 3, 1) ==
+        "sidebar,flag,compose,move");
+    assert (ToolbarLayout.move_item ("sidebar,space,space,compose", 1, 2) ==
+        "sidebar,space,space,compose");
+    assert (ToolbarLayout.move_item ("sidebar,compose", 0, 0) ==
+        "sidebar,compose");
+    assert (ToolbarLayout.move_item ("sidebar,compose", -1, 1) ==
+        "sidebar,compose");
+    assert (ToolbarLayout.move_item ("sidebar,compose", 0, 2) ==
+        "sidebar,compose");
 }
 
 private void test_task_views_recurrence_and_email_flags () {
@@ -6069,7 +6326,10 @@ int main (string[] args) {
         test_new_mail_notifications_are_reconciled_durably);
     Test.add_func ("/notifications/legacy-new-mail-is-adopted-once",
         test_legacy_new_mail_notifications_are_adopted_once);
-    Test.add_func ("/models/toolbar-layout", test_toolbar_layout);
+    Test.add_func ("/models/toolbar-layout/parsing-and-defaults",
+        test_toolbar_layout_parsing_and_defaults);
+    Test.add_func ("/models/toolbar-layout/mutations",
+        test_toolbar_layout_mutations);
     Test.add_func ("/tasks/views-recurrence-and-email-flags", test_task_views_recurrence_and_email_flags);
     Test.add_func ("/tasks/reminder-delivery-is-durable", test_task_reminder_delivery_is_durable);
     Test.add_func ("/mail/sorting", test_message_sorting);
@@ -6097,6 +6357,10 @@ int main (string[] args) {
         test_failed_local_data_migration_is_atomic);
     Test.add_func ("/draft/state", test_draft_state);
     Test.add_func ("/storage/settings", test_settings_store);
+    Test.add_func ("/storage/settings-toolbar-display-mode",
+        test_toolbar_display_mode_settings);
+    Test.add_func ("/storage/settings-toolbar-writer-contention",
+        test_toolbar_settings_do_not_wait_for_database_writer);
     Test.add_func ("/sync/startup-network-gate", test_startup_sync_gate);
     Test.add_func ("/sync/streamed-pass-refresh-gate", test_streamed_pass_refresh_gate);
     Test.add_func ("/sync/live-mail-coordinator", test_live_mail_coordinator_debounces_and_cancels);

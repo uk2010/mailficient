@@ -22,11 +22,13 @@ public class CacheDatabase : Object, AccountStore {
     // application uses this edge-trigger to request Flatpak background access;
     // the background service itself verifies the durable database state.
     public signal void remote_draft_work_queued (string account_id);
+    private string database_path;
     private Sqlite.Database database;
     private Sqlite.Statement? bulk_message_statement;
     private bool bulk_sync_mode;
 
     public CacheDatabase (string path) throws MailError {
+        database_path = path;
         if (Sqlite.Database.open (path, out database) != Sqlite.OK)
             throw new MailError.STORAGE ("Could not open the mail cache");
         // The GUI and the background delivery process intentionally share this
@@ -309,6 +311,41 @@ public class CacheDatabase : Object, AccountStore {
             throw new MailError.STORAGE ("Could not prepare preference storage");
         statement.bind_text (1, key); statement.bind_text (2, value);
         if (statement.step () != Sqlite.DONE) throw new MailError.STORAGE ("Could not save the preference");
+    }
+
+    /* UI-only preferences never use the primary database handle or its
+     * five-second busy timeout. Callers retain the effective value in memory
+     * and retry when another Mailficient process currently owns the WAL
+     * writer. */
+    public bool try_set_preference (string key, string value) throws MailError {
+        // Use a disposable connection for each attempt. It cannot queue behind
+        // a sync statement holding the primary handle's connection mutex, and
+        // closing it after the attempt leaves no additional long-lived WAL
+        // reader in the application.
+        Sqlite.Database preference_database;
+        if (Sqlite.Database.open (database_path, out preference_database) !=
+            Sqlite.OK)
+            throw new MailError.STORAGE ("Could not open the preference store");
+        if (preference_database.busy_timeout (0) != Sqlite.OK)
+            throw new MailError.STORAGE (
+                "Could not configure the preference store");
+        Sqlite.Statement statement;
+        int prepared = preference_database.prepare_v2 (
+            "INSERT INTO preferences(key,value) VALUES(?,?) " +
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            -1, out statement);
+        if (prepared == Sqlite.BUSY || prepared == Sqlite.LOCKED)
+            return false;
+        if (prepared != Sqlite.OK)
+            throw new MailError.STORAGE ("Could not prepare preference storage");
+        statement.bind_text (1, key);
+        statement.bind_text (2, value);
+        int saved = statement.step ();
+        if (saved == Sqlite.BUSY || saved == Sqlite.LOCKED)
+            return false;
+        if (saved != Sqlite.DONE)
+            throw new MailError.STORAGE ("Could not save the preference");
+        return true;
     }
 
     public Gee.ArrayList<JunkRule> list_junk_rules () throws MailError {

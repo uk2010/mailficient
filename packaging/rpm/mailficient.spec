@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Sun Aug 30 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.1-1
+- Add drag-and-drop toolbar customization and whole-app color selection, and
+  fix adaptive styling, toolbar responsiveness, and retained memory.
+
 * Fri Aug 28 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.0-1
 - Add provider-backed folder and subfolder management, a dedicated advanced
   Rules window, and a compact adaptive interface across mail and settings.

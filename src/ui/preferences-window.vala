@@ -438,6 +438,13 @@ public class PreferencesWindow : Adw.Dialog {
         return button;
     }
 
+    private static string rgba_hex (Gdk.RGBA color) {
+        int red = (int) (color.red * 255.0f + 0.5f);
+        int green = (int) (color.green * 255.0f + 0.5f);
+        int blue = (int) (color.blue * 255.0f + 0.5f);
+        return "#%02x%02x%02x".printf (red, green, blue);
+    }
+
     private Adw.PreferencesPage build_general_page () {
         var page = new Adw.PreferencesPage (); page.title = "General"; page.icon_name = "preferences-system-symbolic";
         add_page_intro (page, "EVERYDAY MAIL", "Set your rhythm",
@@ -445,7 +452,7 @@ public class PreferencesWindow : Adw.Dialog {
             "preferences-system-symbolic", "Changes save automatically");
 
         var appearance_group = settings_section ("Look &amp; Feel",
-            "Keep Mailficient in step with your desktop or choose a fixed appearance.",
+            "Choose System, Light, or Dark, then apply any color to that appearance.",
             "appearance");
         var appearance_chooser = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
         appearance_chooser.add_css_class ("appearance-chooser");
@@ -481,7 +488,35 @@ public class PreferencesWindow : Adw.Dialog {
         else if (current_appearance == "dark") dark_option.active = true;
         else system_option.active = true;
         appearance_chooser.append (options);
-        appearance_group.add (appearance_chooser); page.add (appearance_group);
+        appearance_group.add (appearance_chooser);
+
+        var color_dialog = new Gtk.ColorDialog ();
+        color_dialog.title = "Choose Mailficient Color";
+        color_dialog.modal = true;
+        color_dialog.with_alpha = false;
+        var color_picker = new Gtk.ColorDialogButton (color_dialog);
+        Gdk.RGBA selected_color = {};
+        if (!selected_color.parse (settings.app_color))
+            selected_color.parse ("#3584e4");
+        color_picker.rgba = selected_color;
+        color_picker.valign = Gtk.Align.CENTER;
+        color_picker.tooltip_text = "Choose any app color";
+        color_picker.add_css_class ("app-color-picker");
+        Accessibility.label (color_picker, "Choose app color");
+        var app_color = new Adw.ActionRow ();
+        app_color.title = "App color — Light &amp; Dark";
+        app_color.subtitle = "The chosen color automatically gets a complete light and dark palette";
+        app_color.add_suffix (color_picker);
+        app_color.activatable_widget = color_picker;
+        style_control_row (app_color, "color-select-symbolic");
+        color_picker.notify["rgba"].connect (() => {
+            unowned Gdk.RGBA? picked = color_picker.get_rgba ();
+            if (picked == null) return;
+            string chosen = rgba_hex (picked);
+            if (chosen != settings.app_color) settings.app_color = chosen;
+        });
+        appearance_group.add (app_color);
+        page.add (appearance_group);
 
         var checking = settings_section ("Mail Delivery",
             "Control when new messages arrive and when Mailficient lets you know.",

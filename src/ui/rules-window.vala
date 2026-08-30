@@ -74,7 +74,8 @@ public class RulesWindow : Adw.Window {
     private bool run_in_progress;
 
     public RulesWindow (Gtk.Window parent, CacheDatabase cache) {
-        Object (title: "Rules", transient_for: parent, modal: false,
+        Object (title: "Rules", transient_for: parent,
+            application: parent.application, modal: false,
             default_width: Environment.get_variable ("MAILFICIENT_QA_NARROW") == "1" ?
                 600 : 860, default_height: 700);
         bool qa_narrow = Environment.get_variable ("MAILFICIENT_QA_NARROW") == "1";

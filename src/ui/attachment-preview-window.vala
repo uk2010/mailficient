@@ -6,7 +6,8 @@ public class AttachmentPreviewWindow : Adw.Window {
     private Gtk.Box preview_area = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
 
     public AttachmentPreviewWindow (Gtk.Window parent, Attachment attachment) {
-        Object (title: attachment.name, transient_for: parent, modal: true,
+        Object (title: attachment.name, transient_for: parent,
+            application: parent.application, modal: true,
             default_width: 900, default_height: 680);
         this.attachment = attachment;
 

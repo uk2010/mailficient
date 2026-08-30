@@ -2,9 +2,12 @@
 <gresources>
   <gresource prefix="/com/local/Mailficient">
     <file>style.css</file>
+    <file>color-family-base.css</file>
+    <file>color-themes.css</file>
     <file>sample-data/design-review-notes.txt</file>
     <file>sample-data/product-review-invitation.ics</file>
     <file alias="sample-data/mailficient-preview.png">icons/hicolor/256x256/apps/com.local.Mailficient.png</file>
     <file>icons/scalable/actions/mailficient-flag-symbolic.svg</file>
+    <file>icons/scalable/actions/toolbar-space-symbolic.svg</file>
   </gresource>
 </gresources>

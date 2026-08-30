@@ -56,6 +56,7 @@ public class ComposeWindow : Adw.Window {
     private string applied_signature_block = "";
     private bool signature_initialized;
     private ulong signature_settings_handler;
+    private ulong style_manager_dark_handler;
     private OutboxItem? queued_item;
     private bool opened_from_outbox;
     private bool accepted_pending_cleanup;
@@ -95,7 +96,7 @@ public class ComposeWindow : Adw.Window {
                           Draft? saved_draft = null, bool queued = false) {
         Object (title: saved_draft == null ? compose_title (source_message, mode) :
                     (queued ? "Outbox Message" : "Edit Draft"), transient_for: parent,
-                modal: false,
+                application: parent.application, modal: false,
                 default_width: child_window_dimension (720, parent.get_width (), 480),
                 default_height: child_window_dimension (620, parent.get_height (), 420));
         // Adw.Window intentionally has a transparent content surface. The
@@ -106,7 +107,7 @@ public class ComposeWindow : Adw.Window {
         add_css_class ("compose-window");
         var style_manager = Adw.StyleManager.get_default ();
         update_compose_palette (style_manager.dark);
-        style_manager.notify["dark"].connect (() =>
+        style_manager_dark_handler = style_manager.notify["dark"].connect (() =>
             update_compose_palette (Adw.StyleManager.get_default ().dark));
         set_deletable (false);
         this.cache = cache;
@@ -657,6 +658,7 @@ public class ComposeWindow : Adw.Window {
         if (force_close) {
             attachment_operations.cancel (); cancel_spellcheck ();
             disconnect_signature_settings ();
+            disconnect_style_manager ();
             release_outbox_editor ();
             return false;
         }
@@ -665,6 +667,13 @@ public class ComposeWindow : Adw.Window {
 
     internal void request_close () {
         confirm_close.begin ();
+    }
+
+    private void disconnect_style_manager () {
+        if (style_manager_dark_handler == 0) return;
+        Adw.StyleManager.get_default ().disconnect (
+            style_manager_dark_handler);
+        style_manager_dark_handler = 0;
     }
 
     private void acquire_outbox_editor_if_needed () throws MailError {

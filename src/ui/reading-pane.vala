@@ -34,6 +34,8 @@ public class ReadingPane : Gtk.Box {
     private Gee.ArrayList<ulong> html_layout_handlers = new Gee.ArrayList<ulong> ();
     private Gee.ArrayList<ulong> html_link_handlers = new Gee.ArrayList<ulong> ();
     private int constrained_width;
+    private bool tracks_available_width;
+    private int last_available_width = -1;
     private bool shutting_down;
     private bool suspended;
     private Gtk.Widget? recovery_notice;
@@ -71,10 +73,37 @@ public class ReadingPane : Gtk.Box {
     public void set_viewport_width (int width) {
         if (shutting_down) return;
         if (width <= 0) return;
+        tracks_available_width = false;
+        last_available_width = -1;
         constrained_width = width;
         content.set_size_request (width, -1);
         foreach (var html_view in html_views)
             if (html_view.get_parent () != null) html_view.constrain_width (width);
+    }
+
+    public void use_available_width () {
+        if (shutting_down) return;
+        tracks_available_width = true;
+        constrained_width = 0;
+        last_available_width = -1;
+        content.set_size_request (0, -1);
+        var adjustment = scroller.hadjustment;
+        adjustment.value = adjustment.lower;
+        queue_resize ();
+    }
+
+    public override void size_allocate (int width, int height, int baseline) {
+        base.size_allocate (width, height, baseline);
+        if (!tracks_available_width || shutting_down) return;
+        int available = scroller.get_width ();
+        if (available <= 0) available = width;
+        if (available <= 0 || available == last_available_width) return;
+        last_available_width = available;
+        foreach (var html_view in html_views)
+            if (html_view.get_parent () != null)
+                html_view.constrain_width (available);
+        var adjustment = scroller.hadjustment;
+        adjustment.value = adjustment.lower;
     }
 
     public void zoom_in () {
@@ -138,7 +167,18 @@ public class ReadingPane : Gtk.Box {
         content.append (header);
         if (conversation == null || conversation.size == 0) append_conversation_message (message, true);
         else foreach (var item in conversation) append_conversation_message (item, item.id == message.id);
-        if (constrained_width > 0) set_viewport_width (constrained_width);
+        if (tracks_available_width) {
+            int available = scroller.get_width ();
+            if (available <= 0) available = get_width ();
+            if (available > 0) {
+                last_available_width = available;
+                foreach (var html_view in html_views)
+                    if (html_view.get_parent () != null)
+                        html_view.constrain_width (available);
+            }
+        } else if (constrained_width > 0) {
+            set_viewport_width (constrained_width);
+        }
         string? qa_preview = Environment.get_variable ("MAILFICIENT_QA_PREVIEW");
         if (!qa_preview_opened && qa_preview != null && qa_preview != "" && message.attachments.size > 0) {
             int index = qa_preview == "image" && message.attachments.size > 1 ? 1 : 0;
@@ -637,8 +677,14 @@ public class ReadingPane : Gtk.Box {
         dialog.set_size_request (520, 480);
         dialog.add_css_class ("message-security-dialog");
         sync_security_dialog_theme (dialog);
-        Adw.StyleManager.get_default ().notify["dark"].connect (() =>
+        var style_manager = Adw.StyleManager.get_default ();
+        ulong style_handler = style_manager.notify["dark"].connect (() =>
             sync_security_dialog_theme (dialog));
+        dialog.closed.connect (() => {
+            if (style_handler == 0) return;
+            style_manager.disconnect (style_handler);
+            style_handler = 0;
+        });
 
         var toolbar = new Adw.ToolbarView ();
         toolbar.add_css_class ("message-security-surface");

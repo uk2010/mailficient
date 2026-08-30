@@ -10,7 +10,8 @@ public class ContactPickerWindow : Adw.Window {
     private Cancellable? search_cancellable;
 
     public ContactPickerWindow (Gtk.Window parent, ContactSuggestionProvider provider) {
-        Object (title: "GNOME Contacts", transient_for: parent, modal: true,
+        Object (title: "GNOME Contacts", transient_for: parent,
+            application: parent.application, modal: true,
             default_width: 480, default_height: 520);
         this.provider = provider;
         var toolbar = new Adw.ToolbarView ();

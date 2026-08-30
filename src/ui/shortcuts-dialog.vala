@@ -2,6 +2,7 @@ namespace Mailficient {
 public class ShortcutsDialog : Adw.PreferencesDialog {
     public ShortcutsDialog () {
         title = "Keyboard Shortcuts"; content_width = 560; content_height = 600; search_enabled = false;
+        add_css_class ("shortcuts-dialog");
         var page = new Adw.PreferencesPage (); page.title = "Shortcuts"; page.icon_name = "preferences-desktop-keyboard-shortcuts-symbolic";
         var mail = new Adw.PreferencesGroup (); mail.title = "Mail";
         add_shortcut_row (mail, "New Message", "Ctrl+N"); add_shortcut_row (mail, "Reply", "Ctrl+R");

@@ -1,0 +1,171 @@
+/* Shared color-family foundations ------------------------------------------
+ *
+ * This provider stays installed for both supported families. Blue defines
+ * its established shell palette here; Gray supplies the same variables from
+ * color-themes.css while selected. Only opaque structural surfaces live in
+ * this sheet so Blue's intentional accent artwork remains unchanged.
+ */
+
+window.color-theme-blue {
+  --accent-color: #1c71d8;
+  --accent-bg-color: #3584e4;
+  --accent-fg-color: #ffffff;
+  --window-bg-color: #f4f7fa;
+  --window-fg-color: #26313d;
+  --view-bg-color: #f8fafc;
+  --view-fg-color: #26313d;
+  --headerbar-bg-color: #edf2f7;
+  --headerbar-fg-color: #26313d;
+  --card-bg-color: #fbfcfd;
+  --card-fg-color: #26313d;
+  --popover-bg-color: #f8fafc;
+  --popover-fg-color: #26313d;
+  --dialog-bg-color: #f4f7fa;
+  --dialog-fg-color: #26313d;
+  --sidebar-bg-color: #edf3f8;
+  --sidebar-fg-color: #26313d;
+
+  --mailficient-theme-window: #f4f7fa;
+  --mailficient-theme-header: #edf2f7;
+  --mailficient-theme-sidebar: #edf3f8;
+  --mailficient-theme-list: #f8fafc;
+  --mailficient-theme-view: #ffffff;
+  --mailficient-theme-card: #fbfcfd;
+  --mailficient-theme-raised: #ffffff;
+  --mailficient-theme-border: rgba(38, 49, 61, .12);
+  --mailficient-theme-wash: rgba(53, 132, 228, .08);
+  --mailficient-theme-wash-strong: rgba(53, 132, 228, .15);
+}
+
+window.color-theme-blue.color-theme-dark {
+  --accent-color: #99c1f1;
+  --accent-bg-color: #3584e4;
+  --accent-fg-color: #ffffff;
+  --window-bg-color: #101720;
+  --window-fg-color: #eef3f8;
+  --view-bg-color: #101820;
+  --view-fg-color: #eef3f8;
+  --headerbar-bg-color: #202c39;
+  --headerbar-fg-color: #f3f7fb;
+  --card-bg-color: #1e2a37;
+  --card-fg-color: #eef3f8;
+  --popover-bg-color: #202c39;
+  --popover-fg-color: #eef3f8;
+  --dialog-bg-color: #1b2631;
+  --dialog-fg-color: #eef3f8;
+  --sidebar-bg-color: #192633;
+  --sidebar-fg-color: #eaf0f6;
+
+  --mailficient-theme-window: #101720;
+  --mailficient-theme-header: #202c39;
+  --mailficient-theme-sidebar: #192633;
+  --mailficient-theme-list: #141c25;
+  --mailficient-theme-view: #101820;
+  --mailficient-theme-card: #1e2a37;
+  --mailficient-theme-raised: #253342;
+  --mailficient-theme-border: rgba(238, 243, 248, .12);
+  --mailficient-theme-wash: rgba(83, 155, 245, .10);
+  --mailficient-theme-wash-strong: rgba(83, 155, 245, .18);
+}
+
+/* GtkPopoverMenu carries the .menu class on its outer popover node. Keep
+ * that allocation clear in every color family and paint only its rounded
+ * `contents` child in the family-specific sheet. */
+popover.menu,
+.popover.menu {
+  background: transparent;
+}
+
+/* Dialog wrapper nodes remain transparent so libadwaita can preserve its
+ * rounded sheet shape and dimming. Paint only the visible nested sheet. */
+.shortcuts-dialog,
+.about-dialog,
+.settings-dialog,
+.task-editor-dialog,
+.rule-editor-dialog,
+.rule-run-dialog,
+.quick-step-editor-dialog,
+.sender-lists-dialog {
+  color: var(--dialog-fg-color);
+  background: transparent;
+}
+
+.shortcuts-dialog sheet,
+.about-dialog sheet,
+.settings-dialog sheet,
+.task-editor-dialog sheet,
+.rule-editor-dialog sheet,
+.rule-run-dialog sheet,
+.quick-step-editor-dialog sheet,
+.sender-lists-dialog sheet {
+  color: var(--dialog-fg-color);
+  background: var(--dialog-bg-color);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Native PreferencesGroup cards otherwise come from the desktop GTK theme.
+ * Tint the cards used by the named secondary surfaces without touching their
+ * semantic warning/destructive states or Blue's purpose-built accent art. */
+.shortcuts-dialog .boxed-list,
+.about-dialog .boxed-list,
+.task-editor-dialog .boxed-list {
+  color: var(--card-fg-color);
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+.shortcuts-dialog .keycap {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-wash);
+  border-color: var(--mailficient-theme-border);
+}
+
+.task-editor-dialog calendar {
+  color: var(--card-fg-color);
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Rules is the one secondary GtkWindow; all rule builders beneath it are
+ * in-window dialogs and inherit this same family ladder. */
+window.color-theme-blue.rules-window,
+window.color-theme-blue.rules-window.background,
+window.color-theme-blue.rules-window > contents,
+.rule-editor-dialog toolbarview,
+.rule-run-dialog toolbarview,
+.quick-step-editor-dialog toolbarview,
+.sender-lists-dialog toolbarview {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-window);
+}
+
+window.color-theme-blue.rules-window headerbar,
+.rule-editor-dialog headerbar,
+.rule-run-dialog headerbar,
+.quick-step-editor-dialog headerbar,
+.sender-lists-dialog headerbar {
+  color: var(--headerbar-fg-color);
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Settings/Manage Accounts uses a custom split view inside Adw.Dialog. */
+.settings-dialog .settings-content,
+.settings-dialog .settings-page,
+.settings-dialog .settings-page-frame {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-window);
+  border-color: var(--mailficient-theme-border);
+}
+
+.settings-dialog .settings-sidebar {
+  color: var(--sidebar-fg-color);
+  background: var(--mailficient-theme-sidebar);
+  border-color: var(--mailficient-theme-border);
+}
+
+.settings-dialog .settings-headerbar {
+  color: var(--headerbar-fg-color);
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}

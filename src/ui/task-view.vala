@@ -12,6 +12,9 @@ public class TaskView : Gtk.Box {
     private Gtk.Stack state_stack = new Gtk.Stack ();
     private Adw.StatusPage empty_page = new Adw.StatusPage ();
     private Gtk.CheckButton show_completed = new Gtk.CheckButton.with_label ("Show completed");
+    private Gtk.Box view_header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
+    private Gtk.Box header_labels = new Gtk.Box (Gtk.Orientation.VERTICAL, 2);
+    private Adw.ButtonContent add_content = new Adw.ButtonContent ();
     private string query = "";
     private int64 focus_task_id;
     private uint reload_source;
@@ -23,24 +26,24 @@ public class TaskView : Gtk.Box {
         this.service = service;
         add_css_class ("task-view");
 
-        var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
-        header.add_css_class ("task-view-header");
-        header.margin_start = 24; header.margin_end = 24;
-        header.margin_top = 20; header.margin_bottom = 14;
-        var labels = new Gtk.Box (Gtk.Orientation.VERTICAL, 2); labels.hexpand = true;
-        heading.xalign = 0; heading.add_css_class ("title-1"); labels.append (heading);
-        summary.xalign = 0; summary.add_css_class ("dim-label"); labels.append (summary);
-        header.append (labels);
+        view_header.add_css_class ("task-view-header");
+        view_header.margin_start = 24; view_header.margin_end = 24;
+        view_header.margin_top = 20; view_header.margin_bottom = 14;
+        header_labels.hexpand = true;
+        heading.xalign = 0; heading.ellipsize = Pango.EllipsizeMode.END;
+        heading.add_css_class ("title-1"); header_labels.append (heading);
+        summary.xalign = 0; summary.ellipsize = Pango.EllipsizeMode.END;
+        summary.add_css_class ("dim-label"); header_labels.append (summary);
+        view_header.append (header_labels);
         show_completed.valign = Gtk.Align.CENTER;
         show_completed.toggled.connect (queue_reload);
-        header.append (show_completed);
-        var add_content = new Adw.ButtonContent ();
+        view_header.append (show_completed);
         add_content.icon_name = "list-add-symbolic"; add_content.label = "New Task";
         var add = new Gtk.Button (); add.child = add_content; add.add_css_class ("suggested-action");
         add.tooltip_text = "Create a task"; Accessibility.label (add, "Create a new task");
         add.clicked.connect (() => edit_task.begin (null, null));
-        header.append (add);
-        append (header);
+        view_header.append (add);
+        append (view_header);
 
         task_list.selection_mode = Gtk.SelectionMode.NONE;
         task_list.show_separators = false;
@@ -66,6 +69,16 @@ public class TaskView : Gtk.Box {
         service.sync_failed.connect ((provider, detail) =>
             toast_requested ("%s sync is unavailable — changes remain saved locally".printf (provider)));
         set_mode (TaskViewMode.TODAY);
+    }
+
+    public void set_compact_layout (bool compact) {
+        view_header.spacing = compact ? 8 : 12;
+        view_header.margin_start = compact ? 12 : 24;
+        view_header.margin_end = compact ? 12 : 24;
+        view_header.margin_top = compact ? 12 : 20;
+        view_header.margin_bottom = compact ? 10 : 14;
+        show_completed.label = compact ? "Completed" : "Show completed";
+        add_content.label = compact ? "New" : "New Task";
     }
 
     public void set_mode (TaskViewMode mode) {
@@ -340,6 +353,7 @@ public class TaskView : Gtk.Box {
         scroller.hscrollbar_policy = Gtk.PolicyType.NEVER; scroller.child = editor;
         var dialog = new Adw.AlertDialog (task == null ? "New Task" : "Edit Task",
             task == null ? "Plan a follow-up with an optional reminder and recurrence." : "Update this task’s schedule and details.");
+        dialog.add_css_class ("task-editor-dialog");
         dialog.extra_child = scroller; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("save", "Save");
         dialog.default_response = "save"; dialog.close_response = "cancel";
         var parent = get_root () as Gtk.Widget;

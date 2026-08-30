@@ -1,0 +1,943 @@
+/* Gray color family ----------------------------------------------------------
+ *
+ * This provider is loaded only while Gray is selected. It replaces both the
+ * accent and the tonal surface ladder without changing semantic success,
+ * warning, or destructive colors.
+ */
+
+window.color-theme-gray {
+  --accent-color: #5f656c;
+  --accent-bg-color: #70767d;
+  --accent-fg-color: #ffffff;
+  --window-bg-color: #eff0f1;
+  --window-fg-color: #25272a;
+  --view-bg-color: #f8f8f9;
+  --view-fg-color: #25272a;
+  --headerbar-bg-color: #e7e8ea;
+  --headerbar-fg-color: #25272a;
+  --card-bg-color: #fafafb;
+  --card-fg-color: #25272a;
+  --popover-bg-color: #f8f8f9;
+  --popover-fg-color: #25272a;
+  --dialog-bg-color: #f1f1f2;
+  --dialog-fg-color: #25272a;
+  --sidebar-bg-color: #e5e6e8;
+  --sidebar-fg-color: #292b2e;
+
+  --mailficient-theme-window: #eff0f1;
+  --mailficient-theme-header: #e7e8ea;
+  --mailficient-theme-sidebar: #e3e4e6;
+  --mailficient-theme-list: #f3f3f4;
+  --mailficient-theme-view: #f8f8f9;
+  --mailficient-theme-card: #fbfbfc;
+  --mailficient-theme-raised: #ffffff;
+  --mailficient-theme-border: rgba(37, 39, 42, .12);
+  --mailficient-theme-wash: rgba(104, 110, 117, .08);
+  --mailficient-theme-wash-strong: rgba(104, 110, 117, .15);
+}
+
+window.color-theme-gray.color-theme-dark {
+  --accent-color: #c2c6ca;
+  --accent-bg-color: #737980;
+  --accent-fg-color: #ffffff;
+  --window-bg-color: #191a1c;
+  --window-fg-color: #f0f0f1;
+  --view-bg-color: #1e1f22;
+  --view-fg-color: #f0f0f1;
+  --headerbar-bg-color: #25262a;
+  --headerbar-fg-color: #f4f4f5;
+  --card-bg-color: #26272b;
+  --card-fg-color: #f0f0f1;
+  --popover-bg-color: #292a2e;
+  --popover-fg-color: #f0f0f1;
+  --dialog-bg-color: #202124;
+  --dialog-fg-color: #f0f0f1;
+  --sidebar-bg-color: #212225;
+  --sidebar-fg-color: #f0f0f1;
+
+  --mailficient-theme-window: #191a1c;
+  --mailficient-theme-header: #25262a;
+  --mailficient-theme-sidebar: #212225;
+  --mailficient-theme-list: #1e1f22;
+  --mailficient-theme-view: #18191b;
+  --mailficient-theme-card: #25262a;
+  --mailficient-theme-raised: #2b2c30;
+  --mailficient-theme-border: rgba(235, 236, 238, .12);
+  --mailficient-theme-wash: rgba(206, 209, 213, .065);
+  --mailficient-theme-wash-strong: rgba(206, 209, 213, .13);
+}
+
+/* Root and window-level material. */
+window.color-theme-gray,
+window.color-theme-gray.background,
+window.color-theme-gray > contents,
+window.color-theme-gray .mail-shell-overlay,
+window.color-theme-gray .mail-shell-toolbar-view,
+window.color-theme-gray .compose-root,
+window.color-theme-gray.rules-window > contents {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-window);
+}
+
+/* Header material shared by the main, compose, rules, and settings windows. */
+window.color-theme-gray headerbar,
+window.color-theme-gray .mail-header-bar,
+window.color-theme-gray .compose-header-bar,
+window.color-theme-gray .settings-headerbar,
+window.color-theme-gray .message-security-headerbar {
+  color: var(--headerbar-fg-color);
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Navigation surfaces. */
+window.color-theme-gray .mailbox-pane,
+window.color-theme-gray .sidebar-column,
+window.color-theme-gray .mail-sidebar,
+window.color-theme-gray .settings-sidebar {
+  color: var(--sidebar-fg-color);
+  background: var(--mailficient-theme-sidebar);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Message lists and settings/rules canvases form the middle tonal layer. */
+window.color-theme-gray .message-pane,
+window.color-theme-gray .message-list,
+window.color-theme-gray .message-list scrolledwindow,
+window.color-theme-gray .message-list scrolledwindow viewport,
+window.color-theme-gray .message-list-items,
+window.color-theme-gray .settings-content,
+window.color-theme-gray .settings-page,
+window.color-theme-gray .settings-page-frame,
+window.color-theme-gray.rules-window toolbarview,
+window.color-theme-gray .rule-editor-dialog toolbarview,
+window.color-theme-gray .sender-lists-dialog toolbarview {
+  background: var(--mailficient-theme-list);
+}
+
+window.color-theme-gray .message-list-header,
+window.color-theme-gray .settings-page-intro,
+window.color-theme-gray .rules-hero,
+window.color-theme-gray .rule-editor-hero {
+  background: color-mix(in srgb,
+    var(--mailficient-theme-card) 92%, var(--accent-bg-color));
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Reading, writing, and dialog canvases are the quietest surfaces. */
+window.color-theme-gray .reader-stack,
+window.color-theme-gray .reading-pane,
+window.color-theme-gray .reading-pane scrolledwindow,
+window.color-theme-gray .reading-pane scrolledwindow viewport,
+window.color-theme-gray .compose-header-fields,
+window.color-theme-gray .compose-editor-scroller,
+window.color-theme-gray .compose-editor-scroller > viewport,
+window.color-theme-gray .compose-body,
+window.color-theme-gray .compose-body text,
+window.color-theme-gray .message-security-surface,
+window.color-theme-gray .message-security-page,
+window.color-theme-gray .sender-lists-images-page {
+  background: var(--mailficient-theme-view);
+}
+
+window.color-theme-gray .message-header,
+window.color-theme-gray .compose-actions,
+window.color-theme-gray .message-security-action-bar,
+window.color-theme-gray .rules-action-bar {
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Cards, grouped settings rows, and secondary editors. */
+window.color-theme-gray .conversation-message,
+window.color-theme-gray .settings-section-card .boxed-list,
+window.color-theme-gray .account-settings-list .boxed-list,
+window.color-theme-gray .account-settings-add .boxed-list,
+window.color-theme-gray .settings-feature-card,
+window.color-theme-gray .settings-editor-card,
+window.color-theme-gray .signature-editor-card,
+window.color-theme-gray .account-summary-card,
+window.color-theme-gray .provider-card,
+window.color-theme-gray .rules-list row.rule-card,
+window.color-theme-gray .rule-editor-section,
+window.color-theme-gray .rules-empty-card,
+window.color-theme-gray .message-security-card,
+window.color-theme-gray .message-security-verdict.neutral,
+window.color-theme-gray .sync-status-dialog {
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .conversation-message.conversation-expanded,
+window.color-theme-gray .provider-card:hover,
+window.color-theme-gray .rules-list row.rule-card:hover:not(:selected),
+window.color-theme-gray .settings-control-row:hover,
+window.color-theme-gray .settings-action-row:hover,
+window.color-theme-gray .account-settings-row:hover,
+window.color-theme-gray .account-settings-add-row:hover {
+  background: var(--mailficient-theme-raised);
+}
+
+/* Popovers and ordinary dialog content inherit the same raised material. */
+window.color-theme-gray popover > contents,
+window.color-theme-gray .popover > contents,
+window.color-theme-gray .account-dialog-identity,
+window.color-theme-gray .account-dialog-advanced,
+window.color-theme-gray .account-dialog-actions {
+  color: var(--popover-fg-color);
+  background: var(--mailficient-theme-raised);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray popover listview row:selected,
+window.color-theme-gray popover listview row:selected:hover,
+window.color-theme-gray popover list row:selected,
+window.color-theme-gray popover list row:selected:hover,
+window.color-theme-gray popover row.activatable:selected,
+window.color-theme-gray popover row.activatable:selected:hover {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+}
+
+/* Neutral selection and focus washes replace blue-painted materials. */
+window.color-theme-gray .mail-sidebar row.mailbox-row.active-mailbox,
+window.color-theme-gray .mail-sidebar row.mailbox-row.active-mailbox:hover,
+window.color-theme-gray .mail-sidebar row.mailbox-row:selected,
+window.color-theme-gray .settings-navigation row.settings-nav-row:selected,
+window.color-theme-gray .settings-navigation row.settings-nav-row:selected:hover,
+window.color-theme-gray .rules-list row.rule-card:selected,
+window.color-theme-gray .rules-list row.rule-card:selected:hover,
+window.color-theme-gray .message-list-items > row:selected,
+window.color-theme-gray .message-list-items > row:selected:hover,
+window.color-theme-gray .message-list-items > row:focus-visible {
+  color: inherit;
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .34);
+  box-shadow: inset 3px 0 var(--accent-bg-color);
+}
+
+window.color-theme-gray .settings-control-row:focus-within,
+window.color-theme-gray .settings-action-row:focus-within,
+window.color-theme-gray .account-settings-row:focus-within,
+window.color-theme-gray .account-settings-add-row:focus-within {
+  background: var(--mailficient-theme-wash-strong);
+  box-shadow: inset 3px 0 var(--accent-bg-color);
+}
+
+/* App identity accents. Semantic status colors intentionally keep their
+ * success/warning/destructive hues and are not part of this selector list. */
+window.color-theme-gray .settings-sidebar-eyebrow,
+window.color-theme-gray .settings-nav-icon,
+window.color-theme-gray .settings-page-intro-icon-badge,
+window.color-theme-gray .settings-page-intro-icon,
+window.color-theme-gray .settings-page-intro-kicker,
+window.color-theme-gray .settings-page-intro-status,
+window.color-theme-gray .settings-state-badge,
+window.color-theme-gray .settings-control-icon,
+window.color-theme-gray .settings-feature-card-icon-badge,
+window.color-theme-gray .settings-feature-card-icon,
+window.color-theme-gray .settings-empty-action,
+window.color-theme-gray .rules-hero-icon,
+window.color-theme-gray .rules-eyebrow,
+window.color-theme-gray .provider-card-icon-badge,
+window.color-theme-gray .provider-card-chevron {
+  color: var(--accent-color);
+  border-color: alpha(var(--accent-bg-color), .24);
+  background: var(--mailficient-theme-wash);
+}
+
+window.color-theme-gray button.suggested-action,
+window.color-theme-gray .settings-primary-action,
+window.color-theme-gray .settings-feature-card-action,
+window.color-theme-gray .rules-primary-action,
+window.color-theme-gray .settings-section button.suggested-action,
+window.color-theme-gray switch:checked {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  border-color: color-mix(in srgb, var(--accent-bg-color) 78%, black);
+}
+
+window.color-theme-gray button.suggested-action:hover,
+window.color-theme-gray .settings-primary-action:hover,
+window.color-theme-gray .settings-feature-card-action:hover,
+window.color-theme-gray .settings-section button.suggested-action:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 86%, white);
+}
+
+/* The appearance chooser itself previews and acknowledges the Gray family. */
+window.color-theme-gray button.appearance-option:hover {
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+window.color-theme-gray button.appearance-option:checked {
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .78);
+  box-shadow: 0 0 0 2px alpha(var(--accent-bg-color), .15),
+              inset 0 1px alpha(white, .12);
+}
+
+window.color-theme-gray .appearance-option-check {
+  color: var(--accent-color);
+}
+
+/* Complete accent remapping -------------------------------------------------
+ * Several polished controls in the base theme intentionally use fixed blue
+ * values so they remain consistent across third-party GTK themes.  Gray is a
+ * full application color family, so remap those app-owned interaction states
+ * here as well as the large surfaces above. */
+window.color-theme-gray .sidebar-identity-badge {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: transparent;
+}
+
+window.color-theme-gray .mail-sidebar row.mailbox-row.active-mailbox image,
+window.color-theme-gray .mail-sidebar row.mailbox-row:selected image,
+window.color-theme-gray .message-list-header button:checked,
+window.color-theme-gray .reader-subject-action:checked {
+  color: var(--accent-color);
+}
+
+window.color-theme-gray .mail-sidebar row.mailbox-row.active-mailbox .mailbox-count,
+window.color-theme-gray .mail-sidebar row.mailbox-row:selected .mailbox-count {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  box-shadow: inset 0 1px alpha(white, .18);
+}
+
+window.color-theme-gray .message-row .unread-indicator-dot {
+  background: var(--accent-bg-color);
+  border-color: var(--mailficient-theme-list);
+  box-shadow: 0 2px 5px alpha(var(--accent-bg-color), .28);
+}
+
+window.color-theme-gray .mail-header-bar .apple-toolbar-button:active,
+window.color-theme-gray .mail-header-bar .apple-toolbar-button:checked,
+window.color-theme-gray .mail-header-bar menubutton > button:active,
+window.color-theme-gray .mail-header-bar menubutton > button:checked,
+window.color-theme-gray .mail-header-bar .header-back-button:active,
+window.color-theme-gray .message-list-header button:checked,
+window.color-theme-gray .reader-subject-action:checked,
+window.color-theme-gray .mail-header-bar .flag-control .apple-toolbar-button:active,
+window.color-theme-gray .mail-header-bar .flag-control .apple-toolbar-button:checked,
+window.color-theme-gray .mail-header-bar .flag-control menubutton > button:active,
+window.color-theme-gray .mail-header-bar .flag-control menubutton > button:checked {
+  color: var(--accent-color);
+  border-color: alpha(var(--accent-bg-color), .30);
+  background: var(--mailficient-theme-wash-strong);
+}
+
+window.color-theme-gray .mail-header-bar .apple-toolbar-button.compose-toolbar-button,
+window.color-theme-gray .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  color: var(--accent-color);
+  border-color: alpha(var(--accent-bg-color), .22);
+  background: var(--mailficient-theme-wash-strong);
+  box-shadow: none;
+}
+
+window.color-theme-gray .mail-header-bar .apple-toolbar-button.compose-toolbar-button:hover {
+  background: color-mix(in srgb,
+    var(--mailficient-theme-wash-strong) 78%, var(--accent-bg-color));
+}
+
+window.color-theme-gray .mail-header-bar .apple-toolbar-button.compose-toolbar-button:active {
+  color: var(--accent-fg-color);
+  border-color: var(--accent-bg-color);
+  background: var(--accent-bg-color);
+}
+
+window.color-theme-gray .mail-header-bar .apple-toolbar-button:focus-visible,
+window.color-theme-gray .mail-header-bar menubutton > button:focus-visible,
+window.color-theme-gray .mail-header-bar .header-back-button:focus-visible,
+window.color-theme-gray button:focus-visible {
+  outline-color: alpha(var(--accent-bg-color), .82);
+}
+
+/* Search, input, selection, and native control accents. */
+window.color-theme-gray .mail-header-bar .toolbar-search-control:focus-within,
+window.color-theme-gray .settings-search:focus-within {
+  border-color: alpha(var(--accent-bg-color), .62);
+  box-shadow: 0 0 0 3px alpha(var(--accent-bg-color), .15),
+              inset 0 1px alpha(white, .08);
+}
+
+window.color-theme-gray entry:focus-within,
+window.color-theme-gray searchentry:focus-within,
+window.color-theme-gray spinbutton:focus-within,
+window.color-theme-gray dropdown > button:focus-visible,
+window.color-theme-gray textview:focus-within {
+  outline-color: alpha(var(--accent-bg-color), .82);
+  border-color: alpha(var(--accent-bg-color), .60);
+}
+
+window.color-theme-gray selection,
+window.color-theme-gray entry selection,
+window.color-theme-gray textview text selection {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+}
+
+window.color-theme-gray switch:checked {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+  border-color: color-mix(in srgb, var(--accent-bg-color) 78%, black);
+}
+
+window.color-theme-gray switch:checked slider {
+  border-color: alpha(var(--accent-color), .55);
+}
+
+window.color-theme-gray checkbutton check:checked,
+window.color-theme-gray radiobutton radio:checked,
+window.color-theme-gray progressbar progress,
+window.color-theme-gray scale highlight {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+  border-color: var(--accent-bg-color);
+}
+
+window.color-theme-gray link,
+window.color-theme-gray linkbutton > button {
+  color: var(--accent-color);
+}
+
+/* Gray previews make it clear that Color and Light/Dark are independent and
+ * can be combined in all four permutations. */
+window.color-theme-gray .appearance-preview-sidebar {
+  background: #d7d9dc;
+}
+
+window.color-theme-gray .appearance-preview-line-primary {
+  background: #83888e;
+}
+
+window.color-theme-gray .appearance-option-dark .appearance-option-preview {
+  background: #1b1c1f;
+  border-color: rgba(224, 226, 229, .18);
+}
+
+window.color-theme-gray .appearance-option-dark .appearance-preview-header {
+  background: #303236;
+}
+
+window.color-theme-gray .appearance-option-dark .appearance-preview-body {
+  background: #202124;
+}
+
+window.color-theme-gray .appearance-option-dark .appearance-preview-sidebar {
+  background: #292b2f;
+}
+
+window.color-theme-gray .appearance-option-dark .appearance-preview-line {
+  background: #64686d;
+}
+
+window.color-theme-gray .appearance-option-dark .appearance-preview-line-primary {
+  background: #969ba1;
+}
+
+window.color-theme-gray .appearance-option-system .appearance-preview-header {
+  background: linear-gradient(to right,
+    #e6e7e9 0%, #e6e7e9 50%, #303236 50%, #303236 100%);
+}
+
+window.color-theme-gray .appearance-option-system .appearance-preview-body {
+  background: linear-gradient(to right,
+    #fafafb 0%, #fafafb 50%, #202124 50%, #202124 100%);
+}
+
+window.color-theme-gray .appearance-option-system .appearance-preview-sidebar {
+  background: linear-gradient(to right,
+    #d7d9dc 0%, #d7d9dc 50%, #292b2f 50%, #292b2f 100%);
+}
+
+window.color-theme-gray .appearance-option-system .appearance-preview-line {
+  background: linear-gradient(to right,
+    #c5c8cc 0%, #c5c8cc 50%, #64686d 50%, #64686d 100%);
+}
+
+window.color-theme-gray .appearance-option-system .appearance-preview-line-primary {
+  background: linear-gradient(to right,
+    #83888e 0%, #83888e 50%, #969ba1 50%, #969ba1 100%);
+}
+
+/* Compose owns a few intentionally link-like actions and enabled-state
+ * badges which need to follow the selected color family too. */
+window.color-theme-gray .compose-recipient-reveal,
+window.color-theme-gray .compose-security-button.security-enabled,
+window.color-theme-gray .attachment-chip:not(.requires-download) image {
+  color: var(--accent-color);
+}
+
+window.color-theme-gray .compose-recipient-reveal:hover,
+window.color-theme-gray .compose-recipient-reveal:active,
+window.color-theme-gray .compose-recipient-reveal:checked,
+window.color-theme-gray .compose-security-button.security-enabled {
+  background: var(--mailficient-theme-wash-strong);
+}
+
+window.color-theme-gray .attachment-chip:not(.requires-download) {
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Rules uses a compact syntax color to make its flow scannable.  In Gray it
+ * remains distinct through weight and contrast instead of a stray blue hue. */
+window.color-theme-gray .rules-primary-action,
+window.color-theme-gray .rules-primary-action > button,
+window.color-theme-gray menubutton.rules-primary-action > button {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  border-color: color-mix(in srgb, var(--accent-bg-color) 78%, black);
+  box-shadow: inset 0 1px alpha(white, .18),
+              0 3px 10px alpha(var(--accent-bg-color), .18);
+}
+
+window.color-theme-gray .rules-primary-action > button:hover,
+window.color-theme-gray menubutton.rules-primary-action > button:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 86%, white);
+}
+
+window.color-theme-gray .rules-count-pill,
+window.color-theme-gray .rule-editor-device-badge,
+window.color-theme-gray .rules-hero-icon,
+window.color-theme-gray .rule-run-hero-icon {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+window.color-theme-gray .rules-eyebrow,
+window.color-theme-gray .rule-preview-eyebrow,
+window.color-theme-gray .rule-flow-label,
+window.color-theme-gray .rule-editor-add-row,
+window.color-theme-gray .rule-run-match-count {
+  color: var(--accent-color);
+}
+
+window.color-theme-gray .rule-editor-add-row:hover,
+window.color-theme-gray .rule-preview-card {
+  color: inherit;
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .32);
+}
+
+/* The toolbar editor is attached to the themed main window.  Override its
+ * fixed dark navy material as well as its primary and hover accents. */
+window.color-theme-gray .toolbar-customization-sheet {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .toolbar-customization-content,
+window.color-theme-gray .toolbar-customization-surface,
+window.color-theme-gray .toolbar-customization-palette,
+window.color-theme-gray .toolbar-customization-palette flowboxchild {
+  color: var(--window-fg-color);
+  background: transparent;
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .toolbar-customization-tile,
+window.color-theme-gray .toolbar-customization-default-label {
+  color: alpha(var(--window-fg-color), .80);
+}
+
+window.color-theme-gray .toolbar-customization-tile-icon,
+window.color-theme-gray .toolbar-customization-default-item,
+window.color-theme-gray .toolbar-customization-show > button,
+window.color-theme-gray .toolbar-customization-show button {
+  color: inherit;
+  background: var(--mailficient-theme-wash);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .toolbar-customization-default-strip {
+  color: alpha(currentColor, .86);
+  background: var(--mailficient-theme-raised);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .toolbar-customization-tile:hover,
+window.color-theme-gray .toolbar-customization-palette flowboxchild:hover .toolbar-customization-tile,
+window.color-theme-gray .toolbar-customization-default-strip:hover,
+window.color-theme-gray .toolbar-customization-show > button:hover,
+window.color-theme-gray .toolbar-customization-show button:hover {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+window.color-theme-gray .toolbar-customization-done,
+window.color-theme-gray .toolbar-customization-done:hover,
+window.color-theme-gray .toolbar-customization-done:active {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  border-color: color-mix(in srgb, var(--accent-bg-color) 78%, black);
+}
+
+window.color-theme-gray .toolbar-customization-palette,
+window.color-theme-gray .toolbar-customization-footer {
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Dialog and secondary-surface completion ---------------------------------
+ * These selectors intentionally do not depend on a GtkWindow ancestor. That
+ * lets them reach libadwaita's in-window dialogs, response controls, and
+ * detached popovers while the Gray-only provider is installed. */
+.shortcuts-dialog,
+.about-dialog,
+.settings-dialog,
+.task-editor-dialog,
+.rule-editor-dialog,
+.rule-run-dialog,
+.quick-step-editor-dialog,
+.sender-lists-dialog {
+  color: var(--dialog-fg-color);
+  background: transparent;
+}
+
+.settings-dialog sheet,
+.settings-dialog .settings-content,
+.settings-dialog .settings-page,
+.settings-dialog .settings-page-frame {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-window);
+  border-color: var(--mailficient-theme-border);
+}
+
+.settings-dialog .settings-sidebar {
+  color: var(--sidebar-fg-color);
+  background: var(--mailficient-theme-sidebar);
+  border-color: var(--mailficient-theme-border);
+}
+
+.settings-dialog .settings-headerbar {
+  color: var(--headerbar-fg-color);
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}
+
+/* Adw.AboutDialog paints the nested sheet, rather than the transparent outer
+ * wrapper. Target the visible surface so it follows the selected family. */
+.about-dialog sheet {
+  color: var(--dialog-fg-color);
+  background: var(--dialog-bg-color);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.rules-window,
+window.rules-window.background,
+window.rules-window > contents,
+.rule-editor-dialog toolbarview,
+.rule-run-dialog toolbarview,
+.quick-step-editor-dialog toolbarview,
+.sender-lists-dialog toolbarview {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-window);
+}
+
+.shortcuts-dialog .keycap {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-wash);
+  border-color: var(--mailficient-theme-border);
+  box-shadow: inset 0 -1px alpha(currentColor, .12);
+}
+
+/* Today and Planned share TaskView. Spell out the complete surface ladder
+ * here instead of depending only on inherited toolkit variables: this keeps
+ * the page, header, list viewport, and task cards in the same Gray family. */
+window.color-theme-gray .task-view,
+window.color-theme-gray .task-view scrolledwindow,
+window.color-theme-gray .task-view scrolledwindow > viewport,
+window.color-theme-gray .task-view statuspage {
+  color: var(--view-fg-color);
+  background: var(--mailficient-theme-view);
+}
+
+window.color-theme-gray .task-view-header {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .task-list,
+window.color-theme-gray .task-list > row {
+  background: transparent;
+}
+
+window.color-theme-gray .task-list > row.task-row {
+  color: var(--card-fg-color);
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+window.color-theme-gray .task-list > row.task-row:hover {
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+/* Native controls inside Adw.Dialog and AlertDialog do not necessarily match
+ * a `window.color-theme-gray …` selector. Remap their non-semantic accent
+ * states globally while this Gray-only provider is installed. */
+button.suggested-action:not(.destructive-action),
+switch:checked {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  border-color: color-mix(in srgb, var(--accent-bg-color) 78%, black);
+}
+
+button.suggested-action:not(.destructive-action):hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 86%, white);
+}
+
+button:focus-visible,
+entry:focus-within,
+searchentry:focus-within,
+spinbutton:focus-within,
+dropdown > button:focus-visible,
+textview:focus-within {
+  outline-color: alpha(var(--accent-bg-color), .82);
+  border-color: alpha(var(--accent-bg-color), .60);
+}
+
+selection,
+entry selection,
+textview text selection {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+}
+
+checkbutton check:checked,
+radiobutton radio:checked,
+progressbar progress,
+scale highlight {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+  border-color: var(--accent-bg-color);
+}
+
+link,
+linkbutton > button {
+  color: var(--accent-color);
+}
+
+/* GtkCalendar paints its selected day with a toolkit accent separate from the
+ * surrounding AlertDialog. Keep Today distinct without leaving a blue day
+ * behind in either light or dark Gray. */
+.task-editor-dialog calendar > grid > label.day-number:selected,
+.task-editor-dialog calendar > grid > label.day-number.today:selected {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+}
+
+.task-editor-dialog calendar > grid > label.day-number.today:not(:selected) {
+  color: var(--accent-color);
+}
+
+/* Account onboarding and Manage Accounts. Validation/destructive states are
+ * intentionally excluded so errors remain red and immediately recognizable. */
+.account-onboarding-icon-badge,
+.account-setup-intro-badge,
+.online-account-trust-badge,
+.account-auth-badge,
+.account-summary-icon-badge {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .28);
+}
+
+.account-onboarding-icon,
+.account-onboarding-value-icon,
+.account-onboarding-eyebrow,
+.account-setup-intro-badge image,
+.online-account-trust-badge image,
+.account-summary-icon,
+.account-settings-row > box > image,
+.account-settings-add-row > box > image,
+.account-settings-empty > box > image,
+.account-settings-add-row .title,
+.account-settings-empty-action,
+.settings-action-row:hover .settings-action-chevron,
+.account-settings-add-row:hover .settings-action-chevron {
+  color: var(--accent-color);
+}
+
+.account-setup-intro,
+.online-account-trust,
+.account-provider-hint,
+.account-summary-card {
+  background: color-mix(in srgb,
+    var(--mailficient-theme-card) 94%, var(--accent-bg-color));
+  border-color: alpha(var(--accent-bg-color), .25);
+}
+
+.provider-card:hover,
+.account-settings-row:hover,
+.account-settings-add-row:hover {
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+.account-settings-row:focus-within,
+.account-settings-add-row:focus-within {
+  background: var(--mailficient-theme-wash-strong);
+  box-shadow: inset 3px 0 var(--accent-bg-color);
+}
+
+.account-onboarding-actions button.suggested-action,
+.account-onboarding button.suggested-action,
+button.account-summary-add {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  border-color: color-mix(in srgb, var(--accent-bg-color) 78%, black);
+  box-shadow: inset 0 1px alpha(white, .22),
+              0 3px 10px alpha(var(--accent-bg-color), .20);
+}
+
+.account-onboarding-actions button.suggested-action:hover,
+.account-onboarding button.suggested-action:hover,
+button.account-summary-add:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 86%, white);
+}
+
+/* Rules and rule builders. Warnings and run-result status colors are left to
+ * the semantic rules in the base sheet. */
+.rules-empty-icon,
+.rules-hero-icon,
+.rule-run-hero-icon,
+.rules-eyebrow,
+.rule-preview-eyebrow,
+.rule-flow-label,
+.rule-editor-add-row,
+.rule-run-match-count {
+  color: var(--accent-color);
+}
+
+.rules-empty-icon,
+.rules-hero-icon,
+.rule-run-hero-icon,
+.rules-count-pill,
+.rule-editor-device-badge {
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+.rules-hero,
+.rule-editor-hero,
+.rule-editor-section,
+.rule-preview-card,
+.rule-run-scope-card,
+.rules-empty-card,
+.rule-builder-row {
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+.rule-builder-row:hover,
+.rule-editor-add-row:hover {
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .30);
+}
+
+/* Settings subdialogs and neutral information states. */
+.sender-lists-dialog headerbar {
+  background: var(--mailficient-theme-header);
+  border-color: var(--mailficient-theme-border);
+}
+
+.sender-lists-dialog viewswitcher button:checked {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .30);
+  box-shadow: inset 0 -2px var(--accent-bg-color);
+}
+
+.sender-list-entry-row:focus-within {
+  color: inherit;
+  background: var(--mailficient-theme-wash-strong);
+  box-shadow: inset 3px 0 var(--accent-bg-color);
+}
+
+.quick-step-editor .quick-step-basics-card,
+.quick-step-editor .quick-step-actions-card {
+  color: var(--window-fg-color);
+  background: var(--mailficient-theme-card);
+  border-color: var(--mailficient-theme-border);
+}
+
+.quick-step-name-entry:focus,
+.quick-step-account-dropdown:focus-within {
+  color: inherit;
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .52);
+  box-shadow: 0 0 0 2px alpha(var(--accent-bg-color), .13);
+}
+
+.quick-step-add-action {
+  color: var(--accent-color);
+}
+
+.quick-step-add-action:hover {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .38);
+}
+
+.vacation-status:not(.error),
+.automation-status:not(.error),
+.account-settings-status:not(.error) {
+  border-left-color: var(--accent-bg-color);
+  background: var(--mailficient-theme-wash);
+}
+
+/* Remaining informational accents in mail and compose. Avatar palettes,
+ * colored flags, warning, success, overdue, and destructive states remain
+ * semantic and are deliberately not remapped. */
+.message-security-summary:not(.danger):not(.warning):not(.trusted)
+  .message-security-summary-badge,
+.message-security-verdict.neutral .message-security-verdict-badge {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .26);
+}
+
+.message-security-notice,
+.message-security-dialog .message-security-notice {
+  color: alpha(currentColor, .72);
+  background: color-mix(in srgb,
+    var(--mailficient-theme-card) 94%, var(--accent-bg-color));
+  border-color: alpha(var(--accent-bg-color), .22);
+}
+
+.outbox-status.undo-send,
+.outbox-status.scheduled,
+.outbox-status.preparing {
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .28);
+}
+
+.outbox-status.undo-send > box > image,
+.outbox-status.scheduled > box > image,
+.outbox-status.preparing > box > image {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+}
+
+.compose-actions togglebutton:checked,
+.recipient-chip {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash-strong);
+  border-color: alpha(var(--accent-bg-color), .28);
+}
+
+.mail-window .mail-sidebar .favorites-header:hover .sidebar-add-button,
+.mail-window .mail-sidebar .sidebar-add-button:hover,
+.mail-window .mail-sidebar .sidebar-add-button:focus,
+.mail-window .conversation-message .conversation-details-button:hover {
+  color: var(--accent-color);
+  background: var(--mailficient-theme-wash);
+  border-color: alpha(var(--accent-bg-color), .20);
+}

@@ -1,10 +1,34 @@
 namespace Mailficient {
 public class MailSettingsStore : Object {
     public signal void changed (string key);
+    private const uint TOOLBAR_PERSISTENCE_RETRY_MILLISECONDS = 50;
     private CacheDatabase cache;
+    private string cached_toolbar_layout = ToolbarLayout.DEFAULT_LAYOUT;
+    private string cached_toolbar_display_mode = "icons";
+    private bool cached_toolbar_layout_percentages_migrated;
+    private string pending_toolbar_layout = "";
+    private string pending_toolbar_display_mode = "";
+    private string pending_toolbar_layout_percentages_migrated = "";
+    private uint toolbar_persistence_source;
 
     public MailSettingsStore (CacheDatabase cache) {
         this.cache = cache;
+        string stored_layout = get_string (
+            "toolbar-layout", ToolbarLayout.DEFAULT_LAYOUT);
+        bool migrate_legacy_layout = ToolbarLayout.is_legacy_default (
+            stored_layout);
+        cached_toolbar_layout = migrate_legacy_layout ?
+            ToolbarLayout.DEFAULT_LAYOUT : stored_layout;
+        cached_toolbar_display_mode = canonical_toolbar_display_mode (
+            get_string ("toolbar-display-mode", "icons"));
+        cached_toolbar_layout_percentages_migrated = get_bool (
+            "toolbar-layout-percentages-migrated", false);
+
+        // Preserve the existing exact-default migration without ever making a
+        // later toolbar getter perform storage I/O.
+        if (migrate_legacy_layout)
+            queue_toolbar_preference_persistence (
+                "toolbar-layout", cached_toolbar_layout);
     }
 
     public bool notifications_enabled {
@@ -58,6 +82,51 @@ public class MailSettingsStore : Object {
         }
     }
 
+    public string color_theme {
+        owned get {
+            string value = get_string ("color-theme", "blue");
+            return value == "gray" || value == "custom" ? value : "blue";
+        }
+        set {
+            set_string ("color-theme",
+                value == "gray" || value == "custom" ? value : "blue");
+        }
+    }
+
+    /*
+     * Blue and Gray were the original fixed color families. Keep reading
+     * those exact colors so existing preferences migrate without a visual
+     * change. Choosing a color stores it as the custom family in one logical
+     * update, which prevents observers from briefly applying a stale color.
+     */
+    public string app_color {
+        owned get {
+            switch (color_theme) {
+            case "gray": return "#70767d";
+            case "custom":
+                return canonical_app_color (get_string ("app-color", "#3584e4"));
+            default: return "#3584e4";
+            }
+        }
+        set {
+            string color = canonical_app_color (value);
+            try {
+                cache.set_preference ("app-color", color);
+                cache.set_preference ("color-theme", "custom");
+                changed ("color-theme");
+            } catch (Error error) {
+                warning ("Could not save app color preference: %s", error.message);
+            }
+        }
+    }
+
+    private static string canonical_app_color (string value) {
+        string color = value.strip ();
+        if (!Regex.match_simple ("^#[0-9A-Fa-f]{6}$", color))
+            return "#3584e4";
+        return color.down ();
+    }
+
     public int sync_interval_minutes {
         get { return normalize_sync_interval ((int) get_double ("sync-interval-minutes", 5)); }
         set { set_double ("sync-interval-minutes", normalize_sync_interval (value)); }
@@ -89,8 +158,8 @@ public class MailSettingsStore : Object {
     }
 
     public int window_width {
-        get { return clamp_int ((int) get_double ("window-width", 1180), 640, 3840); }
-        set { set_double ("window-width", clamp_int (value, 640, 3840)); }
+        get { return clamp_int ((int) get_double ("window-width", 1180), 480, 3840); }
+        set { set_double ("window-width", clamp_int (value, 480, 3840)); }
     }
 
     public int window_height {
@@ -162,26 +231,36 @@ public class MailSettingsStore : Object {
     }
 
     public string toolbar_layout {
-        owned get {
-            string value = get_string ("toolbar-layout", ToolbarLayout.DEFAULT_LAYOUT);
-            // Earlier releases shipped a crowded, spacer-heavy default. Move
-            // only that exact layout to the calmer default; genuine user
-            // customizations remain untouched.
-            if (ToolbarLayout.is_legacy_default (value)) {
-                set_string ("toolbar-layout", ToolbarLayout.DEFAULT_LAYOUT);
-                return ToolbarLayout.DEFAULT_LAYOUT;
-            }
-            return value;
-        }
+        owned get { return cached_toolbar_layout; }
         set {
-            set_string ("toolbar-layout",
-                ToolbarLayout.serialize (ToolbarLayout.parse (value)));
+            string canonical = ToolbarLayout.serialize (ToolbarLayout.parse (value));
+            if (canonical == "") canonical = ToolbarLayout.DEFAULT_LAYOUT;
+            cached_toolbar_layout = canonical;
+            changed ("toolbar-layout");
+            queue_toolbar_preference_persistence ("toolbar-layout", canonical);
+        }
+    }
+
+    public string toolbar_display_mode {
+        owned get { return cached_toolbar_display_mode; }
+        set {
+            string canonical = canonical_toolbar_display_mode (value);
+            cached_toolbar_display_mode = canonical;
+            changed ("toolbar-display-mode");
+            queue_toolbar_preference_persistence (
+                "toolbar-display-mode", canonical);
         }
     }
 
     public bool toolbar_layout_percentages_migrated {
-        get { return get_bool ("toolbar-layout-percentages-migrated", false); }
-        set { set_bool ("toolbar-layout-percentages-migrated", value); }
+        get { return cached_toolbar_layout_percentages_migrated; }
+        set {
+            cached_toolbar_layout_percentages_migrated = value;
+            changed ("toolbar-layout-percentages-migrated");
+            queue_toolbar_preference_persistence (
+                "toolbar-layout-percentages-migrated",
+                value ? "true" : "false");
+        }
     }
 
     public string preferences_page {
@@ -257,6 +336,83 @@ public class MailSettingsStore : Object {
     private void set_string (string key, string value) {
         try { cache.set_preference (key, value); changed (key); }
         catch (Error error) { warning ("Could not save text preference: %s", error.message); }
+    }
+
+    private static string canonical_toolbar_display_mode (string value) {
+        switch (value) {
+        case "icons":
+        case "icons-text":
+        case "text": return value;
+        default: return "icons";
+        }
+    }
+
+    private void queue_toolbar_preference_persistence (string key,
+                                                       string value) {
+        if (key == "toolbar-layout") {
+            pending_toolbar_layout = value;
+        } else if (key == "toolbar-display-mode") {
+            pending_toolbar_display_mode = value;
+        } else {
+            pending_toolbar_layout_percentages_migrated = value;
+        }
+        retry_toolbar_preference (key, value);
+        schedule_toolbar_persistence_retry ();
+    }
+
+    private string pending_toolbar_preference (string key) {
+        if (key == "toolbar-layout") return pending_toolbar_layout;
+        if (key == "toolbar-display-mode")
+            return pending_toolbar_display_mode;
+        return pending_toolbar_layout_percentages_migrated;
+    }
+
+    private void clear_pending_toolbar_preference (string key, string value) {
+        if (pending_toolbar_preference (key) != value) return;
+        if (key == "toolbar-layout") pending_toolbar_layout = "";
+        else if (key == "toolbar-display-mode")
+            pending_toolbar_display_mode = "";
+        else pending_toolbar_layout_percentages_migrated = "";
+    }
+
+    private bool has_pending_toolbar_preferences () {
+        return pending_toolbar_layout != "" ||
+            pending_toolbar_display_mode != "" ||
+            pending_toolbar_layout_percentages_migrated != "";
+    }
+
+    private void schedule_toolbar_persistence_retry () {
+        if (!has_pending_toolbar_preferences () ||
+            toolbar_persistence_source != 0)
+            return;
+        toolbar_persistence_source = Timeout.add (
+            TOOLBAR_PERSISTENCE_RETRY_MILLISECONDS, () => {
+                toolbar_persistence_source = 0;
+                retry_toolbar_persistence ();
+                return Source.REMOVE;
+            });
+    }
+
+    private void retry_toolbar_persistence () {
+        retry_toolbar_preference (
+            "toolbar-layout", pending_toolbar_layout);
+        retry_toolbar_preference (
+            "toolbar-display-mode", pending_toolbar_display_mode);
+        retry_toolbar_preference (
+            "toolbar-layout-percentages-migrated",
+            pending_toolbar_layout_percentages_migrated);
+        schedule_toolbar_persistence_retry ();
+    }
+
+    private void retry_toolbar_preference (string key, string pending_value) {
+        if (pending_value == "" ||
+            pending_toolbar_preference (key) != pending_value) return;
+        try {
+            if (cache.try_set_preference (key, pending_value))
+                clear_pending_toolbar_preference (key, pending_value);
+        } catch (Error error) {
+            warning ("Could not save toolbar preference: %s", error.message);
+        }
     }
 
     private static double clamp_double (double value, double minimum, double maximum) {

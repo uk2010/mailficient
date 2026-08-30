@@ -15,6 +15,7 @@ public class MailApplication : Adw.Application {
     private AccountSyncService? sync_service;
     private FolderService? folder_service;
     private MailSettingsStore settings;
+    private ColorThemeController color_theme_controller;
     private CacheMaintenanceService? cache_maintenance;
     private NotificationService notifications;
     private TaskReminderService? task_reminders;
@@ -54,6 +55,8 @@ public class MailApplication : Adw.Application {
         provider.load_from_resource ("/com/local/Mailficient/style.css");
         Gtk.StyleContext.add_provider_for_display (Gdk.Display.get_default (), provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+        color_theme_controller = new ColorThemeController ();
+        window_added.connect ((window) => color_theme_controller.apply_to_window (window));
         var quit_action = new SimpleAction ("quit", null);
         quit_action.activate.connect (quit);
         add_action (quit_action);
@@ -106,6 +109,7 @@ public class MailApplication : Adw.Application {
                 });
                 settings = new MailSettingsStore (cache);
                 apply_appearance ();
+                apply_color_theme ();
                 credential_cleanup = new CredentialCleanupService (cache, credentials);
                 remote_content_policy = new RemoteContentPolicy (cache);
                 if (Environment.get_variable ("MAILFICIENT_QA_SIGNATURE") == "1") {
@@ -116,6 +120,7 @@ public class MailApplication : Adw.Application {
                 settings.changed.connect ((key) => {
                     if (key == "notifications-enabled") notifications.enabled = settings.notifications_enabled;
                     if (key == "appearance") apply_appearance ();
+                    if (key == "color-theme") apply_color_theme ();
                     if ((key == "sync-interval-minutes" || key == "sync-on-startup") && sync_service != null)
                         install_background_sync (false);
                 });
@@ -401,6 +406,14 @@ public class MailApplication : Adw.Application {
         case "dark": manager.color_scheme = Adw.ColorScheme.FORCE_DARK; break;
         default: manager.color_scheme = Adw.ColorScheme.DEFAULT; break;
         }
+    }
+
+    private void apply_color_theme () {
+        string requested = Environment.get_variable ("MAILFICIENT_QA_COLOR_THEME") ?? "";
+        string requested_color = Environment.get_variable ("MAILFICIENT_QA_APP_COLOR") ?? "";
+        color_theme_controller.apply (
+            requested == "" ? settings.color_theme : requested,
+            requested_color == "" ? settings.app_color : requested_color);
     }
 
     protected override void shutdown () {

@@ -2,11 +2,18 @@ namespace Mailficient {
 public class ToolbarLayout : Object {
     public const string LEGACY_DEFAULT_LAYOUT =
         "sidebar,compose,flex,flex,flex,flex,flex,flex,refresh,flex:0,reply-group,flex:0,mail-actions,flex:0,move,flex:0,flag,flex,search,sort";
-    public const string DEFAULT_LAYOUT =
+    public const string PREVIOUS_DEFAULT_LAYOUT =
         "sidebar,compose,refresh,flex,mail-actions,reply,move,flex,search,sort";
+    public const string RECENT_DEFAULT_LAYOUT =
+        "sidebar,compose,flex,reply-group,mail-actions,move,flag,flex,search";
+    public const string DEFAULT_LAYOUT =
+        "sidebar,compose,flex,refresh,space,reply-group,mail-actions,move,flag,flex,search,sort";
 
     public static bool is_legacy_default (string serialized) {
-        return serialize (parse (serialized)) == serialize (parse (LEGACY_DEFAULT_LAYOUT));
+        string canonical = serialize (parse (serialized));
+        return canonical == serialize (parse (LEGACY_DEFAULT_LAYOUT)) ||
+            canonical == serialize (parse (PREVIOUS_DEFAULT_LAYOUT)) ||
+            canonical == serialize (parse (RECENT_DEFAULT_LAYOUT));
     }
 
     public static Gee.ArrayList<string> parse (string serialized) {
@@ -31,6 +38,42 @@ public class ToolbarLayout : Object {
         return serialized.str;
     }
 
+    // Insert at an index in the resulting layout. Invalid controls, duplicate
+    // non-repeatable controls, and out-of-range indices are safe no-ops.
+    public static string insert_item (string serialized, string id, int index) {
+        var items = parse (serialized);
+        if (index < 0 || index > items.size || !is_valid (id))
+            return serialize (items);
+        if (!is_repeatable (id) && items.contains (id))
+            return serialize (items);
+        items.insert (index, id);
+        return serialize (items);
+    }
+
+    // Remove exactly one item. This matters for repeatable spaces, whose
+    // neighboring instances must remain in the layout.
+    public static string remove_item (string serialized, int index) {
+        var items = parse (serialized);
+        if (index < 0 || index >= items.size)
+            return serialize (items);
+        items.remove_at (index);
+        return serialize (items);
+    }
+
+    // Both indices refer to the final array: moving index 1 to index 3 makes
+    // that item the fourth item. Invalid indices are safe no-ops.
+    public static string move_item (string serialized, int from_index,
+                                    int destination_index) {
+        var items = parse (serialized);
+        if (from_index < 0 || from_index >= items.size ||
+            destination_index < 0 || destination_index >= items.size ||
+            from_index == destination_index)
+            return serialize (items);
+        string id = items.remove_at (from_index);
+        items.insert (destination_index, id);
+        return serialize (items);
+    }
+
     public static bool is_repeatable (string id) {
         return id == "space" || is_flexible_space (id);
     }
@@ -44,7 +87,8 @@ public class ToolbarLayout : Object {
             unichar character = value.get_char (index);
             if (character < '0' || character > '9') return false;
         }
-        int percentage = int.parse (value);
+        int percentage;
+        if (!int.try_parse (value, out percentage)) return false;
         // Values above 100 are accepted temporarily so layouts written by
         // the old pixel-based editor can be migrated instead of discarded.
         return percentage >= 0 && percentage <= 480;

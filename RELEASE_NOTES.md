@@ -1,3 +1,19 @@
+# Mailficient 0.4.1
+
+Mailficient 0.4.1 brings Apple-style toolbar customization and whole-app color
+personalization while eliminating delays and memory growth during toolbar edits.
+
+Highlights:
+
+- Reworks the top toolbar and its compact customizer with draggable controls,
+  flexible spaces, the new default layout, and Icon Only or Icon and Text modes
+- Adds an arbitrary app-color picker whose complete palette follows the System,
+  Light, or Dark appearance choice
+- Corrects adaptive toolbar sizing and ordering, search and flag colors, compact
+  window-control hover states, and theme consistency across app windows
+- Reuses one bounded drag-and-drop controller tree, keeps accelerator mappings
+  stable, and uses nonblocking SQLite persistence so Done closes promptly
+
 # Mailficient 0.4.0
 
 Mailficient 0.4.0 turns folders and rules into complete desktop workflows and

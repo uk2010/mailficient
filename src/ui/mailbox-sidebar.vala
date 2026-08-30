@@ -131,13 +131,15 @@ public class MailboxSidebar : Gtk.Box {
         identity.add_css_class ("sidebar-identity");
         identity.set_margin_start (14); identity.set_margin_end (14);
         identity.set_margin_top (12); identity.set_margin_bottom (5);
-        var identity_badge = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        var identity_badge = new Gtk.CenterBox ();
         identity_badge.add_css_class ("sidebar-identity-badge");
         identity_badge.set_size_request (30, 30);
         identity_badge.halign = Gtk.Align.CENTER; identity_badge.valign = Gtk.Align.CENTER;
         var identity_icon = new Gtk.Image.from_icon_name ("mail-unread-symbolic");
+        identity_icon.halign = Gtk.Align.CENTER;
+        identity_icon.valign = Gtk.Align.CENTER;
         identity_icon.add_css_class ("sidebar-identity-icon");
-        identity_badge.append (identity_icon);
+        identity_badge.center_widget = identity_icon;
         identity.append (identity_badge);
         var identity_label = new Gtk.Label ("Mailficient");
         identity_label.xalign = 0; identity_label.hexpand = true;

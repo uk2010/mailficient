@@ -1,6 +1,13 @@
 namespace Mailficient {
 public class MailWindow : Adw.ApplicationWindow {
     private const int READER_MIN_WIDTH = 280;
+    // GTK content-width cutoffs for the toolbar's three overflow stages.
+    // The full default toolbar needs 968 px of viewport in addition to the
+    // app menu and native window controls, so the old 980 px cutoff was much
+    // too late. The final stage remains usable below the former 680 px floor.
+    private const int COMPACT_TOOLBAR_MAX_WIDTH = 1169;
+    private const int NARROW_LAYOUT_MAX_WIDTH = 840;
+    private const int MINIMAL_TOOLBAR_MAX_WIDTH = 610;
     private static int startup_dimension (int requested, bool horizontal) {
         var display = Gdk.Display.get_default ();
         if (display == null) return requested;
@@ -12,7 +19,7 @@ public class MailWindow : Adw.ApplicationWindow {
         int screen_dimension = horizontal ? geometry.width : geometry.height;
         int margin = horizontal ? 64 : 96;
         int available = screen_dimension - margin;
-        int minimum = horizontal ? 640 : 480;
+        int minimum = 480;
         if (available < minimum) available = screen_dimension;
         return requested < available ? requested : available;
     }
@@ -24,7 +31,6 @@ public class MailWindow : Adw.ApplicationWindow {
     private TaskService task_service;
     private TaskView task_view;
     private Gtk.SearchEntry search = new Gtk.SearchEntry ();
-    private Gtk.MenuButton search_scope_button = new Gtk.MenuButton ();
     private Gtk.SearchEntry task_search = new Gtk.SearchEntry ();
     private CacheDatabase cache;
     private AttachmentService attachment_service;
@@ -79,19 +85,49 @@ public class MailWindow : Adw.ApplicationWindow {
     private SimpleAction? full_html_formatting_action;
     private Gtk.MenuButton sort_button = new Gtk.MenuButton ();
     private Gtk.Box customizable_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+    private Gtk.ScrolledWindow mail_toolbar_scroller = new Gtk.ScrolledWindow ();
     private Gtk.Box task_toolbar = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
     private Gtk.Stack toolbar_stack = new Gtk.Stack ();
+    private Gtk.Box? header_content;
+    private Gtk.Overlay workspace_overlay = new Gtk.Overlay ();
+    private ToolbarCustomizationDialog? toolbar_customization;
+    private Gtk.Box? toolbar_customization_layer;
+    private ToolbarCustomizationDialog? cached_toolbar_customization;
+    private Gtk.Box? cached_toolbar_customization_layer;
+    private Gtk.EventControllerKey? toolbar_customization_escape_controller;
+    private uint toolbar_customization_open_source;
+    private bool toolbar_customization_drag_active;
+    private Gtk.DragSource? toolbar_customization_active_drag_source;
+    private bool toolbar_customization_escape_canceling_drag;
+    private bool toolbar_customization_close_pending;
+    private uint toolbar_customization_close_source;
+    private int64 toolbar_customization_close_requested_at;
+    private bool toolbar_customization_layout_sync_pending;
+    private bool toolbar_customization_started_narrow;
+    private bool toolbar_customization_content_was_visible;
+    private bool toolbar_customization_structure_refresh_pending;
+    private uint toolbar_customization_catchup_source;
+    private bool closing_toolbar_customization;
+    private uint toolbar_layout_change_source;
+    private string pending_toolbar_layout = "";
+    private uint toolbar_display_mode_change_source;
+    private string pending_toolbar_display_mode = "";
     private Gee.ArrayList<Gtk.Box> percentage_spacers = new Gee.ArrayList<Gtk.Box> ();
     private Gee.ArrayList<int> percentage_spacer_values = new Gee.ArrayList<int> ();
     private bool migrating_toolbar_layout = false;
     private bool rebuilding_toolbar;
     private bool toolbar_rebuild_pending;
+    private uint toolbar_rebuild_source;
     private Gtk.PopoverMenu? toolbar_context_menu;
+    private Gtk.Box? toolbar_overflow_host;
     // Start compact until the first allocation tells the adaptive breakpoint
     // that a wide toolbar is genuinely available. This prevents the wide
     // toolbar's natural width from forcing the window wider during startup.
     private bool compact_toolbar = true;
     private bool narrow_layout;
+    private bool minimal_toolbar;
+    private int last_adaptive_allocation_width = -1;
+    private uint adaptive_layout_source;
     private Message? selected_message;
     private Mailbox? active_mailbox;
     private Adw.OverlaySplitView mailbox_split = new Adw.OverlaySplitView ();
@@ -123,6 +159,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private string pending_initial_inbox_account_id = "";
     private bool local_removal_refresh_pending;
     private uint repository_refresh_source;
+    private bool repository_refresh_sidebar_current;
     // Only the first durable message batch in a backend pass needs to wake the
     // coalesced UI refresh. The pass edge below publishes the final cache state
     // before a history continuation starts, avoiding a full list rebuild for
@@ -134,7 +171,13 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Button? toggle_read_button;
     private MenuItem? more_toggle_read_item;
     private Menu quick_steps_menu = new Menu ();
-    private weak RulesWindow? rules_window;
+    private Menu move_menu = new Menu ();
+    // Keep a real reference while the non-modal Rules window is alive. A
+    // Vala `weak` field is only an unowned pointer; after the window closed it
+    // could still point at freed memory and a later Rules action would try to
+    // present that stale object. The close-request handler below releases this
+    // reference before GTK destroys the window.
+    private RulesWindow? rules_window;
     private MailSearchScope search_scope = MailSearchScope.CURRENT_FOLDER;
     private Cancellable? server_search_cancellable;
 
@@ -150,7 +193,7 @@ public class MailWindow : Adw.ApplicationWindow {
                        OnlineAccountService online_accounts) {
         Object (application: app, title: "Mailficient",
             default_width: startup_dimension (
-                Environment.get_variable ("MAILFICIENT_QA_NARROW") == "1" ? 760 : settings.window_width, true),
+                Environment.get_variable ("MAILFICIENT_QA_NARROW") == "1" ? 480 : settings.window_width, true),
             default_height: startup_dimension (
                 Environment.get_variable ("MAILFICIENT_QA") == "1" ? 820 : settings.window_height, false));
         add_css_class ("mail-window");
@@ -162,7 +205,7 @@ public class MailWindow : Adw.ApplicationWindow {
         });
         // Keep the full three-column workspace on a normal desktop, while
         // still allowing a useful list-then-reader layout on smaller screens.
-        set_size_request (680, 520);
+        set_size_request (480, 520);
         this.repository = repository;
         this.search_service = search_service;
         this.cache = cache;
@@ -199,7 +242,28 @@ public class MailWindow : Adw.ApplicationWindow {
                     full_html_formatting_action.set_state (new Variant.boolean (settings.full_html_formatting));
                 if (selected_message != null) display_message (selected_message);
             }
-            if (key == "toolbar-layout") rebuild_toolbar ();
+            if (key == "toolbar-layout") {
+                // close_toolbar_customization() commits a just-dropped item
+                // before its final live-toolbar rebuild. Do not rebuild once
+                // from this synchronous settings signal and then immediately
+                // tear that intermediate toolbar down again.
+                if (!closing_toolbar_customization) rebuild_toolbar ();
+                if (toolbar_customization != null) {
+                    if (toolbar_customization_drag_active)
+                        toolbar_customization_layout_sync_pending = true;
+                    else
+                        toolbar_customization.sync_layout (settings.toolbar_layout);
+                }
+            }
+            if (key == "toolbar-display-mode") {
+                // A GtkDropDown selection can reach this signal while its
+                // Wayland popup is still finishing the input transaction.
+                // The queued writer normally commits after that dispatch; a
+                // close-time flush suppresses this intermediate rebuild.
+                if (!closing_toolbar_customization) rebuild_toolbar ();
+                if (toolbar_customization != null)
+                    toolbar_customization.sync_display_mode (settings.toolbar_display_mode);
+            }
         });
         qa_layout = Environment.get_variable ("MAILFICIENT_QA") == "1";
         if (!settings.compact_pane_widths_migrated) {
@@ -274,7 +338,7 @@ public class MailWindow : Adw.ApplicationWindow {
             if (search.text != "") search.text = "";
             workspace_stack.visible_child_name = "mail";
             toolbar_stack.visible_child_name = "mail";
-            search.placeholder_text = "Search Mail";
+            search.placeholder_text = "Search";
             sort_button.sensitive = true;
             DebugTrace.log ("navigation", "load_mailbox mailbox=%s".printf (mailbox.id));
             message_list.show_mailbox (mailbox);
@@ -471,9 +535,14 @@ public class MailWindow : Adw.ApplicationWindow {
         });
         message_split.notify["position"].connect (() => {
             clamp_message_split_position ();
-            if (!restoring_pane_widths) message_pane_width = message_split.position;
+            if (!restoring_pane_widths && !narrow_layout)
+                message_pane_width = message_split.position;
         });
         workspace_stack.hexpand = true; workspace_stack.vexpand = true;
+        // Only the active workspace should contribute a horizontal minimum.
+        // The hidden task header is intentionally wider at desktop sizes and
+        // must not force the mail list/reader past a small window's edge.
+        workspace_stack.hhomogeneous = false;
         workspace_stack.add_css_class ("mail-workspace");
         // A crossfade snapshots the complete mail workspace, including the
         // active WebKit view. Rich or very tall HTML messages can make that
@@ -484,7 +553,12 @@ public class MailWindow : Adw.ApplicationWindow {
         workspace_stack.add_named (message_split, "mail");
         workspace_stack.add_named (task_view, "tasks");
         workspace_stack.visible_child_name = "mail";
-        mailbox_split.content = workspace_stack; toolbar.set_content (mailbox_split);
+        mailbox_split.content = workspace_stack;
+        workspace_overlay.add_css_class ("mail-workspace-overlay");
+        workspace_overlay.overflow = Gtk.Overflow.HIDDEN;
+        workspace_overlay.child = mailbox_split;
+        add_toolbar_removal_target (this, workspace_overlay);
+        toolbar.set_content (workspace_overlay);
         mailbox_split.show_sidebar = settings.sidebar_visible;
         var mail_overlay = new Gtk.Overlay ();
         mail_overlay.add_css_class ("mail-shell-overlay");
@@ -561,16 +635,27 @@ public class MailWindow : Adw.ApplicationWindow {
                     message_list.invalidate_cached_views ();
                     repository.reload ();
                 }
-                sidebar.refresh_counts ();
+                if (toolbar_customization_blocks_mail_refresh ())
+                    repository_refresh_pending = true;
+                else
+                    sidebar.refresh_counts ();
             });
             // The streamed callback above handles row visibility. Keep this
             // completion edge for account-wide reconciliation and status only.
             sync_service.synchronized.connect ((account_id) => {
-                reconcile_mailbox_structure (
-                    pending_folder_replacement_account,
-                    pending_folder_replacement_name,
-                    pending_folder_replacement_remote, false);
-                select_pending_account_inbox (account_id);
+                if (toolbar_customization_blocks_mail_refresh ()) {
+                    // Folder discovery may rebuild most of the sidebar. Keep
+                    // the live customization surface responsive and perform
+                    // one reconciliation when it closes.
+                    toolbar_customization_structure_refresh_pending = true;
+                    repository_refresh_pending = true;
+                } else {
+                    reconcile_mailbox_structure (
+                        pending_folder_replacement_account,
+                        pending_folder_replacement_name,
+                        pending_folder_replacement_remote, false);
+                    select_pending_account_inbox (account_id);
+                }
                 if (complete_account_sync (account_id))
                     finish_sync_progress ("Mail is up to date");
             });
@@ -583,13 +668,17 @@ public class MailWindow : Adw.ApplicationWindow {
                 // If that refresh has already run (or there were no message
                 // batches), perform the one completion refresh still needed
                 // for server-side flag, order, and membership changes.
-                bool task_workspace = active_mailbox != null &&
-                    is_task_mailbox (active_mailbox.id);
-                if (task_workspace)
-                    message_list.defer_refresh_until_shown ();
-                else if (!repository_refresh_pending)
-                    message_list.refresh_after_mail_check ();
-                sidebar.refresh_counts ();
+                if (toolbar_customization_blocks_mail_refresh ()) {
+                    repository_refresh_pending = true;
+                } else {
+                    bool task_workspace = active_mailbox != null &&
+                        is_task_mailbox (active_mailbox.id);
+                    if (task_workspace)
+                        message_list.defer_refresh_until_shown ();
+                    else if (!repository_refresh_pending)
+                        message_list.refresh_after_mail_check ();
+                    sidebar.refresh_counts ();
+                }
             });
             sync_service.failed.connect ((account_id, error) => {
                 // A failed pass can still have committed useful batches after
@@ -794,9 +883,64 @@ public class MailWindow : Adw.ApplicationWindow {
         });
     }
 
+    public override void size_allocate (int width, int height, int baseline) {
+        base.size_allocate (width, height, baseline);
+        if (width <= 0 || width == last_adaptive_allocation_width) return;
+        last_adaptive_allocation_width = width;
+
+        schedule_adaptive_layout_sync ();
+    }
+
+    private void schedule_adaptive_layout_sync () {
+        if (adaptive_layout_source != 0 || preparing_for_shutdown) return;
+        // Gtk.Widget has no notifying `width` property. Observe real
+        // allocations and defer rebuilding until GTK has completed the
+        // current layout pass, coalescing a fast resize into one update.
+        adaptive_layout_source = Idle.add (() => {
+            adaptive_layout_source = 0;
+            if (preparing_for_shutdown) return Source.REMOVE;
+            sync_adaptive_toolbar_layout ();
+            update_percentage_spacers ();
+            return Source.REMOVE;
+        });
+    }
+
     public void prepare_for_shutdown () {
         if (preparing_for_shutdown) return;
         preparing_for_shutdown = true;
+        var active_rules_window = rules_window;
+        rules_window = null;
+        if (active_rules_window != null) active_rules_window.close ();
+        if (toolbar_customization_open_source != 0) {
+            Source.remove (toolbar_customization_open_source);
+            toolbar_customization_open_source = 0;
+        }
+        if (toolbar_customization_close_source != 0) {
+            Source.remove (toolbar_customization_close_source);
+            toolbar_customization_close_source = 0;
+        }
+        if (toolbar_customization_catchup_source != 0) {
+            Source.remove (toolbar_customization_catchup_source);
+            toolbar_customization_catchup_source = 0;
+        }
+        if (toolbar_rebuild_source != 0) {
+            Source.remove (toolbar_rebuild_source);
+            toolbar_rebuild_source = 0;
+        }
+        if (adaptive_layout_source != 0) {
+            Source.remove (adaptive_layout_source);
+            adaptive_layout_source = 0;
+        }
+        if (repository_refresh_source != 0) {
+            Source.remove (repository_refresh_source);
+            repository_refresh_source = 0;
+            repository_refresh_sidebar_current = false;
+        }
+        toolbar_customization_close_pending = false;
+        closing_toolbar_customization = true;
+        flush_pending_toolbar_layout_change ();
+        flush_pending_toolbar_display_mode_change ();
+        closing_toolbar_customization = false;
         if (outbox_watch_source != 0) {
             Source.remove (outbox_watch_source);
             outbox_watch_source = 0;
@@ -877,6 +1021,10 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void clamp_message_split_position () {
+        // In the collapsed phone-width layout the list and reader take turns
+        // filling the complete workspace. The hidden paned child can retain a
+        // stale desktop allocation, so it must not constrain the visible reader.
+        if (narrow_layout) return;
         int split_width = message_split.get_width ();
         if (split_width <= 0) return;
 
@@ -900,6 +1048,12 @@ public class MailWindow : Adw.ApplicationWindow {
         restoring_pane_widths = true;
         int stage = 0;
         add_tick_callback ((widget, frame_clock) => {
+            if (narrow_layout) {
+                reader.use_available_width ();
+                restoring_pane_widths = false;
+                pane_restore_scheduled = false;
+                return Source.REMOVE;
+            }
             if (mailbox_split.get_width () <= 0) return Source.CONTINUE;
             if (stage == 0) {
                 set_mailbox_pane_width (mailbox_pane_width);
@@ -919,7 +1073,8 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void set_message_content_visible (bool visible) {
         var content = message_split.end_child;
-        if (narrow_layout) {
+        bool editing_toolbar = toolbar_customization != null;
+        if (narrow_layout && !editing_toolbar) {
             message_pane.visible = !visible;
             if (content != null) content.visible = visible;
             message_back.visible = visible && workspace_stack.visible_child_name == "mail";
@@ -1379,44 +1534,40 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private Gtk.Widget build_header () {
         var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+        header_content = header;
         header.add_css_class ("mail-header-bar");
         header.add_css_class ("control-layer");
         message_back.add_css_class ("header-back-button");
+        message_back.valign = Gtk.Align.CENTER;
         message_back.tooltip_text = "Back to message list";
         Accessibility.label (message_back, "Back to message list");
         message_back.clicked.connect (() => set_message_content_visible (false));
         message_back.visible = false;
         header.append (message_back);
 
-        search.placeholder_text = "Search Mail";
+        search.placeholder_text = "Search";
         search.set_size_request (240, -1);
         search.add_css_class ("apple-toolbar-search");
         Accessibility.label (search, "Search mail");
+        Accessibility.description (search,
+            "Search scope and filters are available from the View menu");
         search.search_changed.connect (() => message_list.search (search.text));
         search.activate.connect (() => search_server.begin ());
 
-        var search_menu = new Menu ();
         var scope_menu = new Menu ();
         scope_menu.append ("This Folder", "win.search-scope::current-folder");
         scope_menu.append ("This Account", "win.search-scope::current-account");
         scope_menu.append ("All Mail", "win.search-scope::all-mail");
-        search_menu.append_section ("Search In", scope_menu);
         var filter_menu = new Menu ();
         filter_menu.append ("Unread", "win.add-search-filter::unread");
         filter_menu.append ("Flagged", "win.add-search-filter::flagged");
         filter_menu.append ("Has Attachments", "win.add-search-filter::attachments");
         filter_menu.append ("From Selected Sender", "win.add-search-filter::sender");
         filter_menu.append ("Past 7 Days", "win.add-search-filter::week");
-        search_menu.append_section ("Quick Filters", filter_menu);
-        search_scope_button.label = "Folder";
-        search_scope_button.menu_model = search_menu;
-        search_scope_button.tooltip_text = "Search this folder";
-        search_scope_button.add_css_class ("search-scope-button");
-        search_scope_button.always_show_arrow = true;
-        Accessibility.label (search_scope_button, "Search scope and filters");
 
         task_search.placeholder_text = "Search Tasks";
         task_search.set_size_request (300, -1);
+        task_search.valign = Gtk.Align.CENTER;
         task_search.add_css_class ("apple-toolbar-search");
         Accessibility.label (task_search, "Search tasks");
         task_search.search_changed.connect (() => task_view.set_query (task_search.text));
@@ -1426,34 +1577,57 @@ public class MailWindow : Adw.ApplicationWindow {
         sort_menu.append ("Subject", "win.sort::subject"); sort_menu.append ("Unread First", "win.sort::unread");
         sort_menu.append ("Flagged First", "win.sort::flagged");
         sort_button.child = new Gtk.Image.from_icon_name ("view-sort-descending-symbolic");
-        sort_button.set_size_request (28, 28);
+        sort_button.valign = Gtk.Align.CENTER;
         sort_button.always_show_arrow = false;
         sort_button.tooltip_text = "Sort messages — " + sort_label_for (settings.message_sort);
         sort_button.menu_model = sort_menu;
         Accessibility.label (sort_button, "Sort messages");
 
         var more_menu = new Menu ();
+        more_menu.append ("Get Mail", "win.refresh");
         more_menu.append ("Reply", "win.reply");
         more_menu.append ("Reply All", "win.reply-all");
         more_menu.append ("Forward", "win.forward");
+        more_menu.append_submenu ("Sort By", sort_menu);
         more_menu.append ("Archive", "win.archive"); more_menu.append ("Move to Trash", "win.trash");
         more_menu.append ("Junk or Not Junk", "win.junk"); more_menu.append ("Flag or Unflag", "win.flag");
+        var more_flag_colors = new Menu ();
+        more_flag_colors.append ("Orange", "win.set-flag-color::orange");
+        more_flag_colors.append ("Red", "win.set-flag-color::red");
+        more_flag_colors.append ("Purple", "win.set-flag-color::purple");
+        more_flag_colors.append ("Blue", "win.set-flag-color::blue");
+        more_flag_colors.append ("Yellow", "win.set-flag-color::yellow");
+        more_flag_colors.append ("Green", "win.set-flag-color::green");
+        more_flag_colors.append ("Gray", "win.set-flag-color::gray");
+        more_flag_colors.append ("Clear Flag", "win.clear-flag");
+        more_menu.append_submenu ("Flag Color", more_flag_colors);
         more_menu.append ("Create Rule from Message…", "win.create-rule-from-message");
         more_menu.append ("Create Task from Message…", "win.create-task");
         rebuild_quick_steps_menu ();
         more_menu.append_submenu ("Quick Steps", quick_steps_menu);
         more_toggle_read_item = new MenuItem ("Mark as Read", "win.toggle-read");
         more_menu.append_item (more_toggle_read_item);
-        more_menu.append ("Move or Copy…", "win.show-move");
+        more_menu.append ("Labels…", "win.labels");
+        more_menu.append ("Snooze…", "win.snooze");
+        move_menu.remove_all ();
+        move_menu.append ("No other folders", null);
+        more_menu.append_submenu ("Move or Copy", move_menu);
+        more_menu.append ("Print…", "win.print-message");
         more_menu.append ("Apply Rules", "win.apply-rules");
         more_button.icon_name = "view-more-symbolic"; more_button.tooltip_text = "More message actions"; more_button.menu_model = more_menu;
+        more_button.valign = Gtk.Align.CENTER;
+        more_button.add_css_class ("toolbar-menu-button");
         Accessibility.label (more_button, "More message actions");
 
         customizable_toolbar.hexpand = true;
         customizable_toolbar.halign = Gtk.Align.FILL;
         customizable_toolbar.set_size_request (0, -1);
         customizable_toolbar.add_css_class ("apple-toolbar");
-        customizable_toolbar.notify["width"].connect (() => update_percentage_spacers ());
+        var overflow_host = make_toolbar_host (more_button);
+        Accessibility.label (overflow_host, "More toolbar commands");
+        overflow_host.visible = false;
+        toolbar_overflow_host = overflow_host;
+        customizable_toolbar.append (overflow_host);
 
         task_toolbar.hexpand = true;
         task_toolbar.halign = Gtk.Align.FILL;
@@ -1466,14 +1640,35 @@ public class MailWindow : Adw.ApplicationWindow {
         task_toolbar.append (task_sidebar);
         var task_spacer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         task_spacer.hexpand = true;
-        task_toolbar.append (task_spacer);
+        var task_drag_handle = new Gtk.WindowHandle ();
+        task_drag_handle.hexpand = true;
+        task_drag_handle.add_css_class ("mail-header-handle");
+        task_drag_handle.child = task_spacer;
+        task_toolbar.append (task_drag_handle);
         task_toolbar.append (task_search);
 
         toolbar_stack.hexpand = true;
         toolbar_stack.halign = Gtk.Align.FILL;
+        // An invisible task toolbar must not impose its wider natural search
+        // size on the active mail toolbar (or vice versa) at small widths.
+        toolbar_stack.hhomogeneous = false;
         toolbar_stack.add_css_class ("mail-toolbar-stack");
         toolbar_stack.transition_type = Gtk.StackTransitionType.NONE;
-        toolbar_stack.add_named (customizable_toolbar, "mail");
+        mail_toolbar_scroller.set_policy (
+            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER);
+        mail_toolbar_scroller.propagate_natural_width = false;
+        // GtkScrolledWindow otherwise keeps roughly 300 px of its child's
+        // natural width even though this is precisely the row that is meant
+        // to overflow. Allow the header box to allocate the real remainder.
+        mail_toolbar_scroller.min_content_width = 0;
+        mail_toolbar_scroller.set_size_request (0, -1);
+        mail_toolbar_scroller.overlay_scrolling = true;
+        mail_toolbar_scroller.has_frame = false;
+        mail_toolbar_scroller.hexpand = true;
+        mail_toolbar_scroller.halign = Gtk.Align.FILL;
+        mail_toolbar_scroller.add_css_class ("mail-toolbar-scroller");
+        mail_toolbar_scroller.child = customizable_toolbar;
+        toolbar_stack.add_named (mail_toolbar_scroller, "mail");
         toolbar_stack.add_named (task_toolbar, "tasks");
         toolbar_stack.visible_child_name = "mail";
         header.append (toolbar_stack);
@@ -1500,11 +1695,8 @@ public class MailWindow : Adw.ApplicationWindow {
         display_menu.append ("Always Show Images", "win.always-show-images");
         display_menu.append ("Display Full HTML", "win.full-html-formatting");
         view_menu.append_submenu ("Message Display", display_menu);
-        var search_scope_menu = new Menu ();
-        search_scope_menu.append ("This Folder", "win.search-scope::current-folder");
-        search_scope_menu.append ("This Account", "win.search-scope::current-account");
-        search_scope_menu.append ("All Mail", "win.search-scope::all-mail");
-        view_menu.append_submenu ("Search Scope", search_scope_menu);
+        view_menu.append_submenu ("Search Scope", scope_menu);
+        view_menu.append_submenu ("Search Filters", filter_menu);
         app_menu.append_section ("View", view_menu);
 
         var accounts_menu = new Menu ();
@@ -1523,7 +1715,6 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu.append_section ("Help", help_menu);
         var app_menu_button = new Gtk.MenuButton ();
         app_menu_button.child = new Gtk.Image.from_icon_name ("open-menu-symbolic");
-        app_menu_button.set_size_request (28, 38);
         app_menu_button.always_show_arrow = false;
         app_menu_button.add_css_class ("app-menu-button");
         app_menu_button.valign = Gtk.Align.CENTER;
@@ -1552,14 +1743,17 @@ public class MailWindow : Adw.ApplicationWindow {
         });
         customizable_toolbar.add_controller (secondary_click);
         rebuild_toolbar ();
-        var window_handle = new Gtk.WindowHandle ();
-        window_handle.add_css_class ("mail-header-handle");
-        window_handle.child = header;
-        return window_handle;
+        // Do not put interactive toolbar controls under one WindowHandle.
+        // On Wayland its title-drag gesture can retain the seat when a
+        // customization popup changes the toolbar tree. Flexible blank
+        // spaces get their own handles below, preserving normal window drag.
+        return header;
     }
 
     private Gtk.Button make_toolbar_button (string id, string action_name) {
-        var button = new Gtk.Button.from_icon_name (ToolbarLayout.icon_name (id));
+        var button = new Gtk.Button ();
+        button.valign = Gtk.Align.CENTER;
+        button.child = toolbar_item_content (id);
         if (action_name != "") button.action_name = action_name;
         button.tooltip_text = ToolbarLayout.label (id);
         button.add_css_class ("apple-toolbar-button");
@@ -1568,8 +1762,36 @@ public class MailWindow : Adw.ApplicationWindow {
         return button;
     }
 
+    private Gtk.Widget toolbar_item_content (string id) {
+        // At the smallest supported width, mirror native toolbars by falling
+        // back to symbols even if the normal preference includes labels.
+        // The customization surface still shows the configured presentation.
+        string mode = minimal_toolbar && toolbar_customization == null ?
+            "icons" : settings.toolbar_display_mode;
+        if (mode == "text") {
+            var text = new Gtk.Label (ToolbarLayout.label (id));
+            text.add_css_class ("toolbar-item-label");
+            return text;
+        }
+
+        var icon = new Gtk.Image.from_icon_name (ToolbarLayout.icon_name (id));
+        icon.pixel_size = 16;
+        if (mode == "icons") return icon;
+
+        var content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+        content.halign = Gtk.Align.CENTER;
+        content.valign = Gtk.Align.CENTER;
+        content.add_css_class ("toolbar-item-content");
+        content.append (icon);
+        var text = new Gtk.Label (ToolbarLayout.label (id));
+        text.add_css_class ("toolbar-item-label");
+        content.append (text);
+        return content;
+    }
+
     private Gtk.Box make_toolbar_group (string[] ids, string[] actions, string label) {
         var group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        group.valign = Gtk.Align.CENTER;
         group.add_css_class ("linked");
         group.add_css_class ("apple-toolbar-group");
         group.tooltip_text = label;
@@ -1590,7 +1812,8 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private bool overflows_in_compact_toolbar (string id) {
-        if (id == "reply-group" || id == "reply-all" || id == "forward") return true;
+        if (id == "reply-group" || id == "reply" ||
+            id == "reply-all" || id == "forward") return true;
         switch (id) {
         case "move":
         case "flag":
@@ -1604,29 +1827,39 @@ public class MailWindow : Adw.ApplicationWindow {
         }
     }
 
-    private bool belongs_in_action_cluster (string id) {
+    private bool overflows_in_narrow_toolbar (string id) {
+        // Keep the small-window command bar to the configured essentials.
+        // Every other command remains reachable from the trailing More menu.
+        if (minimal_toolbar) {
+            switch (id) {
+            case "sidebar":
+            case "compose":
+            case "search":
+                return false;
+            default:
+                return !ToolbarLayout.is_flexible_space (id) && id != "space";
+            }
+        }
         switch (id) {
-        case "reply-group":
-        case "mail-actions":
-        case "reply":
-        case "reply-all":
-        case "forward":
-        case "archive":
-        case "trash":
-        case "junk":
-        case "move":
-        case "flag":
-        case "toggle-read":
-        case "labels":
-        case "snooze":
-        case "print":
-            return true;
-        default:
+        case "sidebar":
+        case "compose":
+        case "refresh":
+        case "search":
+        case "sort":
             return false;
+        default:
+            return !ToolbarLayout.is_flexible_space (id) && id != "space";
         }
     }
 
     private void rebuild_toolbar () {
+        // A DragSource and its source widget must remain parented until GTK has
+        // emitted drag-end/drag-cancel. Adaptive or settings-driven rebuilds
+        // during that interval are replayed by toolbar_customization_drag_finished().
+        if (toolbar_customization_drag_active) {
+            toolbar_rebuild_pending = true;
+            return;
+        }
         if (rebuilding_toolbar) {
             toolbar_rebuild_pending = true;
             return;
@@ -1645,73 +1878,76 @@ public class MailWindow : Adw.ApplicationWindow {
         // a nested/partially rebuilt layout must never feed an already-parented
         // widget to gtk_box_append().
         if (!detach_toolbar_widget (search) ||
-            !detach_toolbar_widget (search_scope_button) ||
-            !detach_toolbar_widget (sort_button) ||
-            !detach_toolbar_widget (more_button)) return;
+            !detach_toolbar_widget (sort_button)) return;
         percentage_spacers.clear ();
         percentage_spacer_values.clear ();
-        more_button.remove_css_class ("apple-toolbar-button");
-        more_button.remove_css_class ("toolbar-menu-button");
+        customizable_toolbar.remove_css_class ("toolbar-display-icons");
+        customizable_toolbar.remove_css_class ("toolbar-display-icons-text");
+        customizable_toolbar.remove_css_class ("toolbar-display-text");
+        customizable_toolbar.remove_css_class ("toolbar-customizing");
+        customizable_toolbar.remove_css_class ("toolbar-minimal");
+        task_toolbar.remove_css_class ("toolbar-minimal");
+        var header = header_content;
+        if (header != null) {
+            header.remove_css_class ("mail-header-minimal");
+            header.spacing = minimal_toolbar ? 4 : 6;
+            if (minimal_toolbar) header.add_css_class ("mail-header-minimal");
+        }
+        customizable_toolbar.add_css_class ("toolbar-display-" +
+            settings.toolbar_display_mode);
+        if (minimal_toolbar && toolbar_customization == null) {
+            customizable_toolbar.add_css_class ("toolbar-minimal");
+            task_toolbar.add_css_class ("toolbar-minimal");
+        }
         Gtk.Widget? child = customizable_toolbar.get_first_child ();
         while (child != null) {
             Gtk.Widget? next = child.get_next_sibling ();
-            if (child != toolbar_context_menu)
+            if (child != toolbar_context_menu && child != toolbar_overflow_host)
                 customizable_toolbar.remove (child);
             child = next;
         }
+        if (toolbar_overflow_host != null) toolbar_overflow_host.visible = false;
 
         var layout = ToolbarLayout.parse (settings.toolbar_layout);
         if (layout.size == 0) layout = ToolbarLayout.parse (ToolbarLayout.DEFAULT_LAYOUT);
+        bool editing_toolbar = toolbar_customization != null;
+        customizable_toolbar.spacing = editing_toolbar ? 0 : 6;
+        if (editing_toolbar) customizable_toolbar.add_css_class ("toolbar-customizing");
 
-        if (narrow_layout) {
-            var narrow_sidebar = toolbar_widget_for ("sidebar");
-            var narrow_compose = toolbar_widget_for ("compose");
-            var narrow_refresh = toolbar_widget_for ("refresh");
-            if (narrow_sidebar != null) customizable_toolbar.append (narrow_sidebar);
-            if (narrow_compose != null) customizable_toolbar.append (narrow_compose);
-            if (narrow_refresh != null) customizable_toolbar.append (narrow_refresh);
-            more_button.add_css_class ("toolbar-menu-button");
-            customizable_toolbar.append (more_button);
-            var narrow_spacer = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
-            narrow_spacer.hexpand = true;
-            customizable_toolbar.append (narrow_spacer);
-            customizable_toolbar.append (make_search_control ());
-            var narrow_sort = toolbar_widget_for ("sort");
-            if (narrow_sort != null) customizable_toolbar.append (narrow_sort);
-            return;
-        }
-        if (compact_toolbar) {
-            var compact_sidebar = toolbar_widget_for ("sidebar");
-            if (compact_sidebar != null) customizable_toolbar.append (compact_sidebar);
-        }
-        bool added_overflow = false;
-        Gtk.Box? action_cluster = null;
-        foreach (var id in layout) {
-            // The adaptive layout always supplies its own mailbox control.
-            if (compact_toolbar && id == "sidebar") continue;
-            if (compact_toolbar && overflows_in_compact_toolbar (id)) {
-                action_cluster = null;
-                if (!added_overflow) {
-                    more_button.add_css_class ("toolbar-menu-button");
-                    customizable_toolbar.append (more_button);
-                    added_overflow = true;
-                }
+        bool has_overflow = false;
+        for (int layout_index = 0; layout_index < layout.size; layout_index++) {
+            string id = layout[layout_index];
+            if (!editing_toolbar && narrow_layout &&
+                (ToolbarLayout.is_flexible_space (id) || id == "space"))
+                continue;
+            bool overflow = !editing_toolbar && (narrow_layout ?
+                overflows_in_narrow_toolbar (id) :
+                (compact_toolbar && overflows_in_compact_toolbar (id)));
+            if (overflow) {
+                has_overflow = true;
                 continue;
             }
             Gtk.Widget? item = toolbar_widget_for (id);
             if (item == null) continue;
-            if (belongs_in_action_cluster (id)) {
-                if (action_cluster == null) {
-                    action_cluster = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
-                    action_cluster.add_css_class ("toolbar-action-cluster");
-                    customizable_toolbar.append (action_cluster);
-                }
-                item.add_css_class ("toolbar-cluster-segment");
-                action_cluster.append (item);
-            } else {
-                action_cluster = null;
-                customizable_toolbar.append (item);
+            customizable_toolbar.append (
+                make_toolbar_drag_host (item, id, layout_index));
+        }
+        if (has_overflow) {
+            var overflow_host = toolbar_overflow_host;
+            if (overflow_host != null) {
+                var last_child = customizable_toolbar.get_last_child ();
+                if (last_child != overflow_host)
+                    customizable_toolbar.reorder_child_after (
+                        overflow_host, last_child);
+                overflow_host.visible = true;
             }
+        }
+        if (editing_toolbar) {
+            var end_target = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+            end_target.add_css_class ("toolbar-drop-end-target");
+            end_target.tooltip_text = "Drop at end of toolbar";
+            add_toolbar_insertion_target (this, end_target, layout.size, true);
+            customizable_toolbar.append (end_target);
         }
         // The search field is the flexible part of the toolbar. Keeping a
         // minimum width preserves usability while allowing the toolbar to
@@ -1729,6 +1965,438 @@ public class MailWindow : Adw.ApplicationWindow {
         }
         warning ("Reusable toolbar control has an unexpected non-box parent");
         return false;
+    }
+
+    private Gtk.Box make_toolbar_host (Gtk.Widget item) {
+        var host = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        host.add_css_class ("toolbar-item-host");
+        host.valign = Gtk.Align.CENTER;
+        host.halign = Gtk.Align.FILL;
+        host.hexpand = item.hexpand;
+        item.valign = Gtk.Align.CENTER;
+        item.halign = Gtk.Align.FILL;
+        host.append (item);
+        return host;
+    }
+
+    private Gtk.Widget make_toolbar_drag_host (Gtk.Widget item, string id,
+                                                int index) {
+        var host = make_toolbar_host (item);
+        host.add_css_class ("toolbar-drag-host");
+        Accessibility.label (host, ToolbarLayout.label (id));
+
+        if (ToolbarLayout.is_flexible_space (id) && id != "flex") {
+            percentage_spacers.add (host);
+            percentage_spacer_values.add (
+                ToolbarLayout.flexible_space_percentage (id));
+        }
+        // Drag/drop and keyboard editing belong exclusively to Apple's
+        // customization session. A normal toolbar must contain ordinary
+        // controls only; otherwise every display-mode rebuild creates another
+        // controller tree and those controllers can also intercept clicks.
+        if (toolbar_customization != null)
+            add_toolbar_item_drag_and_drop (this, host, id, index);
+        return host;
+    }
+
+    private static void add_toolbar_item_drag_and_drop (MailWindow window,
+                                                        Gtk.Widget widget,
+                                                        string id, int index) {
+        var source = new Gtk.DragSource ();
+        source.actions = Gdk.DragAction.MOVE;
+        // The customization surface needs first refusal so GtkWindowHandle
+        // cannot turn an item drag into a window move.
+        source.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+
+        // GtkWidget owns its controllers, and each controller owns its signal
+        // closures. Keep every object on the return edge weak or an old toolbar
+        // survives each display-mode rebuild as widget -> controller -> closure
+        // -> widget/window/controller.
+        weak MailWindow weak_window = window;
+        weak Gtk.Widget weak_widget = widget;
+        weak Gtk.DragSource weak_source = source;
+        source.prepare.connect ((x, y) => {
+            if (weak_window == null || weak_widget == null ||
+                weak_source == null || weak_window.toolbar_customization == null)
+                return null;
+            var paintable = new Gtk.WidgetPaintable (weak_widget);
+            weak_source.set_icon (paintable.get_current_image (), (int) x, (int) y);
+            Value value = Value (typeof (string));
+            value.set_string ("toolbar|%d|%s".printf (index, id));
+            return new Gdk.ContentProvider.for_value (value);
+        });
+        source.drag_begin.connect ((drag) => {
+            if (weak_window == null || weak_widget == null || weak_source == null)
+                return;
+            weak_widget.add_css_class ("toolbar-dragging");
+            weak_window.toolbar_customization_escape_canceling_drag = false;
+            weak_window.toolbar_customization_drag_active = true;
+            if (weak_window.toolbar_customization != null) {
+                weak_window.toolbar_customization_active_drag_source = weak_source;
+                weak_window.toolbar_customization.begin_live_toolbar_drag ();
+            }
+        });
+        source.drag_end.connect ((drag, delete_data) => {
+            if (weak_widget != null)
+                weak_widget.remove_css_class ("toolbar-dragging");
+            if (weak_window == null) return;
+            if (weak_window.toolbar_customization_active_drag_source == weak_source)
+                weak_window.toolbar_customization_active_drag_source = null;
+            weak_window.toolbar_customization_escape_canceling_drag = false;
+            weak_window.toolbar_customization_drag_finished ();
+        });
+        source.drag_cancel.connect ((drag, reason) => {
+            if (weak_window == null) return false;
+            bool suppress_removal =
+                weak_window.toolbar_customization_escape_canceling_drag;
+            bool handled = false;
+            if (!suppress_removal && reason == Gdk.DragCancelReason.NO_TARGET) {
+                var current = ToolbarLayout.parse (
+                    weak_window.settings.toolbar_layout);
+                if (current.size > 1 && index >= 0 && index < current.size &&
+                    current[index] == id)
+                    weak_window.queue_toolbar_layout_change (
+                        ToolbarLayout.remove_item (
+                            weak_window.settings.toolbar_layout, index));
+                handled = true;
+            }
+            // drag-cancel reports the failure reason, but drag-end is GTK's
+            // terminal lifecycle edge. Keep the source parented and marked
+            // active until drag-end so Done cannot rebuild underneath it.
+            return handled;
+        });
+        // Header bars start window moves from otherwise unclaimed drags.
+        // Claim the press as part of the DragSource's gesture group so a
+        // customization drag always moves the item, never the window.
+        widget.focusable = true;
+        Accessibility.label (widget,
+            "%s. Press Delete to remove; Alt Shift Left or Right to move".printf (
+                ToolbarLayout.label (id)));
+        var drag_guard = new Gtk.GestureClick ();
+        drag_guard.button = Gdk.BUTTON_PRIMARY;
+        drag_guard.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        drag_guard.group (source);
+        weak Gtk.GestureClick weak_drag_guard = drag_guard;
+        drag_guard.pressed.connect ((presses, x, y) => {
+            if (weak_widget == null || weak_drag_guard == null) return;
+            weak_widget.grab_focus ();
+            weak_drag_guard.set_state (Gtk.EventSequenceState.CLAIMED);
+        });
+        widget.add_controller (drag_guard);
+        add_toolbar_keyboard_customization (window, widget, id, index);
+        widget.add_controller (source);
+        add_toolbar_insertion_target (window, widget, index, false);
+    }
+
+    private static void add_toolbar_keyboard_customization (MailWindow window,
+                                                             Gtk.Widget widget,
+                                                             string id, int index) {
+        var keys = new Gtk.EventControllerKey ();
+        keys.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        weak MailWindow weak_window = window;
+        weak Gtk.Widget weak_widget = widget;
+        keys.key_pressed.connect ((keyval, keycode, state) => {
+            if (weak_window == null || weak_widget == null) return false;
+            var root = weak_widget.get_root ();
+            var focused = root == null ? null : root.get_focus ();
+            if (focused is Gtk.Editable) return false;
+
+            var current = ToolbarLayout.parse (weak_window.settings.toolbar_layout);
+            if (index < 0 || index >= current.size || current[index] != id)
+                return false;
+            if ((keyval == Gdk.Key.Delete || keyval == Gdk.Key.BackSpace) &&
+                current.size > 1) {
+                weak_window.queue_toolbar_layout_change (ToolbarLayout.remove_item (
+                    weak_window.settings.toolbar_layout, index));
+                return true;
+            }
+
+            Gdk.ModifierType move_modifiers = Gdk.ModifierType.ALT_MASK |
+                Gdk.ModifierType.SHIFT_MASK;
+            if ((state & move_modifiers) != move_modifiers) return false;
+            int destination = index;
+            if (keyval == Gdk.Key.Left && index > 0)
+                destination--;
+            else if (keyval == Gdk.Key.Right && index + 1 < current.size)
+                destination++;
+            else return false;
+            weak_window.queue_toolbar_layout_change (ToolbarLayout.move_item (
+                weak_window.settings.toolbar_layout, index, destination));
+            return true;
+        });
+        widget.add_controller (keys);
+    }
+
+    private static void add_toolbar_insertion_target (MailWindow window,
+                                                       Gtk.Widget widget,
+                                                       int base_index,
+                                                       bool end_only) {
+        var target = new Gtk.DropTarget (typeof (string),
+            Gdk.DragAction.COPY | Gdk.DragAction.MOVE);
+        target.preload = true;
+        target.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+        weak MailWindow weak_window = window;
+        weak Gtk.Widget weak_widget = widget;
+        weak Gtk.DropTarget weak_target = target;
+        bool after = end_only;
+        target.enter.connect ((x, y) => {
+            if (weak_window == null || weak_widget == null || weak_target == null)
+                return (Gdk.DragAction) 0;
+            Gdk.DragAction action = toolbar_drop_action (weak_target, false);
+            if (weak_window.qa_layout)
+                message ("Toolbar DnD enter: action=%u index=%d",
+                    (uint) action, base_index);
+            if (action == 0) return (Gdk.DragAction) 0;
+            after = end_only || x > weak_widget.get_width () / 2.0;
+            show_toolbar_drop_indicator (weak_widget, after);
+            return action;
+        });
+        target.motion.connect ((x, y) => {
+            if (weak_widget == null || weak_target == null)
+                return (Gdk.DragAction) 0;
+            Gdk.DragAction action = toolbar_drop_action (weak_target, false);
+            if (action == 0) {
+                clear_toolbar_drop_indicator (weak_widget);
+                return (Gdk.DragAction) 0;
+            }
+            bool next_after = end_only || x > weak_widget.get_width () / 2.0;
+            if (next_after != after) {
+                after = next_after;
+                show_toolbar_drop_indicator (weak_widget, after);
+            }
+            return action;
+        });
+        target.leave.connect (() => {
+            if (weak_widget != null) clear_toolbar_drop_indicator (weak_widget);
+        });
+        target.drop.connect ((value, x, y) => {
+            if (weak_window == null || weak_widget == null) return false;
+            clear_toolbar_drop_indicator (weak_widget);
+            string? payload = value.get_string ();
+            if (weak_window.qa_layout)
+                message ("Toolbar DnD drop: payload=%s index=%d",
+                    payload ?? "(null)", base_index);
+            if (payload == null) return false;
+            int insertion_index = end_only ? base_index : base_index + (after ? 1 : 0);
+            return weak_window.apply_toolbar_drop (payload, insertion_index);
+        });
+        widget.add_controller (target);
+    }
+
+    private static void show_toolbar_drop_indicator (Gtk.Widget widget, bool after) {
+        widget.remove_css_class ("toolbar-drop-before");
+        widget.remove_css_class ("toolbar-drop-after");
+        var host = widget as Gtk.Box;
+        Gtk.Widget? item = host == null ? null : host.get_first_child ();
+        if (item != null) {
+            item.margin_start = after ? 0 : 12;
+            item.margin_end = after ? 12 : 0;
+        }
+        widget.add_css_class (after ? "toolbar-drop-after" : "toolbar-drop-before");
+    }
+
+    private static void clear_toolbar_drop_indicator (Gtk.Widget widget) {
+        widget.remove_css_class ("toolbar-drop-before");
+        widget.remove_css_class ("toolbar-drop-after");
+        var host = widget as Gtk.Box;
+        Gtk.Widget? item = host == null ? null : host.get_first_child ();
+        if (item != null) {
+            item.margin_start = 0;
+            item.margin_end = 0;
+        }
+    }
+
+    private static Gdk.DragAction toolbar_drop_action (Gtk.DropTarget target,
+                                                       bool removal_only) {
+        unowned Value? value = target.get_value ();
+        if (value != null) {
+            string? payload = value.get_string ();
+            if (payload != null) {
+                if (payload.has_prefix ("toolbar|")) return Gdk.DragAction.MOVE;
+                if (!removal_only && (payload.has_prefix ("palette|") ||
+                    payload.has_prefix ("default|"))) return Gdk.DragAction.COPY;
+                return (Gdk.DragAction) 0;
+            }
+        }
+
+        // A preloaded in-process value can still arrive just after enter.
+        // Our sources advertise one action each, so use that unique action
+        // until the payload is available to the drop callback.
+        unowned Gdk.Drop? drop = target.get_current_drop ();
+        if (drop != null) {
+            Gdk.DragAction actions = drop.get_actions ();
+            if (actions == Gdk.DragAction.MOVE) return Gdk.DragAction.MOVE;
+            if (!removal_only && actions == Gdk.DragAction.COPY)
+                return Gdk.DragAction.COPY;
+        }
+        return (Gdk.DragAction) 0;
+    }
+
+    private bool apply_toolbar_drop (string payload, int insertion_index) {
+        if (toolbar_customization_escape_canceling_drag) return true;
+        string[] parts = payload.split ("|");
+        if (parts.length < 2) return false;
+        string next_layout;
+        if (parts[0] == "default") {
+            next_layout = ToolbarLayout.serialize (ToolbarLayout.parse (parts[1]));
+            if (next_layout == "") next_layout = ToolbarLayout.DEFAULT_LAYOUT;
+        } else if (parts[0] == "palette") {
+            next_layout = ToolbarLayout.insert_item (
+                settings.toolbar_layout, parts[1], insertion_index);
+        } else if (parts[0] == "toolbar" && parts.length >= 3) {
+            int old_index;
+            if (!int.try_parse (parts[1], out old_index)) return false;
+            var current = ToolbarLayout.parse (settings.toolbar_layout);
+            if (old_index < 0 || old_index >= current.size ||
+                current[old_index] != parts[2]) return false;
+            int final_index = insertion_index;
+            if (old_index < final_index) final_index--;
+            next_layout = ToolbarLayout.move_item (
+                settings.toolbar_layout, old_index, final_index);
+        } else return false;
+
+        queue_toolbar_layout_change (next_layout);
+        return true;
+    }
+
+    private static void add_toolbar_removal_target (MailWindow window,
+                                                    Gtk.Widget widget) {
+        var target = new Gtk.DropTarget (typeof (string), Gdk.DragAction.MOVE);
+        target.preload = true;
+        target.propagation_phase = Gtk.PropagationPhase.BUBBLE;
+        weak MailWindow weak_window = window;
+        weak Gtk.Widget weak_widget = widget;
+        weak Gtk.DropTarget weak_target = target;
+        target.enter.connect ((x, y) => {
+            if (weak_widget == null || weak_target == null)
+                return (Gdk.DragAction) 0;
+            Gdk.DragAction action = toolbar_drop_action (weak_target, true);
+            if (action == 0) return (Gdk.DragAction) 0;
+            weak_widget.add_css_class ("toolbar-removal-target");
+            return action;
+        });
+        target.leave.connect (() => {
+            if (weak_widget != null)
+                weak_widget.remove_css_class ("toolbar-removal-target");
+        });
+        target.drop.connect ((value, x, y) => {
+            if (weak_window == null || weak_widget == null) return false;
+            weak_widget.remove_css_class ("toolbar-removal-target");
+            string? payload = value.get_string ();
+            if (payload == null) return false;
+            string[] parts = payload.split ("|");
+            if (parts.length < 3 || parts[0] != "toolbar") return false;
+            if (weak_window.toolbar_customization_escape_canceling_drag) return true;
+            int index;
+            if (!int.try_parse (parts[1], out index)) return false;
+            var current = ToolbarLayout.parse (weak_window.settings.toolbar_layout);
+            if (current.size <= 1) return false;
+            if (index < 0 || index >= current.size || current[index] != parts[2])
+                return false;
+            weak_window.queue_toolbar_layout_change (
+                ToolbarLayout.remove_item (
+                    weak_window.settings.toolbar_layout, index));
+            return true;
+        });
+        widget.add_controller (target);
+    }
+
+    private void queue_toolbar_layout_change (string layout) {
+        string canonical = ToolbarLayout.serialize (ToolbarLayout.parse (layout));
+        if (canonical == "") return;
+        if (canonical == settings.toolbar_layout) {
+            pending_toolbar_layout = "";
+            if (toolbar_layout_change_source != 0) {
+                Source.remove (toolbar_layout_change_source);
+                toolbar_layout_change_source = 0;
+            }
+            return;
+        }
+        pending_toolbar_layout = canonical;
+        schedule_pending_toolbar_layout_change ();
+    }
+
+    private void schedule_pending_toolbar_layout_change () {
+        if (toolbar_layout_change_source != 0 || pending_toolbar_layout == "" ||
+            toolbar_customization_drag_active) return;
+        toolbar_layout_change_source = Idle.add (() => {
+            toolbar_layout_change_source = 0;
+            if (toolbar_customization_drag_active) return Source.REMOVE;
+            string layout = pending_toolbar_layout;
+            pending_toolbar_layout = "";
+            if (layout != "" && layout != settings.toolbar_layout)
+                settings.toolbar_layout = layout;
+            return Source.REMOVE;
+        });
+    }
+
+    private void flush_pending_toolbar_layout_change () {
+        if (toolbar_layout_change_source != 0) {
+            Source.remove (toolbar_layout_change_source);
+            toolbar_layout_change_source = 0;
+        }
+        string layout = pending_toolbar_layout;
+        pending_toolbar_layout = "";
+        if (layout != "" && layout != settings.toolbar_layout)
+            settings.toolbar_layout = layout;
+    }
+
+    private static string normalize_toolbar_display_mode (string mode) {
+        switch (mode) {
+        case "icons":
+        case "icons-text":
+        case "text": return mode;
+        default: return "icons";
+        }
+    }
+
+    private void queue_toolbar_display_mode_change (string mode) {
+        string normalized = normalize_toolbar_display_mode (mode);
+        pending_toolbar_display_mode = normalized;
+        // GtkDropDown's native Wayland popup can remain inside its input/unmap
+        // transaction after notify::selected returns. Rebuilding the header on
+        // an arbitrary later timeout is still capable of destroying widgets
+        // underneath that transaction and leaves the seat unresponsive until
+        // Mutter's five-second recovery. Keep the choice in memory and apply it
+        // exactly once when Done has dismissed the customization sheet.
+        if (toolbar_customization != null) return;
+        flush_pending_toolbar_display_mode_change ();
+    }
+
+    private void flush_pending_toolbar_display_mode_change () {
+        if (toolbar_display_mode_change_source != 0) {
+            Source.remove (toolbar_display_mode_change_source);
+            toolbar_display_mode_change_source = 0;
+        }
+        string pending = pending_toolbar_display_mode;
+        pending_toolbar_display_mode = "";
+        if (pending != "" && pending != settings.toolbar_display_mode)
+            settings.toolbar_display_mode = pending;
+    }
+
+    private void toolbar_customization_drag_finished () {
+        toolbar_customization_drag_active = false;
+        if (toolbar_customization_layout_sync_pending) {
+            toolbar_customization_layout_sync_pending = false;
+            if (toolbar_customization != null)
+                toolbar_customization.sync_layout (settings.toolbar_layout);
+        }
+        schedule_pending_toolbar_layout_change ();
+        if (toolbar_customization_close_pending) {
+            schedule_toolbar_customization_close ();
+            return;
+        }
+        if (toolbar_rebuild_pending) schedule_toolbar_rebuild_after_drag ();
+    }
+
+    private void schedule_toolbar_rebuild_after_drag () {
+        if (toolbar_rebuild_source != 0) return;
+        toolbar_rebuild_source = Idle.add (() => {
+            toolbar_rebuild_source = 0;
+            if (toolbar_customization_drag_active) return Source.REMOVE;
+            if (toolbar_rebuild_pending) rebuild_toolbar ();
+            return Source.REMOVE;
+        });
     }
 
     private void update_percentage_spacers () {
@@ -1765,13 +2433,16 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gtk.Widget make_search_control () {
         var control = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         control.add_css_class ("toolbar-search-control");
+        control.valign = Gtk.Align.CENTER;
         control.hexpand = false;
         control.halign = Gtk.Align.CENTER;
-        search_scope_button.valign = Gtk.Align.CENTER;
-        control.append (search_scope_button);
         search.hexpand = true;
         search.halign = Gtk.Align.FILL;
-        search.set_size_request (narrow_layout ? 118 : (compact_toolbar ? 170 : 236), -1);
+        search.set_width_chars (minimal_toolbar ? 6 : -1);
+        search.set_max_width_chars (minimal_toolbar ? 6 : -1);
+        search.set_size_request (toolbar_customization != null ? 236 :
+            (minimal_toolbar ? 80 :
+                (narrow_layout ? 118 : (compact_toolbar ? 170 : 236))), -1);
         control.append (search);
         return control;
     }
@@ -1783,9 +2454,12 @@ public class MailWindow : Adw.ApplicationWindow {
             // "flex" token remains the automatic expanding spacer used by
             // the built-in default layout.
             flexible.hexpand = id == "flex";
-            if (id != "flex") {
-                percentage_spacers.add (flexible);
-                percentage_spacer_values.add (ToolbarLayout.flexible_space_percentage (id));
+            if (toolbar_customization == null) {
+                var drag_handle = new Gtk.WindowHandle ();
+                drag_handle.hexpand = flexible.hexpand;
+                drag_handle.add_css_class ("mail-header-handle");
+                drag_handle.child = flexible;
+                return drag_handle;
             }
             return flexible;
         }
@@ -1798,7 +2472,10 @@ public class MailWindow : Adw.ApplicationWindow {
             return mailbox_toggle;
         case "refresh":
             refresh_button = make_toolbar_button (id, "win.refresh");
-            refresh_button.tooltip_text = "Get Mail (F9)";
+            bool mail_check_active = active_sync_accounts.size > 0;
+            refresh_button.sensitive = !mail_check_active;
+            refresh_button.tooltip_text = mail_check_active ?
+                "Getting Mail…" : "Get Mail (F9)";
             return refresh_button;
         case "compose": return make_toolbar_button (id, "win.compose");
         case "reply-group":
@@ -1824,7 +2501,8 @@ public class MailWindow : Adw.ApplicationWindow {
         case "print": return make_toolbar_button (id, "win.print-message");
         case "move":
             move_button = new Gtk.MenuButton ();
-            move_button.icon_name = ToolbarLayout.icon_name (id);
+            move_button.valign = Gtk.Align.CENTER;
+            move_button.child = toolbar_item_content (id);
             move_button.tooltip_text = "Move or copy to folder";
             move_button.add_css_class ("toolbar-menu-button");
             Accessibility.label (move_button, "Move or copy to folder");
@@ -1832,6 +2510,7 @@ public class MailWindow : Adw.ApplicationWindow {
             return move_button;
         case "search": return make_search_control ();
         case "sort":
+            sort_button.child = toolbar_item_content (id);
             sort_button.add_css_class ("toolbar-menu-button");
             sort_button.add_css_class ("sort-toolbar-button");
             return sort_button;
@@ -1845,6 +2524,7 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private Gtk.Widget make_flag_control () {
         var control = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
+        control.valign = Gtk.Align.CENTER;
         control.add_css_class ("linked");
         control.add_css_class ("flag-control");
 
@@ -1853,7 +2533,7 @@ public class MailWindow : Adw.ApplicationWindow {
         control.append (flag_button);
 
         flag_color_button = new Gtk.MenuButton ();
-        flag_color_button.icon_name = "pan-down-symbolic";
+        flag_color_button.child = new Gtk.Image.from_icon_name ("pan-down-symbolic");
         flag_color_button.tooltip_text = "Choose flag color";
         flag_color_button.add_css_class ("toolbar-menu-button");
         Accessibility.label (flag_color_button, "Choose flag color");
@@ -1862,28 +2542,24 @@ public class MailWindow : Adw.ApplicationWindow {
         popover.has_arrow = false;
         var menu = new Gtk.Box (Gtk.Orientation.VERTICAL, 1);
         menu.add_css_class ("flag-color-menu");
-        menu.append (make_flag_color_row ("orange", "Orange", popover));
-        menu.append (make_flag_color_row ("red", "Red", popover));
-        menu.append (make_flag_color_row ("purple", "Purple", popover));
-        menu.append (make_flag_color_row ("blue", "Blue", popover));
-        menu.append (make_flag_color_row ("yellow", "Yellow", popover));
-        menu.append (make_flag_color_row ("green", "Green", popover));
-        menu.append (make_flag_color_row ("gray", "Gray", popover));
+        menu.append (make_flag_color_row ("orange", "Orange"));
+        menu.append (make_flag_color_row ("red", "Red"));
+        menu.append (make_flag_color_row ("purple", "Purple"));
+        menu.append (make_flag_color_row ("blue", "Blue"));
+        menu.append (make_flag_color_row ("yellow", "Yellow"));
+        menu.append (make_flag_color_row ("green", "Green"));
+        menu.append (make_flag_color_row ("gray", "Gray"));
         menu.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
 
         var clear = new Gtk.Button.with_label ("Clear Flag");
         clear.halign = Gtk.Align.FILL;
-        clear.clicked.connect (() => {
-            popover.popdown ();
-            clear_selected_flags ();
-        });
+        clear.action_name = "win.clear-flag";
+        clear.clicked.connect (popdown_flag_menu);
         menu.append (clear);
         var toggle = new Gtk.Button.with_label ("Toggle Flag");
         toggle.halign = Gtk.Align.FILL;
-        toggle.clicked.connect (() => {
-            popover.popdown ();
-            toggle_selected_flag ();
-        });
+        toggle.action_name = "win.flag";
+        toggle.clicked.connect (popdown_flag_menu);
         menu.append (toggle);
         popover.child = menu;
         flag_color_button.popover = popover;
@@ -1892,7 +2568,7 @@ public class MailWindow : Adw.ApplicationWindow {
         return control;
     }
 
-    private Gtk.Button make_flag_color_row (string color, string label, Gtk.Popover popover) {
+    private static Gtk.Button make_flag_color_row (string color, string label) {
         var row = new Gtk.Button ();
         var content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
         var icon = new Gtk.Image.from_icon_name ("mailficient-flag-symbolic");
@@ -1903,90 +2579,471 @@ public class MailWindow : Adw.ApplicationWindow {
         content.append (icon);
         content.append (text);
         row.child = content;
-        row.clicked.connect (() => {
-            popover.popdown ();
-            set_selected_flag_color (color);
-        });
+        row.action_name = "win.set-flag-color";
+        row.action_target = new Variant.string (color);
+        row.clicked.connect (popdown_flag_menu);
         Accessibility.label (row, "Flag %s".printf (label.down ()));
         return row;
     }
 
+    private static void popdown_flag_menu (Gtk.Button button) {
+        var popover = button.get_ancestor (typeof (Gtk.Popover)) as Gtk.Popover;
+        if (popover != null) popover.popdown ();
+    }
+
     private void show_toolbar_customization () {
-        var dialog = new ToolbarCustomizationDialog (settings.toolbar_layout);
-        dialog.layout_changed.connect ((layout) => settings.toolbar_layout = layout);
-        dialog.present (this);
+        if (toolbar_customization != null) return;
+        int64 customization_open_started = DebugTrace.mark ();
+        DebugTrace.log ("toolbar-customization", "open begin");
+        if (toolbar_context_menu != null) toolbar_context_menu.popdown ();
+
+        // A queued mail-batch refresh can synchronously rebuild the sidebar,
+        // message list, and move menu. Hold it before constructing the live
+        // drag surface; incoming cache commits continue and are collapsed into
+        // one catch-up refresh when customization closes.
+        if (repository_refresh_source != 0) {
+            Source.remove (repository_refresh_source);
+            repository_refresh_source = 0;
+        }
+
+        toolbar_customization_started_narrow = narrow_layout;
+        var current_content = message_split.end_child;
+        toolbar_customization_content_was_visible =
+            current_content != null && current_content.visible;
+
+        ToolbarCustomizationDialog editor;
+        Gtk.Box layer;
+        if (cached_toolbar_customization != null &&
+            cached_toolbar_customization_layer != null) {
+            editor = cached_toolbar_customization;
+            layer = cached_toolbar_customization_layer;
+            editor.sync_layout (settings.toolbar_layout);
+            editor.sync_display_mode (settings.toolbar_display_mode);
+            editor.refresh_theme ();
+        } else {
+            editor = new ToolbarCustomizationDialog (
+                settings.toolbar_layout, settings.toolbar_display_mode);
+            layer = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            layer.hexpand = true;
+            layer.vexpand = true;
+            layer.add_css_class ("toolbar-customization-overlay");
+
+            // Match Mail's attached customization sheet: it begins immediately
+            // below the live toolbar and occupies about four fifths of a desktop
+            // window. Adw.Clamp lets it expand to the available width on narrow
+            // windows instead of forcing a clipped fixed-size panel.
+            var sheet_clamp = new Adw.Clamp ();
+            sheet_clamp.maximum_size = 944;
+            sheet_clamp.tightening_threshold = 720;
+            sheet_clamp.margin_start = 10;
+            sheet_clamp.margin_end = 10;
+            sheet_clamp.halign = Gtk.Align.FILL;
+            sheet_clamp.child = editor;
+            layer.append (sheet_clamp);
+
+            var scrim = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            scrim.vexpand = true;
+            layer.append (scrim);
+
+            editor.layout_changed.connect ((layout) =>
+                queue_toolbar_layout_change (layout));
+            editor.drag_activity_changed.connect ((active) => {
+                if (active)
+                    toolbar_customization_drag_active = true;
+                else
+                    toolbar_customization_drag_finished ();
+            });
+            editor.display_mode_changed.connect ((mode) =>
+                queue_toolbar_display_mode_change (mode));
+            editor.close_requested.connect (() =>
+                request_toolbar_customization_close ());
+
+            cached_toolbar_customization = editor;
+            cached_toolbar_customization_layer = layer;
+            workspace_overlay.add_overlay (layer);
+            workspace_overlay.set_measure_overlay (layer, false);
+        }
+
+        toolbar_customization = editor;
+        toolbar_customization_layer = layer;
+        toolbar_customization_drag_active = false;
+        toolbar_customization_active_drag_source = null;
+        toolbar_customization_escape_canceling_drag = false;
+        toolbar_customization_close_pending = false;
+        toolbar_customization_layout_sync_pending = false;
+        install_toolbar_customization_escape_controller ();
+        layer.opacity = 1;
+        layer.can_target = true;
+        layer.sensitive = true;
+        toolbar_stack.visible_child_name = "mail";
+        rebuild_toolbar ();
+        DebugTrace.duration ("toolbar-customization", "open ready",
+            customization_open_started);
+        Idle.add (() => {
+            if (toolbar_customization == editor) editor.focus_done_button ();
+            return Source.REMOVE;
+        });
+    }
+
+    private void request_toolbar_customization_open () {
+        if (preparing_for_shutdown || toolbar_customization != null ||
+            toolbar_customization_open_source != 0) return;
+
+        // Menu actions are dispatched by a GtkPopoverMenu. Wait until the menu
+        // item and popover have finished their current activation dispatch
+        // before installing the editor and rebuilding toolbar children.
+        // Use a normal-priority one-shot instead of an idle source. A busy
+        // mail check can continuously enqueue normal-priority callbacks and
+        // otherwise starve the request that opens the editor.
+        toolbar_customization_open_source = Timeout.add (1, () => {
+            toolbar_customization_open_source = 0;
+            if (!preparing_for_shutdown && toolbar_customization == null)
+                show_toolbar_customization ();
+            return Source.REMOVE;
+        });
+    }
+
+    private void request_toolbar_customization_close () {
+        var editor = toolbar_customization;
+        if (editor == null) {
+            toolbar_customization_close_pending = false;
+            return;
+        }
+        if (!toolbar_customization_close_pending) {
+            toolbar_customization_close_requested_at = DebugTrace.mark ();
+            DebugTrace.log ("toolbar-customization", "Done requested");
+        }
+        toolbar_customization_close_pending = true;
+
+        // Canceling a drag may emit drag-cancel synchronously. Set the pending
+        // state first so that callback can safely schedule terminal teardown.
+        var source = toolbar_customization_active_drag_source;
+        if (source != null) {
+            toolbar_customization_escape_canceling_drag = true;
+            editor.suppress_live_toolbar_removal ();
+            source.cancel ();
+            if (!toolbar_customization_drag_active &&
+                toolbar_customization_active_drag_source == null)
+                schedule_toolbar_customization_close ();
+            return;
+        }
+        if (editor.cancel_active_drag ()) {
+            if (!toolbar_customization_drag_active)
+                schedule_toolbar_customization_close ();
+            return;
+        }
+        if (toolbar_customization_drag_active) return;
+        schedule_toolbar_customization_close ();
+    }
+
+    private void schedule_toolbar_customization_close () {
+        if (toolbar_customization_close_source != 0 ||
+            toolbar_customization == null) return;
+        // Like opening, closing must not wait for the sync event stream to
+        // become completely idle.
+        toolbar_customization_close_source = Timeout.add (1, () => {
+            toolbar_customization_close_source = 0;
+            if (!toolbar_customization_close_pending ||
+                toolbar_customization == null) return Source.REMOVE;
+            if (toolbar_customization_drag_active ||
+                toolbar_customization_active_drag_source != null)
+                return Source.REMOVE;
+
+            // The editor owns palette/default drag sources. Recheck it here in
+            // case its drag-begin signal arrived just after the close request.
+            var editor = toolbar_customization;
+            if (editor != null && editor.cancel_active_drag ())
+                return Source.REMOVE;
+            close_toolbar_customization ();
+            return Source.REMOVE;
+        });
+    }
+
+    private void close_toolbar_customization () {
+        var layer = toolbar_customization_layer;
+        if (toolbar_customization == null || layer == null) return;
+        if (toolbar_customization_drag_active ||
+            toolbar_customization_active_drag_source != null) {
+            request_toolbar_customization_close ();
+            return;
+        }
+
+        // A successful drop queues its durable setting at idle priority while
+        // Done arrives through a normal-priority button dispatch. Take that
+        // value now so closing can never overtake the user's final drop.
+        if (toolbar_layout_change_source != 0) {
+            Source.remove (toolbar_layout_change_source);
+            toolbar_layout_change_source = 0;
+        }
+        string layout_to_commit = pending_toolbar_layout;
+        pending_toolbar_layout = "";
+        if (toolbar_display_mode_change_source != 0) {
+            Source.remove (toolbar_display_mode_change_source);
+            toolbar_display_mode_change_source = 0;
+        }
+        string display_mode_to_commit = pending_toolbar_display_mode;
+        pending_toolbar_display_mode = "";
+
+        // Make observers see the terminal state before unparenting the sheet.
+        // Suppress the settings signal's intermediate rebuild; this method
+        // performs exactly one live-toolbar rebuild after teardown.
+        closing_toolbar_customization = true;
+        toolbar_customization = null;
+        toolbar_customization_layer = null;
+        toolbar_customization_drag_active = false;
+        toolbar_customization_active_drag_source = null;
+        toolbar_customization_escape_canceling_drag = false;
+        toolbar_customization_close_pending = false;
+        toolbar_customization_layout_sync_pending = false;
+        if (toolbar_rebuild_source != 0) {
+            Source.remove (toolbar_rebuild_source);
+            toolbar_rebuild_source = 0;
+        }
+        if (layout_to_commit != "" && layout_to_commit != settings.toolbar_layout)
+            settings.toolbar_layout = layout_to_commit;
+        if (display_mode_to_commit != "" &&
+            display_mode_to_commit != settings.toolbar_display_mode)
+            settings.toolbar_display_mode = display_mode_to_commit;
+        // Keep one hidden customization tree for the window lifetime. GTK's
+        // asynchronous destruction of dozens of native drag/accessibility
+        // controllers could otherwise monopolize the main loop for seconds,
+        // and rebuilding a fresh tree on every open caused the reported RSS
+        // growth. An invisible overlay is neither measured nor input-active.
+        layer.opacity = 0;
+        layer.can_target = false;
+        layer.sensitive = false;
+        if (toolbar_customization_close_requested_at != 0)
+            DebugTrace.duration ("toolbar-customization", "sheet removed",
+                toolbar_customization_close_requested_at);
+        if (narrow_layout) {
+            // Preserve an existing narrow reader/list choice, but if the
+            // window became narrow while editing, honor the adaptive layout's
+            // normal choice to return to the message list.
+            set_message_content_visible (toolbar_customization_started_narrow &&
+                toolbar_customization_content_was_visible);
+        } else {
+            set_message_content_visible (true);
+        }
+        toolbar_stack.visible_child_name =
+            workspace_stack.visible_child_name == "tasks" ? "tasks" : "mail";
+
+        // This method already runs from the deferred close source, outside
+        // the Done button and GtkDropDown dispatch. Finish the tiny in-memory
+        // rebuild in this same callback: yielding here let a ready mail-sync
+        // callback take the GTK thread and wait on SQLite's busy timeout before
+        // the replacement toolbar could receive input.
+        rebuild_toolbar ();
+        closing_toolbar_customization = false;
+        if (toolbar_customization_close_requested_at != 0) {
+            DebugTrace.duration ("toolbar-customization", "toolbar ready",
+                toolbar_customization_close_requested_at);
+            toolbar_customization_close_requested_at = 0;
+        }
+        schedule_toolbar_customization_catchup ();
+    }
+
+    private void schedule_toolbar_customization_catchup () {
+        if (preparing_for_shutdown || toolbar_customization_catchup_source != 0)
+            return;
+        if (!toolbar_customization_structure_refresh_pending &&
+            !repository_refresh_pending) return;
+
+        // Done must finish and the new toolbar must receive input before a
+        // real mailbox releases work accumulated during customization. Run
+        // one low-priority structure pass, then let the normal coalescer
+        // update the message model on a later main-loop turn.
+        toolbar_customization_catchup_source = Timeout.add_full (
+            Priority.DEFAULT_IDLE, 500, () => {
+                toolbar_customization_catchup_source = 0;
+                if (preparing_for_shutdown) return Source.REMOVE;
+                if (toolbar_customization_blocks_mail_refresh ()) {
+                    schedule_toolbar_customization_catchup ();
+                    return Source.REMOVE;
+                }
+
+                bool sidebar_current = false;
+                if (toolbar_customization_structure_refresh_pending) {
+                    toolbar_customization_structure_refresh_pending = false;
+                    reconcile_mailbox_structure (
+                        pending_folder_replacement_account,
+                        pending_folder_replacement_name,
+                        pending_folder_replacement_remote, false);
+                    if (pending_initial_inbox_account_id != "")
+                        select_pending_account_inbox (
+                            pending_initial_inbox_account_id);
+                    sidebar_current = true;
+                }
+                if (repository_refresh_pending)
+                    queue_repository_refresh (sidebar_current);
+                return Source.REMOVE;
+            });
+    }
+
+    private void install_toolbar_customization_escape_controller () {
+        if (toolbar_customization_escape_controller != null) return;
+        var keys = new Gtk.EventControllerKey ();
+        keys.propagation_phase = Gtk.PropagationPhase.BUBBLE;
+        keys.key_pressed.connect ((keyval, keycode, state) => {
+            if (keyval != Gdk.Key.Escape || toolbar_customization == null)
+                return false;
+            // Escape cancels an active drag without dismissing the editor.
+            // Closing here would destroy the source and misclassify the
+            // cancellation as a drop outside the toolbar, removing the item.
+            var source = toolbar_customization_active_drag_source;
+            if (source != null) {
+                toolbar_customization_escape_canceling_drag = true;
+                toolbar_customization.suppress_live_toolbar_removal ();
+                source.cancel ();
+                return true;
+            }
+            var editor = toolbar_customization;
+            if (editor != null && editor.cancel_active_drag ()) {
+                // Palette/default drag cancellation is fully owned by the
+                // editor. The MailWindow flag only suppresses removal of a
+                // canceled item that originated in the live toolbar.
+                return true;
+            }
+            if (toolbar_customization_drag_active) return true;
+            // Defer teardown until after GTK has finished dispatching through
+            // this controller. Popovers and an active drag get the key first.
+            request_toolbar_customization_close ();
+            return true;
+        });
+        ((Gtk.Widget) this).add_controller (keys);
+        toolbar_customization_escape_controller = keys;
+    }
+
+    private void remove_toolbar_customization_escape_controller () {
+        var keys = toolbar_customization_escape_controller;
+        if (keys == null) return;
+        ((Gtk.Widget) this).remove_controller (keys);
+        toolbar_customization_escape_controller = null;
     }
 
     private void install_adaptive_layout () {
-        var breakpoint = new Adw.Breakpoint (
+        var compact_breakpoint = new Adw.Breakpoint (
             new Adw.BreakpointCondition.length (
-                Adw.BreakpointConditionLengthType.MAX_WIDTH, 1300, Adw.LengthUnit.PX));
-        breakpoint.apply.connect (() => {
-            apply_compact_layout ();
-        });
-        breakpoint.unapply.connect (() => {
-            apply_wide_layout ();
-        });
-        add_breakpoint (breakpoint);
+                Adw.BreakpointConditionLengthType.MAX_WIDTH,
+                COMPACT_TOOLBAR_MAX_WIDTH, Adw.LengthUnit.PX));
+        compact_breakpoint.apply.connect (() => schedule_adaptive_layout_sync ());
+        compact_breakpoint.unapply.connect (() => schedule_adaptive_layout_sync ());
+        add_breakpoint (compact_breakpoint);
+
+        // The compact breakpoint remains applied all the way to the minimum
+        // window width, so it cannot announce the second transition by
+        // itself. A real narrow breakpoint keeps interactive resizing in sync
+        // with startup at the same width.
+        var narrow_breakpoint = new Adw.Breakpoint (
+            new Adw.BreakpointCondition.length (
+                Adw.BreakpointConditionLengthType.MAX_WIDTH,
+                NARROW_LAYOUT_MAX_WIDTH, Adw.LengthUnit.PX));
+        narrow_breakpoint.apply.connect (() => schedule_adaptive_layout_sync ());
+        narrow_breakpoint.unapply.connect (() => schedule_adaptive_layout_sync ());
+        add_breakpoint (narrow_breakpoint);
+
+        var minimal_breakpoint = new Adw.Breakpoint (
+            new Adw.BreakpointCondition.length (
+                Adw.BreakpointConditionLengthType.MAX_WIDTH,
+                MINIMAL_TOOLBAR_MAX_WIDTH, Adw.LengthUnit.PX));
+        minimal_breakpoint.apply.connect (() => schedule_adaptive_layout_sync ());
+        minimal_breakpoint.unapply.connect (() => schedule_adaptive_layout_sync ());
+        add_breakpoint (minimal_breakpoint);
 
         // A window restored maximized can be allocated before the breakpoint
         // gets its first size evaluation. Keep the toolbar in sync with the
         // actual window width so it does not remain in its compact layout
         // until the user performs a resize.
-        notify["width"].connect (() => sync_adaptive_toolbar_layout ());
         add_tick_callback ((widget, frame_clock) => {
             if (get_width () <= 0) return Source.CONTINUE;
-            sync_adaptive_toolbar_layout ();
-            update_percentage_spacers ();
+            schedule_adaptive_layout_sync ();
             return Source.REMOVE;
         });
     }
 
     private void sync_adaptive_toolbar_layout () {
         if (get_width () <= 0) return;
-        if (get_width () <= 840) apply_narrow_layout ();
-        else if (get_width () <= 1300) apply_compact_layout ();
+        if (get_width () <= MINIMAL_TOOLBAR_MAX_WIDTH) apply_minimal_layout ();
+        else if (get_width () <= NARROW_LAYOUT_MAX_WIDTH) apply_narrow_layout ();
+        else if (get_width () <= COMPACT_TOOLBAR_MAX_WIDTH) apply_compact_layout ();
         else apply_wide_layout ();
     }
 
     private void apply_compact_layout () {
-        if (get_width () > 0 && get_width () <= 840) {
+        if (get_width () > 0 && get_width () <= NARROW_LAYOUT_MAX_WIDTH) {
             apply_narrow_layout ();
             return;
         }
         bool was_narrow = narrow_layout;
         narrow_layout = false;
+        minimal_toolbar = false;
         reader.remove_css_class ("narrow-reader");
         if (compact_toolbar && !was_narrow) return;
         task_search.set_size_request (300, -1);
+        task_search.set_width_chars (-1);
+        task_search.set_max_width_chars (-1);
+        task_view.set_compact_layout (false);
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
         set_message_content_visible (true);
         message_back.visible = false;
         compact_toolbar = true;
         rebuild_toolbar ();
+        if (was_narrow) restore_pane_widths_after_layout ();
     }
 
     private void apply_wide_layout () {
         bool was_narrow = narrow_layout;
         narrow_layout = false;
+        minimal_toolbar = false;
         reader.remove_css_class ("narrow-reader");
         if (!compact_toolbar && !was_narrow) return;
         task_search.set_size_request (300, -1);
+        task_search.set_width_chars (-1);
+        task_search.set_max_width_chars (-1);
+        task_view.set_compact_layout (false);
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
         set_message_content_visible (true);
         message_back.visible = false;
         compact_toolbar = false;
         rebuild_toolbar ();
+        if (was_narrow) restore_pane_widths_after_layout ();
     }
 
     private void apply_narrow_layout () {
-        if (narrow_layout) return;
+        if (get_width () > 0 && get_width () <= MINIMAL_TOOLBAR_MAX_WIDTH) {
+            apply_minimal_layout ();
+            return;
+        }
+        bool was_minimal = minimal_toolbar;
+        minimal_toolbar = false;
+        if (narrow_layout && !was_minimal) return;
         narrow_layout = true;
         reader.add_css_class ("narrow-reader");
         task_search.set_size_request (220, -1);
+        task_search.set_width_chars (-1);
+        task_search.set_max_width_chars (-1);
+        task_view.set_compact_layout (false);
         compact_toolbar = true;
         mailbox_split.collapsed = true;
         mailbox_split.show_sidebar = false;
+        reader.use_available_width ();
+        set_message_content_visible (false);
+        message_back.visible = false;
+        rebuild_toolbar ();
+    }
+
+    private void apply_minimal_layout () {
+        if (narrow_layout && minimal_toolbar) return;
+        narrow_layout = true;
+        minimal_toolbar = true;
+        reader.add_css_class ("narrow-reader");
+        task_search.set_size_request (180, -1);
+        task_search.set_width_chars (6);
+        task_search.set_max_width_chars (6);
+        task_view.set_compact_layout (true);
+        compact_toolbar = true;
+        mailbox_split.collapsed = true;
+        mailbox_split.show_sidebar = false;
+        reader.use_available_width ();
         set_message_content_visible (false);
         message_back.visible = false;
         rebuild_toolbar ();
@@ -2011,7 +3068,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var preferences = new SimpleAction ("preferences", null); preferences.activate.connect (() => show_preferences ()); add_action (preferences);
         var rules = new SimpleAction ("rules", null); rules.activate.connect (() => show_rules ()); add_action (rules);
         var customize_toolbar = new SimpleAction ("customize-toolbar", null);
-        customize_toolbar.activate.connect (() => show_toolbar_customization ());
+        customize_toolbar.activate.connect (() => request_toolbar_customization_open ());
         add_action (customize_toolbar);
         group_messages_action = new SimpleAction.stateful (
             "group-messages", null, new Variant.boolean (settings.group_messages));
@@ -2044,16 +3101,10 @@ public class MailWindow : Adw.ApplicationWindow {
             string scope = value.get_string (); search_scope_action.set_state (value);
             if (scope == "all-mail") {
                 search_scope = MailSearchScope.ALL_MAIL;
-                search_scope_button.label = "All Mail";
-                search_scope_button.tooltip_text = "Search all mail";
             } else if (scope == "current-account") {
                 search_scope = MailSearchScope.CURRENT_ACCOUNT;
-                search_scope_button.label = "Account";
-                search_scope_button.tooltip_text = "Search this account";
             } else {
                 search_scope = MailSearchScope.CURRENT_FOLDER;
-                search_scope_button.label = "Folder";
-                search_scope_button.tooltip_text = "Search this folder";
             }
             message_list.set_search_scope (search_scope);
         });
@@ -2100,20 +3151,21 @@ public class MailWindow : Adw.ApplicationWindow {
         var zoom_out = new SimpleAction ("zoom-out", null);
         zoom_out.activate.connect (() => reader.zoom_out ());
         add_action (zoom_out);
-        application.set_accels_for_action ("win.compose", { "<Control>n" });
-        application.set_accels_for_action ("win.new-mailbox", { "<Control><Shift>n" });
-        application.set_accels_for_action ("win.new-task", { "<Control><Shift>t" });
-        application.set_accels_for_action ("win.search", { "<Control>f" });
-        application.set_accels_for_action ("win.zoom-in", { "<Control>plus", "<Control>equal", "<Control>KP_Add" });
-        application.set_accels_for_action ("win.zoom-out", { "<Control>minus", "<Control>KP_Subtract" });
         var select_all = new SimpleAction ("select-all", null);
         select_all.activate.connect (() => message_list.select_all ()); add_action (select_all);
-        application.set_accels_for_action ("win.select-all", { "<Control>a" });
         var clear_selection = new SimpleAction ("clear-selection", null);
-        clear_selection.activate.connect (() => message_list.clear_selection ()); add_action (clear_selection);
-        application.set_accels_for_action ("win.clear-selection", { "Escape" });
+        clear_selection.activate.connect (() => {
+            if (toolbar_customization != null) {
+                // Escape is already this window's clear-selection shortcut.
+                // Reusing it lets an open popover or active drag consume the
+                // first Escape before the editor itself closes.
+                request_toolbar_customization_close ();
+            } else {
+                message_list.clear_selection ();
+            }
+        });
+        add_action (clear_selection);
         var refresh = new SimpleAction ("refresh", null); refresh.activate.connect (() => synchronize.begin ()); add_action (refresh);
-        application.set_accels_for_action ("win.refresh", { "F9" });
         var archive = new SimpleAction ("archive", null); archive.activate.connect (() => move_selected (MailboxRole.ARCHIVE)); add_action (archive);
         var trash = new SimpleAction ("trash", null); trash.activate.connect (() => move_selected (MailboxRole.TRASH)); add_action (trash);
         var junk = new SimpleAction ("junk", null); junk.activate.connect (classify_selected_junk); add_action (junk);
@@ -2142,7 +3194,12 @@ public class MailWindow : Adw.ApplicationWindow {
         }); add_action (copy_to);
         var show_move = new SimpleAction ("show-move", null);
         show_move.activate.connect (() => {
-            if (action_messages ().size > 0) move_button.popup ();
+            if (action_messages ().size == 0) return;
+            // Use whichever toolbar anchor is actually rooted. Compact
+            // layouts expose the same live move model inside More instead of
+            // trying to open an unparented, overflowed Move button.
+            if (move_button.get_root () != null) move_button.popup ();
+            else if (more_button.get_root () != null) more_button.popup ();
         });
         add_action (show_move);
         string initial_sort = settings.message_sort;
@@ -2157,16 +3214,45 @@ public class MailWindow : Adw.ApplicationWindow {
             Accessibility.label (sort_button, sort_button.tooltip_text);
         });
         add_action (sort);
+        set_mail_accelerators_enabled (true);
+    }
+
+    private void set_mail_accelerators_enabled (bool enabled) {
+        if (!enabled) {
+            foreach (var action in new string[] {
+                "compose", "new-mailbox", "new-task", "search", "zoom-in",
+                "zoom-out", "select-all", "refresh", "reply", "reply-all",
+                "forward", "trash", "archive", "flag", "toggle-read",
+                "next-message", "previous-message", "snooze", "clear-selection"
+            }) application.set_accels_for_action ("win." + action, {});
+            return;
+        }
+
+        application.set_accels_for_action ("win.compose", { "<Control>n" });
+        application.set_accels_for_action ("win.new-mailbox", { "<Control><Shift>n" });
+        application.set_accels_for_action ("win.new-task", { "<Control><Shift>t" });
+        application.set_accels_for_action ("win.search", { "<Control>f" });
+        application.set_accels_for_action ("win.zoom-in",
+            { "<Control>plus", "<Control>equal", "<Control>KP_Add" });
+        application.set_accels_for_action ("win.zoom-out",
+            { "<Control>minus", "<Control>KP_Subtract" });
+        application.set_accels_for_action ("win.select-all", { "<Control>a" });
+        application.set_accels_for_action ("win.refresh", { "F9" });
         application.set_accels_for_action ("win.reply", { "<Control>r" });
         application.set_accels_for_action ("win.reply-all", { "<Control><Shift>r" });
         application.set_accels_for_action ("win.forward", { "<Control>l" });
         application.set_accels_for_action ("win.trash", { "Delete" });
-        application.set_accels_for_action ("win.archive", { "<Control><Shift>a", "<Control>e" });
+        application.set_accels_for_action ("win.archive",
+            { "<Control><Shift>a", "<Control>e" });
         application.set_accels_for_action ("win.flag", { "<Control><Shift>l" });
-        application.set_accels_for_action ("win.toggle-read", { "<Control><Shift>u", "<Control>i" });
-        application.set_accels_for_action ("win.next-message", { "<Alt>Down", "<Control>j" });
-        application.set_accels_for_action ("win.previous-message", { "<Alt>Up", "<Control>k" });
+        application.set_accels_for_action ("win.toggle-read",
+            { "<Control><Shift>u", "<Control>i" });
+        application.set_accels_for_action ("win.next-message",
+            { "<Alt>Down", "<Control>j" });
+        application.set_accels_for_action ("win.previous-message",
+            { "<Alt>Up", "<Control>k" });
         application.set_accels_for_action ("win.snooze", { "<Control>s" });
+        application.set_accels_for_action ("win.clear-selection", { "Escape" });
     }
 
     private static MessageSortMode sort_mode_for (string value) {
@@ -2410,7 +3496,8 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void rebuild_move_menu () {
-        var root = new Menu (); var moves = new Menu (); var copies = new Menu (); bool found = false;
+        move_menu.remove_all ();
+        var moves = new Menu (); var copies = new Menu (); bool found = false;
         var selected = action_messages ();
         string account_id = selected.size == 0 ? "" : selected[0].account_id;
         foreach (var message in selected)
@@ -2429,9 +3516,11 @@ public class MailWindow : Adw.ApplicationWindow {
                 found = true;
             }
         }
-        if (found) { root.append_section ("Move to", moves); root.append_section ("Copy to", copies); }
-        else root.append ("No other folders", null);
-        move_button.menu_model = root;
+        if (found) {
+            move_menu.append_section ("Move to", moves);
+            move_menu.append_section ("Copy to", copies);
+        } else move_menu.append ("No other folders", null);
+        move_button.menu_model = move_menu;
     }
 
     private void transfer_selected_to (string mailbox_id, bool copy) {
@@ -2510,7 +3599,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var message = repository.find_message (id); if (message == null) return;
         workspace_stack.visible_child_name = "mail";
         toolbar_stack.visible_child_name = "mail";
-        search.placeholder_text = "Search Mail"; sort_button.sensitive = true;
+        search.placeholder_text = "Search"; sort_button.sensitive = true;
         if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) {
             if (!sidebar.select_mailbox (message.mailbox_id))
                 sidebar.select_mailbox ("unified-inbox");
@@ -2647,8 +3736,16 @@ public class MailWindow : Adw.ApplicationWindow {
         var existing = rules_window;
         if (existing != null) return existing;
         var created = new RulesWindow (this, cache); rules_window = created;
+        created.close_request.connect (rules_window_close_requested);
         created.rules_changed.connect (() => { rebuild_quick_steps_menu (); repository.reload (); });
         return created;
+    }
+
+    private bool rules_window_close_requested () {
+        // Drop the owner's reference while GTK still holds the window for the
+        // close signal. The next Rules action will construct a fresh window.
+        rules_window = null;
+        return false;
     }
 
     public void show_rules () {
@@ -2721,21 +3818,32 @@ public class MailWindow : Adw.ApplicationWindow {
         });
     }
 
-    private void queue_repository_refresh () {
+    private void queue_repository_refresh (bool sidebar_current = false) {
         DebugTrace.log ("refresh", "queue requested source=%u pending=%s".printf (
             repository_refresh_source, repository_refresh_pending.to_string ()));
+        // A just-completed structure reconciliation already rebuilt the
+        // sidebar from the same cache snapshot. A later repository event can
+        // invalidate that guarantee before the coalesced callback runs.
+        if (sidebar_current) repository_refresh_sidebar_current = true;
+        else repository_refresh_sidebar_current = false;
+        if (toolbar_customization_blocks_mail_refresh ()) return;
         if (repository_refresh_source != 0) return;
-        repository_refresh_source = Timeout.add (250, () => {
+        repository_refresh_source = Timeout.add_full (
+            Priority.DEFAULT_IDLE, 250, () => {
             int64 started = DebugTrace.mark ();
             DebugTrace.log ("refresh", "queued refresh begin pending=%s".printf (
                 repository_refresh_pending.to_string ()));
             repository_refresh_source = 0;
+            bool skip_sidebar_refresh = repository_refresh_sidebar_current;
+            repository_refresh_sidebar_current = false;
             if (!repository_refresh_pending) return Source.REMOVE;
+            if (toolbar_customization_blocks_mail_refresh ())
+                return Source.REMOVE;
 
             repository_refresh_pending = false;
             string selected_id = selected_message == null ? "" : selected_message.id;
             DebugTrace.log ("refresh", "reload sidebar and message list selected=%s".printf (selected_id));
-            sidebar.refresh_counts ();
+            if (!skip_sidebar_refresh) sidebar.refresh_counts ();
             if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) {
                 // Today/Planned has no visible mail widgets. Defer the expensive
                 // message model rebuild until show_mailbox() makes mail visible
@@ -2755,10 +3863,22 @@ public class MailWindow : Adw.ApplicationWindow {
         });
     }
 
+    private bool toolbar_customization_blocks_mail_refresh () {
+        // Treat a requested/closing editor and its post-Done grace period as
+        // active too. This closes both lifecycle gaps and prevents a live
+        // sync signal from releasing the heavy refresh before Done has
+        // returned and the rebuilt toolbar has accepted input.
+        return toolbar_customization != null ||
+            toolbar_customization_open_source != 0 ||
+            closing_toolbar_customization ||
+            toolbar_customization_catchup_source != 0;
+    }
+
     private void show_about () {
         var dialog = new Adw.AboutDialog ();
+        dialog.add_css_class ("about-dialog");
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.4.0"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.4.1"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -2990,14 +4110,12 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void update_flag_button_color () {
-        var image = flag_button.get_child () as Gtk.Image;
-        if (image == null) return;
         foreach (var color in new string[] { "orange", "red", "purple", "blue", "yellow", "green", "gray" })
-            image.remove_css_class ("flag-" + color);
+            flag_button.remove_css_class ("flag-" + color);
         string selected_color = "red";
         var messages = action_messages ();
         if (messages.size > 0) selected_color = messages[0].flag_color;
-        image.add_css_class ("flag-" + selected_color);
+        flag_button.add_css_class ("flag-" + selected_color);
     }
 
     private void toggle_selected_read () {
