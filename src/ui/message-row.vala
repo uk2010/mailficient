@@ -4,11 +4,16 @@ public class MessageRow : Gtk.Box {
     public const string DRAG_PAYLOAD_PREFIX = "mailficient-message-ids:\n";
     public signal void reopen_requested (Message message);
     public Message message { get; construct; }
-    private weak Gtk.SelectionModel? context_selection;
+    // These objects emit signals that unbind_selection() must disconnect.
+    // Vala `weak` fields are raw, non-zeroing pointers, so a sync-driven
+    // ListView rebind could destroy either emitter before factory unbind and
+    // leave g_signal_handler_disconnect() dereferencing freed memory. Hold
+    // them strongly until the deterministic factory-unbind edge below.
+    private Gtk.SelectionModel? context_selection;
     // Gtk.ListView keeps a ListItem bound while rows before it are removed,
     // and updates ListItem.position in place.  Keeping a numeric copy here
     // leaves selection styling attached to the row's old position.
-    private weak Gtk.ListItem? context_item;
+    private Gtk.ListItem? context_item;
     private ulong selection_handler;
     private ulong position_handler;
     private ulong unread_handler;
@@ -307,6 +312,8 @@ public class MessageRow : Gtk.Box {
 
     ~MessageRow () {
         qa_live_instances--;
+        if (selection_handler != 0 && context_selection != null)
+            context_selection.disconnect (selection_handler);
         if (position_handler != 0 && context_item != null)
             context_item.disconnect (position_handler);
         if (unread_handler != 0) message.disconnect (unread_handler);

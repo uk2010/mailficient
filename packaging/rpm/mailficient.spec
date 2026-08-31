@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Mon Aug 31 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.3-1
+- Prevent selection crashes during mail checks and bound HTML-reader memory
+  during rapid message navigation.
+
 * Sun Aug 30 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.2-1
 - Bound memory during repeated favorite switching and remove populated-to-empty
   favorite navigation stalls.

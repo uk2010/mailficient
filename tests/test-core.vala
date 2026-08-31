@@ -1204,6 +1204,53 @@ private void test_inline_content_resolver () {
             HtmlSanitizer.sanitize ("<img src='cid:fake@example.net'>"), hostile);
         assert (unresolved.contains ("cid:fake@example.net"));
         assert (!unresolved.contains ("data:image/png"));
+
+        // Rich newsletters can attach hundreds of inline parts. Keep the
+        // generated data-URI document bounded even when every file is valid.
+        var many = new Gee.ArrayList<Attachment> ();
+        var many_html = new StringBuilder ();
+        for (int index = 0; index < InlineContentResolver.MAX_INLINE_IMAGE_COUNT + 1;
+             index++) {
+            string content_id = "image-%d@example.net".printf (index);
+            many.add (new Attachment ("inline-%d".printf (index), image_path,
+                "image-%d.png".printf (index), png.length, "image/png", content_id));
+            many_html.append_printf ("<img src='cid:%s'>", content_id);
+        }
+        string bounded = InlineContentResolver.resolve (
+            HtmlSanitizer.sanitize (many_html.str), many);
+        assert (!bounded.contains ("cid:image-0@example.net"));
+        assert (bounded.contains ("cid:image-%d@example.net".printf (
+            InlineContentResolver.MAX_INLINE_IMAGE_COUNT)));
+        assert (InlineContentResolver.MAX_INLINE_TOTAL_BYTES <= 10 * 1024 * 1024);
+        assert (InlineContentResolver.MAX_INLINE_RENDERED_HTML_BYTES <=
+            24 * 1024 * 1024);
+
+        // Unused attachments do not consume the image budget ahead of a real
+        // reference, and one CID repeated throughout a template cannot expand
+        // the rendered document without bound.
+        var unused_first = new Gee.ArrayList<Attachment> ();
+        for (int index = 0; index < InlineContentResolver.MAX_INLINE_IMAGE_COUNT;
+             index++)
+            unused_first.add (new Attachment ("unused-%d".printf (index),
+                image_path, "unused.png", png.length, "image/png",
+                "unused-%d@example.net".printf (index)));
+        unused_first.add (new Attachment ("used", image_path, "used.png",
+            png.length, "image/png", "used@example.net"));
+        string used_after_unused = InlineContentResolver.resolve (
+            HtmlSanitizer.sanitize ("<img src='cid:used@example.net'>"),
+            unused_first);
+        assert (!used_after_unused.contains ("cid:used@example.net"));
+
+        var repeated_html = new StringBuilder ();
+        for (int index = 0;
+             index < InlineContentResolver.MAX_INLINE_REFERENCE_COUNT + 1;
+             index++)
+            repeated_html.append ("<img src='cid:logo@example.net'>");
+        string bounded_references = InlineContentResolver.resolve (
+            HtmlSanitizer.sanitize (repeated_html.str), attachments);
+        assert (bounded_references.contains ("cid:logo@example.net"));
+        assert (bounded_references.split ("data:image/png;base64,").length - 1 ==
+            InlineContentResolver.MAX_INLINE_REFERENCE_COUNT);
     } catch (Error error) { GLib.error ("inline content resolver test failed: %s", error.message); }
     FileUtils.unlink (image_path); FileUtils.unlink (fake_path); DirUtils.remove (root);
 }
@@ -1591,8 +1638,11 @@ private void test_cached_conversation_excludes_discarded_messages () {
             if (message.id == inbox_reply.id) saw_reply = true;
             if (message.id == final_reply.id) saw_final = true;
             assert (message.id != archive_copy.id);
+            if (message.id == final_reply.id) assert (message.body == "Final");
+            else assert (message.body == "");
         }
         assert (saw_root && saw_reply && saw_final);
+        assert (cache.find_cached_message (root.id).body == "Root");
 
         cache.queue_message_transfer (inbox_reply.id, MailboxRole.TRASH, false);
         var sent_context = cache.conversation_for (

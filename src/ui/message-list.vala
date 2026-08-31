@@ -33,6 +33,7 @@ public class MessageList : Gtk.Box {
     private bool suppress_unread_filter_reload;
     private uint unread_filter_reload_source;
     private uint selection_install_source;
+    private uint selection_generation;
     private bool refresh_deferred_until_shown;
 
     public MessageList (MailRepository repository, MailSearchService search_service) {
@@ -415,6 +416,19 @@ public class MessageList : Gtk.Box {
                 highlighted);
     }
 
+    // Exercise the selection model that is actually painted, which can be the
+    // outgoing model for one main-loop turn during a sync refresh.
+    internal bool qa_select_visible_position (uint position) {
+        var visible_selection = list.model;
+        if (visible_selection == null || position >= visible_selection.get_n_items ())
+            return false;
+        return visible_selection.select_item (position, true);
+    }
+
+    internal uint qa_visible_message_count () {
+        return list.model == null ? 0 : list.model.get_n_items ();
+    }
+
     private void reload (bool notify_selection = true, bool preserve_selection = false,
                          string preferred_id = "", bool force_reload = false) {
         int64 started = DebugTrace.mark ();
@@ -510,17 +524,9 @@ public class MessageList : Gtk.Box {
         }
         var next_model = model;
         var next_selection = new Gtk.MultiSelection (next_model);
+        uint next_generation = ++selection_generation;
         selection = next_selection;
-        next_selection.selection_changed.connect ((position, count) => {
-            if (suppress_selection) return;
-            var selected = selected_messages ();
-            selection_changed (selected);
-            // Local drafts/outbox messages do not need read-state handling,
-            // but they still must announce selection so the reading pane
-            // follows the row the user clicked.
-            if (!select_multiple.active && selected.size == 1)
-                message_selected (selected[0]);
-        });
+        connect_selection_handler (next_selection, next_generation);
         // Keep the currently painted rows until next_selection is ready to be
         // installed. Assigning the replacement directly in the idle callback
         // makes the model change atomic from the frame clock's perspective.
@@ -548,6 +554,28 @@ public class MessageList : Gtk.Box {
             suppress_selection = false;
             if (announce) selection_changed (selected_messages ());
             return Source.REMOVE;
+        });
+    }
+
+    private void connect_selection_handler (Gtk.MultiSelection target,
+                                              uint generation) {
+        // Keep this closure in a separate scope from configure_selection's
+        // idle install. Vala otherwise shares one capture block containing
+        // target/model between both closures, creating
+        // selection -> handler -> selection and retaining every old model.
+        target.selection_changed.connect ((position, count) => {
+            // The old selection remains attached to ListView until the idle
+            // install. A click delivered during that short window must not be
+            // interpreted against the replacement model, and a late signal
+            // from an obsolete selection must not update the reader.
+            if (suppress_selection || selection_generation != generation) return;
+            var selected = selected_messages ();
+            selection_changed (selected);
+            // Local drafts/outbox messages do not need read-state handling,
+            // but they still must announce selection so the reading pane
+            // follows the row the user clicked.
+            if (!select_multiple.active && selected.size == 1)
+                message_selected (selected[0]);
         });
     }
 

@@ -829,6 +829,54 @@ public class MailWindow : Adw.ApplicationWindow {
                 });
                 return Source.REMOVE;
             });
+        if (Environment.get_variable ("MAILFICIENT_QA_SELECTION_REFRESH_STRESS") == "1")
+            Timeout.add (900, () => {
+                int stress_step = 0;
+                int stress_steps = 400;
+                int stress_interval_ms = 10;
+                string requested_steps = Environment.get_variable (
+                    "MAILFICIENT_QA_SELECTION_REFRESH_STRESS_STEPS") ?? "";
+                string requested_interval = Environment.get_variable (
+                    "MAILFICIENT_QA_SELECTION_REFRESH_STRESS_INTERVAL_MS") ?? "";
+                int parsed = 0;
+                if (int.try_parse (requested_steps, out parsed) && parsed > 0)
+                    stress_steps = parsed;
+                if (int.try_parse (requested_interval, out parsed) && parsed > 0)
+                    stress_interval_ms = parsed;
+                Timeout.add (stress_interval_ms, () => {
+                    uint count = message_list.qa_visible_message_count ();
+                    uint candidates = uint.min (count, 5);
+                    if (candidates < 2 ||
+                        !message_list.qa_select_visible_position (
+                            (uint) stress_step % candidates)) {
+                        critical ("Selection-refresh stress could not select row at step %d",
+                            stress_step);
+                        return Source.REMOVE;
+                    }
+                    // Reproduce the production ordering: a user selection
+                    // rebuilds the reader, a streamed sync refresh prepares a
+                    // replacement model, then another input event reaches the
+                    // still-painted outgoing selection before its idle unbind.
+                    message_list.refresh_after_mail_check ();
+                    message_list.qa_select_visible_position (
+                        ((uint) stress_step + 1) % candidates);
+                    stress_step++;
+                    if (stress_step % 100 == 0)
+                        qa_assert_favorite_switch_bounds (stress_step);
+                    if (stress_step >= stress_steps) {
+                        Idle.add (() => {
+                            qa_assert_favorite_switch_bounds (stress_step);
+                            DebugTrace.log ("qa",
+                                "selection_refresh_stress_complete transitions=%d".printf (
+                                    stress_steps));
+                            return Source.REMOVE;
+                        });
+                        return Source.REMOVE;
+                    }
+                    return Source.CONTINUE;
+                });
+                return Source.REMOVE;
+            });
         string qa_removal_selection =
             Environment.get_variable ("MAILFICIENT_QA_REMOVAL_SELECTION") ?? "";
         if (qa_removal_selection != "")
@@ -3912,7 +3960,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var dialog = new Adw.AboutDialog ();
         dialog.add_css_class ("about-dialog");
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.4.2"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.4.3"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

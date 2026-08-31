@@ -1,6 +1,6 @@
 name: mailficient
 base: core24
-version: '0.4.2'
+version: '0.4.3'
 title: Mailficient
 summary: A native desktop email client
 description: |

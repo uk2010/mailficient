@@ -1,6 +1,7 @@
 namespace Mailficient {
 public class ReadingPane : Gtk.Box {
     internal static int qa_live_message_actions;
+    private const int MAX_POOLED_HTML_VIEWS = 1;
     public signal void vip_toggled (Message message, bool vip);
     public signal void attachment_saved (string filename);
     public signal void attachment_failed (Error error);
@@ -302,7 +303,8 @@ public class ReadingPane : Gtk.Box {
         details_button.add_css_class ("conversation-details-button");
         details_button.tooltip_text = "Message security and raw headers";
         Accessibility.label (details_button, "View message security and raw headers");
-        details_button.clicked.connect (() => show_security_details (message));
+        details_button.clicked.connect (() => show_security_details (
+            hydrated_message (message)));
         header_actions.append (details_button); card.append (header_actions);
         var revealer = new Gtk.Revealer (); revealer.hexpand = true; revealer.halign = Gtk.Align.FILL; revealer.reveal_child = expanded; revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
         var message_content = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); message_content.hexpand = true; message_content.halign = Gtk.Align.FILL;
@@ -320,7 +322,10 @@ public class ReadingPane : Gtk.Box {
             // must never hide the message that is already open.
             if (weak_header_button == null || weak_revealer == null || weak_revealer.reveal_child) return;
             if (!content_loaded) {
-                populate_message_content (message, message_content);
+                // Conversation discovery returns lightweight summaries for
+                // collapsed messages. Load one full body only when the user
+                // actually expands that part of the thread.
+                populate_message_content (hydrated_message (message), message_content);
                 content_loaded = true;
             }
             weak_revealer.reveal_child = true;
@@ -328,6 +333,16 @@ public class ReadingPane : Gtk.Box {
             Accessibility.label (weak_header_button, "Message details from %s".printf (message.sender_name));
         });
         content.append (card);
+    }
+
+    private Message hydrated_message (Message summary) {
+        if (current != null && current.id == summary.id) return current;
+        try { return cache.find_cached_message (summary.id) ?? summary; }
+        catch (Error error) {
+            warning ("Could not load conversation message %s: %s",
+                summary.id, error.message);
+            return summary;
+        }
     }
 
     private void populate_message_content (Message message, Gtk.Box message_content) {
@@ -542,9 +557,10 @@ public class ReadingPane : Gtk.Box {
             if (layout_handler != 0) view.disconnect (layout_handler);
             if (link_handler != 0) view.disconnect (link_handler);
             if (!detach_html_view (view)) continue;
-            view.reset_for_reuse ();
-            if (html_view_pool.size < 3) html_view_pool.add (view);
-            else view.shutdown ();
+            if (html_view_pool.size < MAX_POOLED_HTML_VIEWS) {
+                view.reset_for_reuse (true);
+                html_view_pool.add (view);
+            } else view.shutdown ();
         }
         html_views.clear ();
         html_layout_handlers.clear ();

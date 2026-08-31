@@ -10,6 +10,7 @@ public class HtmlMessageView : Gtk.Box {
     private ulong policy_handler;
     private ulong load_handler;
     private ulong width_handler;
+    private ulong termination_handler;
     private class ResourceSignals : Object {
         public WebKit.WebResource resource;
         public ulong finished_handler;
@@ -24,6 +25,8 @@ public class HtmlMessageView : Gtk.Box {
     private uint display_generation;
     private WebKit.PrintOperation? print_operation;
     private bool document_loaded;
+    private bool rendering_message;
+    private bool recovering_renderer;
     private uint active_resources;
     private uint width_fit_source;
     private int layout_width;
@@ -64,21 +67,15 @@ public class HtmlMessageView : Gtk.Box {
         });
         resource_handler = web_view.resource_load_started.connect ((resource, request) => {
             secure_request (request);
+            if (!rendering_message) return;
             uint resource_generation = display_generation;
             active_resources++;
-            bool settled = false;
             var signals = new ResourceSignals (resource);
             signals.finished_handler = resource.finished.connect (() => {
-                if (!settled) {
-                    settled = true;
-                    resource_finished (resource_generation);
-                }
+                settle_resource (signals, resource_generation);
             });
             signals.failed_handler = resource.failed.connect ((error) => {
-                if (!settled) {
-                    settled = true;
-                    resource_finished (resource_generation);
-                }
+                settle_resource (signals, resource_generation);
             });
             resource_signals.add (signals);
         });
@@ -95,11 +92,14 @@ public class HtmlMessageView : Gtk.Box {
             return false;
         });
         load_handler = web_view.load_changed.connect ((event) => {
-            if (event == WebKit.LoadEvent.FINISHED) {
+            if (rendering_message && event == WebKit.LoadEvent.FINISHED) {
                 document_loaded = true;
                 measure_rendered_height.begin (display_generation);
                 notify_resources_settled ();
             }
+        });
+        termination_handler = web_view.web_process_terminated.connect ((reason) => {
+            recover_from_web_process_termination (reason);
         });
         append (web_view);
     }
@@ -108,22 +108,27 @@ public class HtmlMessageView : Gtk.Box {
     // is substantially cheaper than allocating another WebKit view for every
     // mailbox selection, while the resource handlers still need to be reset
     // between documents.
-    public void reset_for_reuse () {
+    public void reset_for_reuse (bool release_document = false) {
         var view = web_view;
         if (view == null) return;
         display_generation++;
+        rendering_message = false;
+        recovering_renderer = false;
         if (width_fit_source != 0) Source.remove (width_fit_source);
         width_fit_source = 0;
         if (height_measurement != null) height_measurement.cancel ();
         height_measurement = null;
         document_loaded = false;
         active_resources = 0;
-        foreach (var signals in resource_signals) {
-            if (signals.finished_handler != 0) signals.resource.disconnect (signals.finished_handler);
-            if (signals.failed_handler != 0) signals.resource.disconnect (signals.failed_handler);
-        }
-        resource_signals.clear ();
+        clear_resource_signals ();
         view.stop_loading ();
+        // A pooled WebView otherwise retains the complete old document (and
+        // decoded image surfaces) while a plain-text message is displayed.
+        // Loading a tiny private page gives WebKit an explicit release edge.
+        if (release_document) {
+            allow_remote_content = false;
+            view.load_html (HtmlContentPolicy.document ("", false), "about:blank");
+        }
     }
 
     public void constrain_width (int width) {
@@ -152,14 +157,19 @@ public class HtmlMessageView : Gtk.Box {
         if (attachments != null) safe = InlineContentResolver.resolve (safe, attachments);
         if (web_view != null) {
             display_generation++;
+            rendering_message = false;
+            recovering_renderer = false;
             document_loaded = false;
             active_resources = 0;
             web_view.zoom_level = 1.0;
             if (height_measurement != null) height_measurement.cancel ();
             height_measurement = null;
+            clear_resource_signals ();
+            web_view.stop_loading ();
             // Start compactly, then fit the WebView to the document's actual
             // laid-out height once WebKit has loaded images and styles.
             web_view.set_size_request (0, 360);
+            rendering_message = true;
             web_view.load_html (HtmlContentPolicy.document (
                 safe, allow_remote_content, print_header_html), "about:blank");
         }
@@ -192,6 +202,31 @@ public class HtmlMessageView : Gtk.Box {
         if (generation != display_generation) return;
         if (active_resources > 0) active_resources--;
         notify_resources_settled ();
+    }
+
+    private void settle_resource (ResourceSignals signals, uint generation) {
+        if (!resource_signals.contains (signals)) return;
+        // Keep the list's strong reference until both closures have released
+        // their captures; Vala object parameters themselves are unowned.
+        disconnect_resource_signals (signals);
+        resource_signals.remove (signals);
+        resource_finished (generation);
+    }
+
+    private static void disconnect_resource_signals (ResourceSignals signals) {
+        ulong finished = signals.finished_handler;
+        ulong failed = signals.failed_handler;
+        signals.finished_handler = 0;
+        signals.failed_handler = 0;
+        if (finished != 0) signals.resource.disconnect (finished);
+        if (failed != 0) signals.resource.disconnect (failed);
+    }
+
+    private void clear_resource_signals () {
+        while (resource_signals.size > 0) {
+            var signals = resource_signals.remove_at (resource_signals.size - 1);
+            disconnect_resource_signals (signals);
+        }
     }
 
     private void notify_resources_settled () {
@@ -242,6 +277,10 @@ public class HtmlMessageView : Gtk.Box {
     private async void measure_rendered_height (uint generation) {
         var view = web_view;
         if (view == null || generation != display_generation) return;
+        // Load completion, width allocation, and zoom can all request a
+        // measurement. Keep only one WebKit JavaScript task alive so replaced
+        // documents cannot accumulate retained views and cancellables.
+        if (height_measurement != null) height_measurement.cancel ();
         var cancellable = new Cancellable ();
         height_measurement = cancellable;
         try {
@@ -309,12 +348,11 @@ public class HtmlMessageView : Gtk.Box {
         if (resource_handler != 0) view.disconnect (resource_handler);
         if (policy_handler != 0) view.disconnect (policy_handler);
         if (load_handler != 0) view.disconnect (load_handler);
+        if (termination_handler != 0) view.disconnect (termination_handler);
         width_handler = permission_handler = resource_handler = policy_handler = load_handler = 0;
-        foreach (var signals in resource_signals) {
-            if (signals.finished_handler != 0) signals.resource.disconnect (signals.finished_handler);
-            if (signals.failed_handler != 0) signals.resource.disconnect (signals.failed_handler);
-        }
-        resource_signals.clear ();
+        termination_handler = 0;
+        rendering_message = false;
+        clear_resource_signals ();
         view.stop_loading ();
         // During application shutdown, ask WebKit to terminate its sandboxed
         // renderer before GTK releases the last WebView. Leaving pooled views
@@ -323,6 +361,41 @@ public class HtmlMessageView : Gtk.Box {
         if (terminate_process) view.terminate_web_process ();
         remove (view);
         web_view = null;
+    }
+
+    private void recover_from_web_process_termination (
+            WebKit.WebProcessTerminationReason reason) {
+        var view = web_view;
+        if (view == null || reason == WebKit.WebProcessTerminationReason.TERMINATED_BY_API)
+            return;
+        bool recovery_failed = recovering_renderer;
+        display_generation++;
+        if (width_fit_source != 0) Source.remove (width_fit_source);
+        width_fit_source = 0;
+        if (height_measurement != null) height_measurement.cancel ();
+        height_measurement = null;
+        document_loaded = false;
+        active_resources = 0;
+        rendering_message = false;
+        clear_resource_signals ();
+        if (recovery_failed) {
+            warning ("The HTML message renderer could not load its recovery page");
+            return;
+        }
+        bool memory_limit = reason ==
+            WebKit.WebProcessTerminationReason.EXCEEDED_MEMORY_LIMIT;
+        warning (memory_limit ?
+            "The HTML message renderer exceeded its private memory limit" :
+            "The HTML message renderer stopped unexpectedly");
+        string explanation = memory_limit ?
+            "This message was too large to preview safely. Its attachments are still available below." :
+            "The formatted preview stopped unexpectedly. Select the message again to retry.";
+        allow_remote_content = false;
+        recovering_renderer = true;
+        rendering_message = true;
+        view.load_html (HtmlContentPolicy.document (
+            "<p>%s</p>".printf (Markup.escape_text (explanation)), false),
+            "about:blank");
     }
 
     private void secure_request (WebKit.URIRequest request) {

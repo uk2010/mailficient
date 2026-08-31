@@ -3861,10 +3861,12 @@ public class CacheDatabase : Object, AccountStore {
             // Caches created before the conversation index are still valid.
             // Use the old bounded fallback once; subsequent sync writes repair
             // the index for those messages.
-            const string fallback_sql = "SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size,b.role FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE m.account_id=? ORDER BY m.rowid";
+            const string fallback_sql = "SELECT m.id,m.mailbox_id,m.sender_name,m.sender_address,m.recipients,m.subject,m.preview,m.timestamp,m.unread,m.flagged,m.has_attachment,m.conversation_count,m.has_remote_content,m.account_id,m.remote_uid,m.internet_message_id,m.in_reply_to,m.references_header,m.date_unix,m.cc_recipients,m.flag_color,m.bcc_recipients,m.message_size,b.role FROM cached_messages m JOIN cached_mailboxes b ON b.id=m.mailbox_id WHERE m.account_id=? ORDER BY m.rowid LIMIT ?";
             if (database.prepare_v2 (fallback_sql, -1, out statement) != Sqlite.OK)
                 throw new MailError.STORAGE ("Could not prepare conversation fallback");
-            statement.bind_text (1, selected.account_id); int row;
+            statement.bind_text (1, selected.account_id);
+            statement.bind_int (2, MAX_CONVERSATION_MESSAGES * 4);
+            int row;
             while ((row = statement.step ()) == Sqlite.ROW) {
                 var candidate = message_summary_from_row (statement);
                 candidates.add (candidate);
@@ -3904,11 +3906,11 @@ public class CacheDatabase : Object, AccountStore {
                 standard_message_ids.contains (summary.internet_message_id))
                 visible = false;
             if (!visible && summary.id != selected.id) continue;
+            // Keep collapsed thread members summary-only. ReadingPane hydrates
+            // exactly one if its header is expanded, instead of every click
+            // materializing as many as 100 complete text/HTML bodies.
             if (summary.id == selected.id) result.add (selected);
-            else {
-                var full = find_cached_message (summary.id);
-                if (full != null) result.add (full);
-            }
+            else result.add (summary);
         }
         if (!contains_message_id (result, selected.id)) {
             if (result.size >= MAX_CONVERSATION_MESSAGES) result.remove_at (result.size - 1);

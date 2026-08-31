@@ -1,3 +1,21 @@
+# Mailficient 0.4.3
+
+Mailficient 0.4.3 prevents crashes while selecting messages during a mail check
+and keeps HTML-reader memory bounded under rapid navigation.
+
+Highlights:
+
+- Keeps refreshed selection models alive until recycled message rows finish
+  disconnecting, eliminating the invalid GTK object access behind the crash
+- Ignores stale selection callbacks when a mail check replaces the message list
+  while allowing immediate selection in the newly installed list
+- Loads conversation bodies only when opened, releases old WebKit documents,
+  and limits the reusable HTML reader pool to one view
+- Bounds inline-image count, decoded bytes, repeated references, and rendered
+  HTML growth, and recovers once if the WebKit renderer reaches its memory limit
+- Adds a 1,000-transition sanitizer stress check for simultaneous message
+  selection and mail-list refreshes
+
 # Mailficient 0.4.2
 
 Mailficient 0.4.2 keeps favorite navigation fast and memory usage bounded
