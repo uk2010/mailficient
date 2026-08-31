@@ -11,6 +11,11 @@
   <launchable type="desktop-id">com.local.Mailficient.desktop</launchable>
   <provides><binary>mailficient</binary></provides>
   <releases>
+    <release version="0.5.0-beta.1" type="development" date="2026-08-31">
+      <description>
+        <p>Opens the Mailficient 0.5 public beta and preserves toolbar text when the Junk action changes between Junk and Not Junk.</p>
+      </description>
+    </release>
     <release version="0.4.4" date="2026-08-31">
       <description>
         <p>Restores explicit Minimize and Maximize controls in the custom main-window toolbar on desktops whose decoration preferences expose only Close.</p>

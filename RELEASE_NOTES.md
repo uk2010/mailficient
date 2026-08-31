@@ -1,3 +1,24 @@
+# Mailficient 0.5.0 Beta 1
+
+Mailficient 0.5.0 Beta 1 opens the public beta for the complete native mail
+workflow while keeping the release designation honest about the remaining
+real-provider qualification.
+
+Highlights:
+
+- Preserves the Junk or Not Junk text in Icon and Text toolbar mode when the
+  selected mailbox changes the action icon
+- Publishes native Debian packages for AMD64 and ARM64 and native RPM packages
+  for x86_64 and aarch64
+- Includes the complete tagged source and SHA-256 checksums for every release
+  artifact
+
+Beta note:
+
+- Controlled large-mailbox memory profiling, live Gmail and Microsoft OAuth
+  qualification, and the remaining hands-on provider and accessibility checks
+  are still in progress
+
 # Mailficient 0.4.4
 
 Mailficient 0.4.4 restores the complete main-window controls across supported

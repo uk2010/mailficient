@@ -1866,6 +1866,19 @@ public class MailWindow : Adw.ApplicationWindow {
         return content;
     }
 
+    private static void update_toolbar_button_icon (Gtk.Button button,
+                                                    string icon_name) {
+        // Gtk.Button.icon_name replaces a custom child. In icon-and-text mode
+        // that would discard the label, so update only the image already in
+        // the configured toolbar presentation. Text-only buttons intentionally
+        // have no image to update.
+        Gtk.Widget? content = button.child;
+        var icon = content as Gtk.Image;
+        if (icon == null && content != null)
+            icon = content.get_first_child () as Gtk.Image;
+        if (icon != null) icon.icon_name = icon_name;
+    }
+
     private Gtk.Box make_toolbar_group (string[] ids, string[] actions, string label) {
         var group = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 0);
         group.valign = Gtk.Align.CENTER;
@@ -3533,7 +3546,8 @@ public class MailWindow : Adw.ApplicationWindow {
         }
         bool in_junk = active_mailbox != null && active_mailbox.role == MailboxRole.JUNK;
         bool permanent = selected && selected_are_in_discard_folders ();
-        junk_button.icon_name = in_junk ? "security-high-symbolic" : "dialog-warning-symbolic";
+        update_toolbar_button_icon (junk_button,
+            in_junk ? "security-high-symbolic" : "dialog-warning-symbolic");
         junk_button.tooltip_text = in_junk ? "Mark as Not Junk" : "Move to Junk";
         delete_button.tooltip_text = local_messages ? "Delete message" :
             permanent ? "Delete permanently" : "Move to Trash";
@@ -3965,7 +3979,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var dialog = new Adw.AboutDialog ();
         dialog.add_css_class ("about-dialog");
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.4.4"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.5.0-beta.1"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }

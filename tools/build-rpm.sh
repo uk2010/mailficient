@@ -45,7 +45,16 @@ done
 app_version=$(grep -o "version: '[0-9][^']*'" "$root_dir/meson.build" |
     head -n 1 |
     cut -d "'" -f 2)
-rpm_release=${MAILFICIENT_RPM_RELEASE:-1}
+rpm_version=$app_version
+default_rpm_release=1
+case "$app_version" in
+    *-beta.*)
+        rpm_version=${app_version%%-beta.*}
+        beta_number=${app_version##*-beta.}
+        default_rpm_release="0.${beta_number}.beta"
+        ;;
+esac
+rpm_release=${MAILFICIENT_RPM_RELEASE:-$default_rpm_release}
 build_root=$(mktemp -d "$root_dir/build-rpm.XXXXXX")
 trap 'rm -rf "$build_root"' EXIT HUP INT TERM
 topdir="$build_root/rpmbuild"
@@ -59,7 +68,7 @@ fi
 rpmbuild \
     --target "$rpm_architecture" \
     --define "_topdir $topdir" \
-    --define "mailficient_version $app_version" \
+    --define "mailficient_version $rpm_version" \
     --define "mailficient_release $rpm_release" \
     --define "mailficient_source_root $root_dir" \
     --define "mailficient_app_tree $app_tree" \
@@ -68,7 +77,7 @@ rpmbuild \
     -bb "$root_dir/packaging/rpm/mailficient.spec"
 
 output_dir="$root_dir/dist"
-output="$output_dir/mailficient-$app_version-$rpm_release.$rpm_architecture.rpm"
+output="$output_dir/mailficient-$rpm_version-$rpm_release.$rpm_architecture.rpm"
 mkdir -p "$output_dir"
 find "$topdir/RPMS/$rpm_architecture" -maxdepth 1 -type f -name '*.rpm' -exec cp -f {} "$output" \;
 if [ ! -f "$output" ]; then
