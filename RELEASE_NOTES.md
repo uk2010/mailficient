@@ -1,3 +1,15 @@
+# Mailficient 0.4.4
+
+Mailficient 0.4.4 restores the complete main-window controls across supported
+Linux desktops and package architectures.
+
+Highlights:
+
+- Explicitly shows Minimize, Maximize, and Close in the custom main toolbar
+  instead of inheriting a desktop's close-only decoration preference
+- Applies the fix to the shared application build used by AMD64 and ARM64
+  Debian and RPM packages
+
 # Mailficient 0.4.3
 
 Mailficient 0.4.3 prevents crashes while selecting messages during a mail check

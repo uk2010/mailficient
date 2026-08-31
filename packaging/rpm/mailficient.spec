@@ -144,6 +144,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Mon Aug 31 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.4-1
+- Restore explicit minimize and maximize controls in the custom main-window
+  toolbar across supported desktops and architectures.
+
 * Mon Aug 31 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.4.3-1
 - Prevent selection crashes during mail checks and bound HTML-reader memory
   during rapid message navigation.

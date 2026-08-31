@@ -1793,6 +1793,11 @@ public class MailWindow : Adw.ApplicationWindow {
         app_menu_button.tooltip_text = "Mailficient menu"; app_menu_button.menu_model = app_menu; header.append (app_menu_button);
         Accessibility.label (app_menu_button, "Mailficient menu");
         var window_controls = new Gtk.WindowControls (Gtk.PackType.END);
+        // The main toolbar is a custom Gtk.Box instead of an Adw.HeaderBar,
+        // so its controls otherwise inherit the desktop decoration layout.
+        // GNOME commonly advertises only Close, which made the RPM appear to
+        // lack Minimize and Maximize on both supported architectures.
+        window_controls.decoration_layout = ":minimize,maximize,close";
         window_controls.add_css_class ("mail-window-controls");
         header.append (window_controls);
 
@@ -3960,7 +3965,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var dialog = new Adw.AboutDialog ();
         dialog.add_css_class ("about-dialog");
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.4.3"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.4.4"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
