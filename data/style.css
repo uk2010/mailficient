@@ -1,4 +1,25 @@
 .mail-sidebar { background: color-mix(in srgb, var(--window-bg-color) 94%, var(--accent-bg-color)); }
+
+/* The embedded GNOME Calendar is a child of Mailficient's window. Keep its
+ * two navigation surfaces on the same preference-driven tonal ladder as the
+ * surrounding mail workspace instead of letting the hidden Calendar window's
+ * default Adwaita colors bleed through. */
+.gnome-calendar-surface {
+  color: var(--view-fg-color);
+  background: var(--view-bg-color);
+}
+.gnome-calendar-surface .mailficient-calendar-sidebar {
+  color: var(--sidebar-fg-color);
+  background: var(--sidebar-bg-color);
+}
+.gnome-calendar-surface .mailficient-calendar-main {
+  color: var(--view-fg-color);
+  background: var(--view-bg-color);
+}
+.gnome-calendar-surface .mailficient-calendar-header {
+  color: var(--headerbar-fg-color);
+  background: var(--headerbar-bg-color);
+}
 .mail-header-bar, .apple-toolbar, .apple-toolbar-search, .message-pane, .message-list, .message-list-header,
 .responsive-preview, .responsive-preview > widget {
   min-width: 0;

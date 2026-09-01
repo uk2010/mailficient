@@ -148,8 +148,19 @@ template $GcalWindow: Adw.ApplicationWindow {
         ]
 
         sidebar: Adw.ToolbarView {
+          styles [
+            "mailficient-calendar-sidebar",
+          ]
+
           [top]
-          Adw.HeaderBar {}
+          Adw.HeaderBar {
+            styles [
+              "mailficient-calendar-header",
+            ]
+
+            show-start-title-buttons: false;
+            show-end-title-buttons: false;
+          }
 
           content: Box {
             orientation: vertical;
@@ -168,10 +179,18 @@ template $GcalWindow: Adw.ApplicationWindow {
         content: Adw.ToolbarView main_toolbar {
           styles [
             "view",
+            "mailficient-calendar-main",
           ]
 
           [top]
           Adw.HeaderBar header_bar {
+            styles [
+              "mailficient-calendar-header",
+            ]
+
+            show-start-title-buttons: false;
+            show-end-title-buttons: false;
+
             [start]
             ToggleButton sidebar_button {
               icon-name: "sidebar-show-symbolic";

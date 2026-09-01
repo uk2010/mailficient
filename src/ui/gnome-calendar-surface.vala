@@ -7,6 +7,7 @@ namespace Mailficient {
     public class GnomeCalendarSurface : Gtk.Box {
         public GnomeCalendarSurface () {
             Object (orientation: Gtk.Orientation.VERTICAL, hexpand: true, vexpand: true);
+            add_css_class ("gnome-calendar-surface");
             var calendar = mailficient_gnome_calendar_new ();
             if (calendar != null) append (calendar);
             else {
