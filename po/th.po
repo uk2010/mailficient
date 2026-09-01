@@ -1,0 +1,1987 @@
+# Thai translation for gnome-calendar.
+# Copyright (C) 2015-2016 Free Software Foundation, Inc.
+# This file is distributed under the same license as the gnome-calendar package.
+# Akom Chotiphantawanon <knight2000@gmail.com>, 2015-2016.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-calendar master\n"
+"Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-calendar/issues\n"
+"POT-Creation-Date: 2026-03-14 15:24+0000\n"
+"PO-Revision-Date: 2026-05-03 00:03+0700\n"
+"Last-Translator: Akom Chotiphantawanon <knight2000@gmail.com>\n"
+"Language-Team: Thai <thai-l10n@googlegroups.com>\n"
+"Language: th\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Poedit 3.9\n"
+
+#: data/org.gnome.Calendar.desktop.in.in:2 src/appdata/org.gnome.Calendar.metainfo.xml.in.in:13
+#: src/gui/common/gcal-calendar-combo-row.blp:5 src/gui/gcal-window.blp:5
+#: src/gui/gcal-window.c:417 src/main.c:35
+msgid "Calendar"
+msgstr "ปฏิทิน"
+
+#: data/org.gnome.Calendar.desktop.in.in:3
+msgid "Access and manage your calendars"
+msgstr "เข้าถึงและจัดการปฏิทินต่างๆ ของคุณ"
+
+#. Translators: Search terms to find this application. Do NOT translate or localize the semicolons! The list MUST also end with a semicolon!
+#: data/org.gnome.Calendar.desktop.in.in:12
+msgid "Calendar;Event;Reminder;"
+msgstr "ปฏิทิน;งานกิจกรรม;ปลุกเตือน;"
+
+#: data/org.gnome.calendar.gschema.xml.in:6
+msgid "Window maximized"
+msgstr "หน้าต่างขยายแผ่อยู่"
+
+#: data/org.gnome.calendar.gschema.xml.in:7
+msgid "Window maximized state"
+msgstr "สถานะขยายแผ่ของหน้าต่าง"
+
+#: data/org.gnome.calendar.gschema.xml.in:11
+msgid "Window size"
+msgstr "ขนาดหน้าต่าง"
+
+#: data/org.gnome.calendar.gschema.xml.in:12
+msgid "Window size (width and height)."
+msgstr "ขนาดหน้าต่าง (ความกว้างและความสูง)"
+
+#: data/org.gnome.calendar.gschema.xml.in:16
+msgid "Type of the active view"
+msgstr "ชนิดของมุมมองที่ทำงาน"
+
+#: data/org.gnome.calendar.gschema.xml.in:17
+msgid "Type of the active window view, default value is: monthly view"
+msgstr "ชนิดของมุมมองหน้าต่างที่ทำงาน ค่าปริยายคือ: มุมมองรายเดือน"
+
+#: data/org.gnome.calendar.gschema.xml.in:21
+msgid "Weather Service Configuration"
+msgstr "การตั้งค่าบริการพยากรณ์อากาศ"
+
+#: data/org.gnome.calendar.gschema.xml.in:22
+msgid "Whether weather reports are shown, automatic locations are used and a location-name"
+msgstr "กำหนดว่าจะให้แสดงรายงานพยากรณ์อากาศโดยตรวจหาสถานที่ตั้งอัตโนมัติหรือไม่"
+
+#: data/org.gnome.calendar.gschema.xml.in:26
+msgid "Zoom level of the week grid"
+msgstr "ระดับการซูมของกริดสัปดาห์"
+
+#: data/org.gnome.calendar.gschema.xml.in:27
+msgid "The current zoom level of the week grid"
+msgstr "ระดับการซูมปัจจุบันของกริดสัปดาห์"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:14
+msgid "Manage your schedule"
+msgstr "จัดการกำหนดการของคุณ"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:17
+msgid ""
+"GNOME Calendar is an elegant tool to help you plan and stay on top of your schedule for "
+"upcoming days and weeks, whether your months are filled with meetings and appointments, public "
+"events, travel logistics, or other commitments in your life."
+msgstr ""
+"“ปฏิทิน” ของ GNOME เป็นเครื่องมืออันงดงามที่ช่วยคุณวางแผนและจัดกำหนดการของคุณสำหรับวันและสัปดาห์ถัด ๆ ไป "
+"ไม่ว่าจะเป็นประชุมและนัดหมาย งานกิจกรรม การท่องเที่ยว หรือเหตุการณ์อื่น ๆ ในชีวิตของคุณ"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:22
+msgid ""
+"Easily create and manage unlimited calendars and events with GNOME Calendar's infinite "
+"scrolling month view, week timetable, and scheduling list view."
+msgstr ""
+"สร้างและจัดการปฏิทินและงานกิจกรรมต่าง ๆ ได้อย่างไม่มีขีดจำกัดโดยง่ายดายด้วยมุมมองเดือนที่สามารถเลื่อนดูได้แบบไม่สิ้นสุด "
+"รวมไปถึงตารางเวลารายสัปดาห์ และมุมมองรายการสำหรับจัดกำหนดการ"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:26
+msgid ""
+"Integrating the latest GNOME technologies and design best practices, GNOME Calendar builds on "
+"top of the mature Evolution data server to manage large quantities of events and to provide "
+"integration with other applications. You can add calendars from various online calendaring "
+"services (like NextCloud, Google Calendar, and CalDAV / WebDAV servers), enabling you to "
+"synchronize your events across multiple devices and platforms. GNOME Calendar also supports "
+"local and offline calendaring, so you can use it anywhere and anytime while travelling (or "
+"after civilization's collapse.)"
+msgstr ""
+"“ปฏิทิน” ของ GNOME สร้างขึ้นจากเซิร์ฟเวอร์ข้อมูล Evolution "
+"ที่สมบูรณ์เพื่อจัดการกับงานกิจกรรมปริมาณมากและเพื่อรองรับการใช้งานร่วมกับแอปพลิเคชันอื่นๆ "
+"โดยได้มีการผสานรวมเทคโนโลยีล่าสุดและแนวทางการออกแบบที่ดีที่สุดของ GNOME เอาไว้ด้วย "
+"คุณสามารถเพิ่มปฏิทินจากบริการปฏิทินออนไลน์ต่างๆ (เช่น NextCloud, Google Calendar และเซิร์ฟเวอร์ CalDAV / "
+"WebDAV) ซึ่งให้คุณเชื่อมข้อมูลงานกิจกรรมของคุณได้ในอุปกรณ์และแพลตอฟร์มต่างๆ นอกจากนั้น “ปฏิทิน” ของ GNOME "
+"ยังรองรับปฏิทินแบบใช้ภายในเครื่องหรือแบบออฟไลน์ ซึ่งให้คุณสามารถใช้งานได้จากที่ไหนก็ได้และเมื่อใดก็ได้ขณะเดินทาง "
+"(หรือหลังจากที่อารยธรรมล่มสลายไปแล้วก็ได้)"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:63
+msgid "Month view"
+msgstr "มุมมองเดือน"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:67
+msgid "Week view"
+msgstr "มุมมองสัปดาห์"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:71
+msgid "Event editor"
+msgstr "เครื่องมือแก้ไขงานกิจกรรม"
+
+#. Translators: %1$s is the start date and %2$s is the end date.
+#. Translators: %1$s is the start date, and %2$s. For example: June 21 - November 29, 2022
+#: src/core/gcal-event.c:1786 src/gui/gcal-event-popover.c:423
+#, c-format
+msgid "%1$s — %2$s"
+msgstr "%1$s — %2$s"
+
+#.
+#. * Translators: %1$s is the start date, %2$s is the start time,
+#. * %3$s is the end date, and %4$s is the end time.
+#.
+#: src/core/gcal-event.c:1794
+#, c-format
+msgid "%1$s %2$s — %3$s %4$s"
+msgstr "%1$s %2$s — %3$s %4$s"
+
+#. Translators: %1$s is a date, %2$s is the start hour, and %3$s is the end hour
+#: src/core/gcal-event.c:1810
+#, c-format
+msgid "%1$s, %2$s – %3$s"
+msgstr "%1$s %2$s – %3$s"
+
+#: src/gui/calendar-management/calendar-row.blp:20
+msgid "Read-Only Calendar"
+msgstr "ปฏิทินแบบอ่านอย่างเดียว"
+
+#: src/gui/calendar-management/calendar-row.blp:29
+msgid "Display Calendar"
+msgstr "แสดงปฏิทิน"
+
+#: src/gui/calendar-management/calendar-row.blp:39
+msgid "Edit calendar"
+msgstr "แก้ไขปฏิทิน"
+
+#: src/gui/calendar-management/gcal-calendar-management-dialog.blp:5
+msgid "Calendar Settings"
+msgstr "ค่าตั้งปฏิทิน"
+
+#: src/gui/calendar-management/gcal-calendars-page.blp:5
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:88
+msgid "Calendars"
+msgstr "ปฏิทิน"
+
+#: src/gui/calendar-management/gcal-calendars-page.blp:37
+msgid "_Add Calendar"
+msgstr "เ_พิ่มปฏิทิน"
+
+#. Create the new toast
+#. TRANSLATORS: %s is a calendar name.
+#: src/gui/calendar-management/gcal-calendars-page.c:351
+#, c-format
+msgid "Calendar “%s” removed"
+msgstr "ลบปฏิทิน “%s” แล้ว"
+
+#: src/gui/calendar-management/gcal-calendars-page.c:356 src/gui/gcal-window.c:994
+msgid "_Undo"
+msgstr "เ_รียกคืน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:5
+msgid "Edit Calendar"
+msgstr "แก้ไขปฏิทิน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:19
+msgid "Account"
+msgstr "บัญชี"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:27
+msgid "Open in Settings"
+msgstr "เปิดในการตั้งค่า"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:43
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:197
+#: src/gui/event-editor/gcal-summary-section.blp:18 src/gui/gcal-event-popover.blp:144
+#: src/gui/importer/gcal-import-file-row.c:180
+msgid "Location"
+msgstr "สถานที่"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:54
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:20
+msgid "Calendar Name"
+msgstr "ชื่อปฏิทิน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:58
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:25
+msgid "Color"
+msgstr "สี"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:74
+msgid "_Display Calendar"
+msgstr "แ_สดงปฏิทิน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:82
+msgid "_Export Calendar"
+msgstr "ส่_งออกปฏิทิน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:89
+msgid "_Remove Calendar"
+msgstr "_ลบปฏิทิน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:180
+msgid "Calendar URL"
+msgstr "URL ปฏิทิน"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:198
+msgid "On This Computer"
+msgstr "ในคอมพิวเตอร์เครื่องนี้"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:344
+msgid "Export Calendar"
+msgstr "ส่งออกปฏิทิน"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:5
+msgid "New Calendar"
+msgstr "ปฏิทินใหม่"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:17
+msgid "Create a Local Calendar"
+msgstr "สร้างปฏิทินในเครื่อง"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:42
+msgid "Connect to an Online Calendar"
+msgstr "เชื่อมต่อกับปฏิทินออนไลน์"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:49
+msgid ""
+"HTTPS, CalDAV, or Webcal URLs are supported. Online calendars that can only be updated by the "
+"provider will be added as read-only."
+msgstr ""
+"รองรับ URL ที่เป็น HTTPS, CalDAV หรือ Webcal "
+"ปฏิทินออนไลน์ที่เฉพาะผู้ให้บริการเท่านั้นสามารถปรับปรุงข้อมูลได้จะถูกเพิ่มแบบอ่านอย่างเดียว"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:108
+msgid ""
+"If the calendar belongs to one of your online accounts, you can add it through the <a "
+"href=\"GOA\">online account settings</a>."
+msgstr ""
+"ถ้าปฏิทินที่ต้องการเพิ่มเป็นส่วนหนึ่งของบัญชีออนไลน์ของคุณ คุณก็สามารถเพิ่มปฏิทินผ่าน <a href=\"GOA\">ค่าตั้งบัญชีออนไลน์</"
+"a> ได้"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:126
+#: src/gui/calendar-management/gcal-new-calendar-page.c:124
+msgctxt "button"
+msgid "Add Calendar"
+msgstr "เพิ่มปฏิทิน"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:141
+msgid "Credentials"
+msgstr "ข้อมูลลับ"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:147
+msgid "User"
+msgstr "ผู้ใช้"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:151
+msgid "Password"
+msgstr "รหัสผ่าน"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:161
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:18
+#: src/gui/importer/gcal-import-dialog.blp:18 src/utils/gcal-utils.c:1213
+msgid "_Cancel"
+msgstr "_ยกเลิก"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:162
+msgid "_Connect"
+msgstr "เ_ชื่อมต่อ"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.c:117
+#, c-format
+msgid "Add Calendar"
+msgid_plural "Add %1$u Calendars"
+msgstr[0] "เพิ่มปฏิทิน %1$u อัน"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.c:332
+msgid "The URL you have entered appears to be invalid."
+msgstr "ดูเหมือนว่า URL ที่คุณป้อนจะมีรูปแบบไม่ถูกต้อง"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.c:385
+msgid "A valid user and password are required to connect to this calendar."
+msgstr "ต้องระบุผู้ใช้และรหัสผ่านที่ถูกต้องเพื่อเชื่อมต่อกับปฏิทินนี้"
+
+#: src/gui/common/gcal-calendar-row.c:72
+msgid "This calendar is hidden"
+msgstr "ปฏิทินนี้ถูกซ่อนไว้"
+
+#: src/gui/common/gcal-date-chooser.blp:15 src/gui/common/gcal-date-chooser.blp:55
+#: src/gui/gcal-window.c:411
+msgid "Month"
+msgstr "เดือน"
+
+#: src/gui/common/gcal-date-chooser.blp:16 src/gui/common/gcal-date-chooser.blp:56
+#: src/gui/gcal-window.c:257
+msgid "Previous Month"
+msgstr "เดือนที่แล้ว"
+
+#: src/gui/common/gcal-date-chooser.blp:17 src/gui/common/gcal-date-chooser.blp:57
+#: src/gui/gcal-window.c:288
+msgid "Next Month"
+msgstr "เดือนถัดไป"
+
+#: src/gui/common/gcal-date-chooser.blp:34
+msgid "Year"
+msgstr "ปี"
+
+#: src/gui/common/gcal-date-chooser.blp:35
+msgid "Previous Year"
+msgstr "ปีที่แล้ว"
+
+#: src/gui/common/gcal-date-chooser.blp:36
+msgid "Next Year"
+msgstr "ปีถัดไป"
+
+#. Translators: Calendar grid abbreviation for Sunday.
+#. *
+#. * NOTE: These grid abbreviations are always shown together
+#. * and in order, e.g. "S M T W T F S".
+#. *
+#. * Please make sure these abbreviations match GNOME Shell's
+#. * abbreviations for your language.
+#.
+#: src/gui/common/gcal-date-chooser.c:336
+msgctxt "grid sunday"
+msgid "S"
+msgstr "อา."
+
+#. Translators: Calendar grid abbreviation for Monday
+#: src/gui/common/gcal-date-chooser.c:341
+msgctxt "grid monday"
+msgid "M"
+msgstr "จ."
+
+#. Translators: Calendar grid abbreviation for Tuesday
+#: src/gui/common/gcal-date-chooser.c:346
+msgctxt "grid tuesday"
+msgid "T"
+msgstr "อ."
+
+#. Translators: Calendar grid abbreviation for Wednesday
+#: src/gui/common/gcal-date-chooser.c:351
+msgctxt "grid wednesday"
+msgid "W"
+msgstr "พ."
+
+#. Translators: Calendar grid abbreviation for Thursday
+#: src/gui/common/gcal-date-chooser.c:356
+msgctxt "grid thursday"
+msgid "T"
+msgstr "พฤ."
+
+#. Translators: Calendar grid abbreviation for Friday
+#: src/gui/common/gcal-date-chooser.c:361
+msgctxt "grid friday"
+msgid "F"
+msgstr "ศ."
+
+#. Translators: Calendar grid abbreviation for Saturday
+#: src/gui/common/gcal-date-chooser.c:366
+msgctxt "grid saturday"
+msgid "S"
+msgstr "ส."
+
+#: src/gui/event-editor/gcal-alarm-row.blp:8
+msgid "Remove Alarm"
+msgstr "ลบรายการแจ้งเตือน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:84
+#, c-format
+msgid "%1$u day, %2$u hour, and %3$u minute before"
+msgid_plural "%1$u day, %2$u hour, and %3$u minutes before"
+msgstr[0] "%1$u วัน %2$u ชั่วโมง %3$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:88
+#, c-format
+msgid "%1$u day, %2$u hours, and %3$u minute before"
+msgid_plural "%1$u day, %2$u hours, and %3$u minutes before"
+msgstr[0] "%1$u วัน %2$u ชั่วโมง %3$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:94
+#, c-format
+msgid "%1$u days, %2$u hour, and %3$u minute before"
+msgid_plural "%1$u days, %2$u hour, and %3$u minutes before"
+msgstr[0] "%1$u วัน %2$u ชั่วโมง %3$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:98
+#, c-format
+msgid "%1$u days, %2$u hours, and %3$u minute before"
+msgid_plural "%1$u days, %2$u hours, and %3$u minutes before"
+msgstr[0] "%1$u วัน %2$u ชั่วโมง %3$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:113
+#, c-format
+msgid "%1$u day and %2$u hour before"
+msgid_plural "%1$u day and %2$u hours before"
+msgstr[0] "%1$u วัน %2$u ชั่วโมงก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:117
+#, c-format
+msgid "%1$u days and %2$u hour before"
+msgid_plural "%1$u days and %2$u hours before"
+msgstr[0] "%1$u วัน %2$u ชั่วโมงก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:133
+#, c-format
+msgid "%1$u day and %2$u minute before"
+msgid_plural "%1$u day and %2$u minutes before"
+msgstr[0] "%1$u วัน %2$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:137
+#, c-format
+msgid "%1$u days and %2$u minute before"
+msgid_plural "%1$u days and %2$u minutes before"
+msgstr[0] "%1$u วัน %2$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:147
+#, c-format
+msgid "%1$u day before"
+msgid_plural "%1$u days before"
+msgstr[0] "%1$u วันก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:165
+#, c-format
+msgid "%1$u hour and %2$u minute before"
+msgid_plural "%1$u hour and %2$u minutes before"
+msgstr[0] "%1$u ชั่วโมง %2$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:169
+#, c-format
+msgid "%1$u hours and %2$u minute before"
+msgid_plural "%1$u hours and %2$u minutes before"
+msgstr[0] "%1$u ชั่วโมง %2$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:179
+#, c-format
+msgid "%1$u hour before"
+msgid_plural "%1$u hours before"
+msgstr[0] "%1$u ชั่วโมงก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:191
+#, c-format
+msgid "%1$u minute before"
+msgid_plural "%1$u minutes before"
+msgstr[0] "%1$u นาทีก่อน"
+
+#: src/gui/event-editor/gcal-alarm-row.c:198
+msgid "Event start time"
+msgstr "เวลาเริ่มต้นงานกิจกรรม"
+
+#: src/gui/event-editor/gcal-attendee-row.blp:29 src/gui/event-editor/gcal-organizer-row.blp:25
+msgid "Copy email"
+msgstr "คัดลอกอีเมล"
+
+#: src/gui/event-editor/gcal-attendee-row.c:108
+msgid "Delegated to: "
+msgstr "มอบหมายให้: "
+
+#: src/gui/event-editor/gcal-attendee-row.c:124
+msgid "optional"
+msgstr "ไม่จำเป็น"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:5
+#: src/gui/event-editor/gcal-attendees-section.blp:22
+msgid "Participants"
+msgstr "ผู้เข้าร่วม"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:16
+msgid "Accepted"
+msgstr "ตอบรับแล้ว"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:29
+msgid "Tentative"
+msgstr "ยังไม่ยืนยัน"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:42
+msgid "Declined"
+msgstr "ปฏิเสธ"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:55
+msgid "Delegated"
+msgstr "มอบหมายต่อ"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:68
+msgid "Not responded"
+msgstr "ยังไม่ตอบกลับ"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:112
+#, c-format
+msgid "%1$u accepted"
+msgid_plural "%1$u accepted"
+msgstr[0] "ตอบรับแล้ว %1$u คน"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:113
+#, c-format
+msgid "%1$u maybe"
+msgid_plural "%1$u maybe"
+msgstr[0] "ยังไม่ยืนยัน %1$u คน"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:114
+#, c-format
+msgid "%1$u declined"
+msgid_plural "%1$u declined"
+msgstr[0] "ปฏิเสธ %1$u คน"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:115
+#, c-format
+msgid "%1$u delegated"
+msgid_plural "%1$u delegated"
+msgstr[0] "มอบหมายต่อ %1$u คน"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:116
+#, c-format
+msgid "%1$u not responded"
+msgid_plural "%1$u not responded"
+msgstr[0] "ยังไม่ตอบกลับ %1$u คน"
+
+#: src/gui/event-editor/gcal-attendees-section.blp:28
+msgid "Resources"
+msgstr "ทรัพยากร"
+
+#: src/gui/event-editor/gcal-date-chooser-row.blp:12
+msgid "Edit Date"
+msgstr "แก้ไขวันที่"
+
+#: src/gui/event-editor/gcal-date-chooser-row.blp:32
+msgid "Edit date"
+msgstr "แก้ไขวันที่"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:6
+msgid "Date"
+msgstr "วันที่"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:11
+msgid "Time"
+msgstr "เวลา"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:20
+#: src/gui/event-editor/gcal-time-chooser-row.blp:12
+msgid "Edit Time"
+msgstr "แก้ไขเวลา"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:52
+msgid ":"
+msgstr ":"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:70
+#: src/gui/event-editor/gcal-date-time-chooser.c:205
+#: src/gui/event-editor/gcal-date-time-chooser.c:270 src/gui/views/gcal-week-hour-bar.c:57
+msgid "AM"
+msgstr "AM"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:75
+#: src/gui/event-editor/gcal-date-time-chooser.c:205 src/gui/views/gcal-week-hour-bar.c:57
+msgid "PM"
+msgstr "PM"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:85
+#: src/gui/event-editor/gcal-date-time-chooser.blp:94
+msgid "Change Timezone"
+msgstr "เปลี่ยนเขตเวลา"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:103
+#: src/gui/event-editor/gcal-time-chooser-row.blp:29
+msgid "Edit time"
+msgstr "แก้ไขเวลา"
+
+#. Translators: "%1$s" is the timezone identifier (e.g. UTC, America/Sao_Paulo)
+#. * and "%2$s" is the timezone offset (e.g. UTC-3).
+#.
+#: src/gui/event-editor/gcal-date-time-chooser.c:141
+#, c-format
+msgid "%1$s (%2$s)"
+msgstr "%1$s (%2$s)"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:25
+#: src/gui/event-editor/gcal-event-editor-dialog.c:129
+msgid "_Done"
+msgstr "เ_สร็จ"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:38
+msgid "This event is in a read-only calendar. It cannot be edited or deleted."
+msgstr "งานกิจกรรมนี้อยู่ในปฏิทินที่อ่านได้อย่างเดียว ไม่สามารถแก้ไขหรือลบได้"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:70
+msgid "Reminders"
+msgstr "เตือนความจำ"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:78
+msgid "Notes"
+msgstr "หมายเหตุ"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:89
+msgid "_Delete Event"
+msgstr "_ลบงานกิจกรรม"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:129
+msgid "_Save"
+msgstr "_บันทึก"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:705
+msgid "New Event"
+msgstr "งานกิจกรรมใหม่"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:707
+msgid "Event Details"
+msgstr "รายละเอียดงานกิจกรรม"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:709
+msgid "Edit Event"
+msgstr "แก้ไขงานกิจกรรม"
+
+#: src/gui/event-editor/gcal-organizer-row.blp:5
+msgid "Organizer"
+msgstr "ผู้จัดงาน"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:16
+msgid "Add Reminder"
+msgstr "เพิ่มรายการเตือนความจำ"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:38
+msgid "Event start"
+msgstr "เวลาเริ่มต้นงานกิจกรรม"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:43
+msgid "5 Minutes"
+msgstr "5 นาที"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:48
+msgid "10 Minutes"
+msgstr "10 นาที"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:53
+msgid "15 Minutes"
+msgstr "15 นาที"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:58
+msgid "30 Minutes"
+msgstr "30 นาที"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:63
+msgid "1 Hour"
+msgstr "1 ชั่วโมง"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:68
+msgid "1 Day"
+msgstr "1 วัน"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:73
+msgid "2 Days"
+msgstr "2 วัน"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:78
+msgid "3 Days"
+msgstr "3 วัน"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:83
+msgid "1 Week"
+msgstr "1 สัปดาห์"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:13
+msgid "_All Day"
+msgstr "_ทั้งวัน"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:19
+msgid "_Time Slot"
+msgstr "_ช่วงเวลา"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:27
+#: src/gui/event-editor/gcal-schedule-section.blp:40
+msgid "Start Date"
+msgstr "วันที่เริ่มต้น"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:34
+#: src/gui/event-editor/gcal-schedule-section.blp:46
+msgid "End Date"
+msgstr "วันที่สิ้นสุด"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:41
+msgid "Start Time"
+msgstr "เวลาเริ่มต้น"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:47
+msgid "End Time"
+msgstr "เวลาสิ้นสุด"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:55
+msgid "Repeat"
+msgstr "ทำซ้ำ"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:60
+msgid "No Repeat"
+msgstr "ไม่ทำซ้ำ"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:61
+msgid "Daily"
+msgstr "ทุกวัน"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:62
+msgid "Monday – Friday"
+msgstr "จันทร์ – ศุกร์"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:63
+msgid "Weekly"
+msgstr "ทุกสัปดาห์"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:64
+msgid "Monthly"
+msgstr "ทุกเดือน"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:65
+msgid "Yearly"
+msgstr "ทุกปี"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:73
+msgid "End Repeat"
+msgstr "สิ้นสุดทำซ้ำ"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:78
+msgid "Forever"
+msgstr "ตลอดกาล"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:79
+#: src/gui/event-editor/gcal-schedule-section.blp:89
+msgid "Number of Occurrences"
+msgstr "จำนวนครั้งที่เกิด"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:80
+msgid "Until Date"
+msgstr "จนถึงวันที่"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:103
+msgid "End Repeat Date"
+msgstr "วันที่สิ้นสุดทำซ้ำ"
+
+#: src/gui/event-editor/gcal-summary-section.blp:13 src/gui/gcal-quick-add-popover.blp:44
+#: src/gui/importer/gcal-import-file-row.c:179
+msgid "Title"
+msgstr "ชื่อ"
+
+#: src/gui/event-editor/gcal-time-zone-dialog.blp:5
+msgid "Select Timezone"
+msgstr "เลือกเขตเวลา"
+
+#: src/gui/event-editor/gcal-time-zone-dialog.blp:16
+msgid "Search Locations"
+msgstr "ค้นหาสถานที่"
+
+#: src/gui/event-editor/gcal-time-zone-dialog.blp:29
+msgid "Search for a Timezone"
+msgstr "ค้นหาเขตเวลา"
+
+#. Translators: "%1$s" is the city / region name, and
+#. * "%2$s" is the country name (already localized).
+#.
+#: src/gui/event-editor/gcal-time-zone-dialog.c:84
+#, c-format
+msgid "%1$s, %2$s"
+msgstr "%1$s %2$s"
+
+#: src/gui/gcal-application.c:58
+msgid "Quit GNOME Calendar"
+msgstr "ออกจากปฏิทิน GNOME"
+
+#: src/gui/gcal-application.c:63
+msgid "Display version number"
+msgstr "แสดงเลขรุ่น"
+
+#: src/gui/gcal-application.c:68
+msgid "Enable debug messages"
+msgstr "เปิดใช้ข้อความแก้จุดบกพร่อง"
+
+#: src/gui/gcal-application.c:73
+msgid "Open calendar on the passed date"
+msgstr "เปิดปฏิทินในวันที่กำหนด"
+
+#: src/gui/gcal-application.c:78
+msgid "Open calendar showing the passed event"
+msgstr "เปิดปฏิทินแสดงงานกิจกรรมที่กำหนด"
+
+#: src/gui/gcal-application.c:144
+#, c-format
+msgid "Copyright © 2012–%d The Calendar authors"
+msgstr "Copyright © 2012–%d The Calendar authors"
+
+#: src/gui/gcal-application.c:241
+msgid "translator-credits"
+msgstr ""
+"Akom Chotiphantawanon <knight2000@gmail.com>\n"
+"Aefgh Threenine <aefgh39622@gmail.com>"
+
+#: src/gui/gcal-application.c:245 src/gui/gcal-window.blp:389
+msgid "Weather"
+msgstr "พยากรณ์อากาศ"
+
+#.
+#. * Translators: %B is the month name and %Y is the year.
+#. * More formats can be found on the doc:
+#. * https://docs.gtk.org/glib/method.DateTime.format.html
+#.
+#: src/gui/gcal-calendar-navigation-button.c:106
+msgid "%B %Y"
+msgstr "%B %Y"
+
+#: src/gui/gcal-event-popover.blp:54
+msgid ""
+"<b>This event is part of a read-only calendar</b>\n"
+"    You cannot delete or change this event."
+msgstr ""
+"<b>งานกิจกรรมนี้เป็นส่วนหนึ่งของปฏิทินที่อ่านได้อย่างเดียว</b>\n"
+"    คุณไม่สามารถลบหรือเปลี่ยนแปลงงานกิจกรรมนี้ได้"
+
+#: src/gui/gcal-event-popover.blp:71 src/gui/gcal-event-popover.c:593
+msgid "Export Event"
+msgstr "ส่งออกงานกิจกรรม"
+
+#: src/gui/gcal-event-popover.blp:98
+msgid "No event notes"
+msgstr "ไม่มีหมายเหตุงานกิจกรรม"
+
+#: src/gui/gcal-event-popover.c:126 src/gui/gcal-quick-add-popover.c:211
+msgid "January"
+msgstr "มกราคม"
+
+#: src/gui/gcal-event-popover.c:127 src/gui/gcal-quick-add-popover.c:212
+msgid "February"
+msgstr "กุมภาพันธ์"
+
+#: src/gui/gcal-event-popover.c:128 src/gui/gcal-quick-add-popover.c:213
+msgid "March"
+msgstr "มีนาคม"
+
+#: src/gui/gcal-event-popover.c:129 src/gui/gcal-quick-add-popover.c:214
+msgid "April"
+msgstr "เมษายน"
+
+#: src/gui/gcal-event-popover.c:130 src/gui/gcal-quick-add-popover.c:215
+msgid "May"
+msgstr "พฤษภาคม"
+
+#: src/gui/gcal-event-popover.c:131 src/gui/gcal-quick-add-popover.c:216
+msgid "June"
+msgstr "มิถุนายน"
+
+#: src/gui/gcal-event-popover.c:132 src/gui/gcal-quick-add-popover.c:217
+msgid "July"
+msgstr "กรกฎาคม"
+
+#: src/gui/gcal-event-popover.c:133 src/gui/gcal-quick-add-popover.c:218
+msgid "August"
+msgstr "สิงหาคม"
+
+#: src/gui/gcal-event-popover.c:134 src/gui/gcal-quick-add-popover.c:219
+msgid "September"
+msgstr "กันยายน"
+
+#: src/gui/gcal-event-popover.c:135 src/gui/gcal-quick-add-popover.c:220
+msgid "October"
+msgstr "ตุลาคม"
+
+#: src/gui/gcal-event-popover.c:136 src/gui/gcal-quick-add-popover.c:221
+msgid "November"
+msgstr "พฤศจิกายน"
+
+#: src/gui/gcal-event-popover.c:137 src/gui/gcal-quick-add-popover.c:222
+msgid "December"
+msgstr "ธันวาคม"
+
+#: src/gui/gcal-event-popover.c:162
+#, c-format
+msgid "Today %s"
+msgstr "วันนี้ %s"
+
+#: src/gui/gcal-event-popover.c:166
+#, c-format
+msgid "Tomorrow %s"
+msgstr "พรุ่งนี้ %s"
+
+#: src/gui/gcal-event-popover.c:170
+#, c-format
+msgid "Yesterday %s"
+msgstr "เมื่อวาน %s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, and %3$ is the hour. This format string results in dates
+#. * like "November 21, 22:00".
+#.
+#: src/gui/gcal-event-popover.c:179
+#, c-format
+msgid "%1$s %2$d, %3$s"
+msgstr "%2$d %1$s %3$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, %3$d is the year, and %4$s is the hour. This format string
+#. * results in dates like "November 21, 2020, 22:00".
+#.
+#: src/gui/gcal-event-popover.c:191
+#, c-format
+msgid "%1$s %2$d, %3$d, %4$s"
+msgstr "%2$d %1$s %3$d %4$s"
+
+#: src/gui/gcal-event-popover.c:203 src/gui/gcal-event-popover.c:317
+#: src/gui/views/gcal-agenda-view.c:198
+msgid "Today"
+msgstr "วันนี้"
+
+#: src/gui/gcal-event-popover.c:207 src/gui/gcal-event-popover.c:321 src/gui/gcal-window.c:290
+#: src/gui/views/gcal-agenda-view.c:200
+msgid "Tomorrow"
+msgstr "พรุ่งนี้"
+
+#: src/gui/gcal-event-popover.c:211 src/gui/gcal-event-popover.c:325 src/gui/gcal-window.c:259
+#: src/gui/views/gcal-agenda-view.c:202
+msgid "Yesterday"
+msgstr "เมื่อวาน"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), and %2$d is
+#. * the day of month. This format string results in dates like
+#. * "November 21".
+#.
+#: src/gui/gcal-event-popover.c:220 src/gui/gcal-event-popover.c:334
+#, c-format
+msgid "%1$s %2$d"
+msgstr "%2$d %1$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, and %3$d is the year. This format string results in dates
+#. * like "November 21, 2020".
+#.
+#: src/gui/gcal-event-popover.c:231 src/gui/gcal-event-popover.c:345
+#, c-format
+msgid "%1$s %2$d, %3$d"
+msgstr "%2$d %1$s %3$d"
+
+#.
+#. * Translators: %1$s is the start hour, and %2$s is the end hour, for
+#. * example: "Today, 19:00 — 22:00"
+#.
+#: src/gui/gcal-event-popover.c:265
+#, c-format
+msgid "Today, %1$s — %2$s"
+msgstr "วันนี้ %1$s — %2$s"
+
+#.
+#. * Translators: %1$s is the start hour, and %2$s is the end hour, for
+#. * example: "Tomorrow, 19:00 — 22:00"
+#.
+#: src/gui/gcal-event-popover.c:273
+#, c-format
+msgid "Tomorrow, %1$s – %2$s"
+msgstr "พรุ่งนี้ %1$s – %2$s"
+
+#.
+#. * Translators: %1$s is the start hour, and %2$s is the end hour, for
+#. * example: "Tomorrow, 19:00 — 22:00"
+#.
+#: src/gui/gcal-event-popover.c:281
+#, c-format
+msgid "Yesterday, %1$s – %2$s"
+msgstr "เมื่อวาน %1$s – %2$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, %3$s is the start hour, and %4$s is the end hour. This
+#. * format string results in dates like "November 21, 19:00 — 22:00".
+#.
+#: src/gui/gcal-event-popover.c:290
+#, c-format
+msgid "%1$s %2$d, %3$s – %4$s"
+msgstr "%2$d %1$s %3$s – %4$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, %3$d is the year, %4$s is the start hour, and %5$s is the
+#. * end hour. This format string results in dates like:
+#. *
+#. * "November 21, 2021, 19:00 — 22:00".
+#.
+#: src/gui/gcal-event-popover.c:305
+#, c-format
+msgid "%1$s %2$d, %3$d, %4$s – %5$s"
+msgstr "%2$d %1$s %3$d %4$s – %5$s"
+
+#: src/gui/gcal-event-popover.c:370
+msgid "View Additional Details"
+msgstr "ดูรายละเอียดเพิ่มเติม"
+
+#: src/gui/gcal-event-popover.c:375
+msgid "Edit Additional Details"
+msgstr "แก้ไขรายละเอียดเพิ่มเติม"
+
+#. Translators: %s is the meeting service name for the event (e.g. "Google Meet")
+#: src/gui/gcal-event-widget.c:388
+#, c-format
+msgid ""
+"\n"
+"\n"
+"On %s"
+msgstr ""
+"\n"
+"\n"
+"บน %s"
+
+#. Translators: %s is a URL informed as the location of the event
+#. Translators: %s is the location of the event (e.g. "Downtown, 3rd Avenue")
+#: src/gui/gcal-event-widget.c:401 src/gui/gcal-event-widget.c:407
+#, c-format
+msgid ""
+"\n"
+"\n"
+"At %s"
+msgstr ""
+"\n"
+"\n"
+"ที่ %s"
+
+#.
+#. * Translators: %a is the abbreviated day name, %B is the month name
+#. * and %d is the day of the month as a number between 0 and 31.
+#. * More formats can be found on the doc:
+#. * https://docs.gtk.org/glib/method.DateTime.format.html
+#.
+#: src/gui/gcal-event-widget.c:466
+msgid "%a %B %d"
+msgstr "%a %d %B"
+
+#: src/gui/gcal-meeting-row.blp:35
+msgid "_Join"
+msgstr "เ_ข้าร่วม"
+
+#: src/gui/gcal-meeting-row.c:72
+msgid "Unknown Service"
+msgstr "บริการไม่รู้จัก"
+
+#: src/gui/gcal-quick-add-popover.blp:86
+msgid "_Edit Details"
+msgstr "แ_ก้ไขรายละเอียด"
+
+#: src/gui/gcal-quick-add-popover.blp:98
+msgid "_Save Event"
+msgstr "_บันทึกงานกิจกรรม"
+
+#: src/gui/gcal-quick-add-popover.c:189
+msgid "from next Monday"
+msgstr "จากวันจันทร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:190
+msgid "from next Tuesday"
+msgstr "จากวันอังคารหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:191
+msgid "from next Wednesday"
+msgstr "จากวันพุธหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:192
+msgid "from next Thursday"
+msgstr "จากวันพฤหัสบดีหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:193
+msgid "from next Friday"
+msgstr "จากวันศุกร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:194
+msgid "from next Saturday"
+msgstr "จากวันเสาร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:195
+msgid "from next Sunday"
+msgstr "จากวันอาทิตย์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:200
+msgid "to next Monday"
+msgstr "ถึงวันจันทร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:201
+msgid "to next Tuesday"
+msgstr "ถึงวันอังคารหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:202
+msgid "to next Wednesday"
+msgstr "ถึงวันพุธหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:203
+msgid "to next Thursday"
+msgstr "ถึงวันพฤหัสบดีหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:204
+msgid "to next Friday"
+msgstr "ถึงวันศุกร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:205
+msgid "to next Saturday"
+msgstr "ถึงวันเสาร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:206
+msgid "to next Sunday"
+msgstr "ถึงวันอาทิตย์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:230
+#, c-format
+msgid "from Today"
+msgstr "จากวันนี้"
+
+#: src/gui/gcal-quick-add-popover.c:234
+#, c-format
+msgid "from Tomorrow"
+msgstr "จากพรุ่งนี้"
+
+#: src/gui/gcal-quick-add-popover.c:238
+#, c-format
+msgid "from Yesterday"
+msgstr "จากเมื่อวานนี้"
+
+#. Translators:
+#. * this is the format string for representing a date consisting of a month
+#. * name and a date of month.
+#.
+#: src/gui/gcal-quick-add-popover.c:256
+#, c-format
+msgid "from %1$s %2$s"
+msgstr "จาก %2$s %1$s"
+
+#: src/gui/gcal-quick-add-popover.c:265
+#, c-format
+msgid "to Today"
+msgstr "ถึงวันนี้"
+
+#: src/gui/gcal-quick-add-popover.c:269
+#, c-format
+msgid "to Tomorrow"
+msgstr "ถึงพรุ่งนี้"
+
+#: src/gui/gcal-quick-add-popover.c:273
+#, c-format
+msgid "to Yesterday"
+msgstr "ถึงเมื่อวานนี้"
+
+#. Translators:
+#. * this is the format string for representing a date consisting of a month
+#. * name and a date of month.
+#.
+#: src/gui/gcal-quick-add-popover.c:291
+#, c-format
+msgid "to %1$s %2$s"
+msgstr "ถึง %2$s %1$s"
+
+#. Translators: %1$s is the start date (e.g. "from Today") and %2$s is the end date (e.g. "to Tomorrow")
+#: src/gui/gcal-quick-add-popover.c:297
+#, c-format
+msgid "New Event %1$s %2$s"
+msgstr "งานกิจกรรมใหม่ในวันที่ %2$s %1$s"
+
+#: src/gui/gcal-quick-add-popover.c:314
+#, c-format
+msgid "New Event Today"
+msgstr "งานกิจกรรมใหม่ในวันนี้"
+
+#: src/gui/gcal-quick-add-popover.c:318
+#, c-format
+msgid "New Event Tomorrow"
+msgstr "งานกิจกรรมใหม่พรุ่งนี้"
+
+#: src/gui/gcal-quick-add-popover.c:322
+#, c-format
+msgid "New Event Yesterday"
+msgstr "งานกิจกรรมใหม่เมื่อวานนี้"
+
+#: src/gui/gcal-quick-add-popover.c:328
+msgid "New Event next Monday"
+msgstr "งานกิจกรรมใหม่ในวันจันทร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:329
+msgid "New Event next Tuesday"
+msgstr "งานกิจกรรมใหม่ในวันอังคารหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:330
+msgid "New Event next Wednesday"
+msgstr "งานกิจกรรมใหม่ในวันพุธหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:331
+msgid "New Event next Thursday"
+msgstr "งานกิจกรรมใหม่ในวันพฤหัสบดีหน้า"
+
+#: src/gui/gcal-quick-add-popover.c:332
+msgid "New Event next Friday"
+msgstr "งานกิจกรรมใหม่ในวันศุกร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:333
+msgid "New Event next Saturday"
+msgstr "งานกิจกรรมใหม่ในวันเสาร์หน้า"
+
+#: src/gui/gcal-quick-add-popover.c:334
+msgid "New Event next Sunday"
+msgstr "งานกิจกรรมใหม่ในวันอาทิตย์หน้า"
+
+#. Translators: %d is the numeric day of month
+#: src/gui/gcal-quick-add-popover.c:346
+#, c-format
+msgid "New Event on January %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d มกราคม"
+
+#: src/gui/gcal-quick-add-popover.c:347
+#, c-format
+msgid "New Event on February %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d กุมภาพันธ์"
+
+#: src/gui/gcal-quick-add-popover.c:348
+#, c-format
+msgid "New Event on March %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d มีนาคม"
+
+#: src/gui/gcal-quick-add-popover.c:349
+#, c-format
+msgid "New Event on April %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d เมษายน"
+
+#: src/gui/gcal-quick-add-popover.c:350
+#, c-format
+msgid "New Event on May %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d พฤษภาคม"
+
+#: src/gui/gcal-quick-add-popover.c:351
+#, c-format
+msgid "New Event on June %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d มิถุนายน"
+
+#: src/gui/gcal-quick-add-popover.c:352
+#, c-format
+msgid "New Event on July %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d กรกฎาคม"
+
+#: src/gui/gcal-quick-add-popover.c:353
+#, c-format
+msgid "New Event on August %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d สิงหาคม"
+
+#: src/gui/gcal-quick-add-popover.c:354
+#, c-format
+msgid "New Event on September %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d กันยายน"
+
+#: src/gui/gcal-quick-add-popover.c:355
+#, c-format
+msgid "New Event on October %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d ตุลาคม"
+
+#: src/gui/gcal-quick-add-popover.c:356
+#, c-format
+msgid "New Event on November %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d พฤศจิกายน"
+
+#: src/gui/gcal-quick-add-popover.c:357
+#, c-format
+msgid "New Event on December %d"
+msgstr "งานกิจกรรมใหม่ในวันที่ %d ธันวาคม"
+
+#. Translators: %1$s is the event name, %2$s is the start hour, and %3$s is the end hour.
+#. * To avoid spurious line wrapping, use non-breaking space characters around the en dash.
+#: src/gui/gcal-quick-add-popover.c:426
+#, c-format
+msgid "%1$s, %2$s – %3$s"
+msgstr "%1$s %2$s – %3$s"
+
+#: src/gui/gcal-search-button.blp:26
+msgid "Search Events"
+msgstr "ค้นหางานกิจกรรม"
+
+#: src/gui/gcal-search-button.blp:44
+msgid "Search events"
+msgstr "ค้นหางานกิจกรรม"
+
+#: src/gui/gcal-search-button.c:179
+msgid "No results found"
+msgstr "ไม่พบผลลัพธ์"
+
+#: src/gui/gcal-search-button.c:179
+#, c-format
+msgid "One result found"
+msgid_plural "%u results found"
+msgstr[0] "พบผลลัพธ์ %u รายการ"
+
+#: src/gui/gcal-sync-indicator.blp:19
+msgctxt "tooltip"
+msgid "Synchronizing Remote Calendars"
+msgstr "ปรับข้อมูลปฏิทินทางไกลให้ตรงกัน"
+
+#: src/gui/gcal-weather-settings.blp:17
+msgid "Show Weather"
+msgstr "แสดงพยากรณ์อากาศ"
+
+#: src/gui/gcal-weather-settings.blp:31
+msgid "Automatic Location"
+msgstr "สถานที่อัตโนมัติ"
+
+#: src/gui/gcal-weather-settings.blp:40
+msgid "Search locations"
+msgstr "ค้นหาสถานที่"
+
+#: src/gui/gcal-window.blp:126
+msgid "Drop Event Files to Import"
+msgstr "ปล่อยไฟล์งานกิจกรรมเพื่อนำเข้า"
+
+#: src/gui/gcal-window.blp:178
+msgid "Toggle Sidebar"
+msgstr "เปิด/ปิดแถบข้าง"
+
+#: src/gui/gcal-window.blp:203
+msgid "Main Menu"
+msgstr "เมนูหลัก"
+
+#: src/gui/gcal-window.blp:209
+msgctxt "tooltip"
+msgid "Search"
+msgstr "ค้นหา"
+
+#: src/gui/gcal-window.blp:224
+msgid "_Month"
+msgstr "เ_ดือน"
+
+#: src/gui/gcal-window.blp:238
+msgid "_Week"
+msgstr "_สัปดาห์"
+
+#: src/gui/gcal-window.blp:251
+msgid "_Agenda"
+msgstr "_กำหนดการ"
+
+#: src/gui/gcal-window.blp:286
+msgid "_Today"
+msgstr "_วันนี้"
+
+#: src/gui/gcal-window.blp:290
+msgid "Go to Today"
+msgstr "ไปที่วันนี้"
+
+#: src/gui/gcal-window.blp:306
+msgctxt "tooltip"
+msgid "Add Event"
+msgstr "เพิ่มงานกิจกรรม"
+
+#: src/gui/gcal-window.blp:312
+msgid "Manage Calendars"
+msgstr "จัดการปฏิทิน"
+
+#: src/gui/gcal-window.blp:372
+msgid "_Synchronize Calendars"
+msgstr "_ปรับข้อมูลปฏิทินให้ตรงกัน"
+
+#: src/gui/gcal-window.blp:379
+msgid "_Date & Time Settings…"
+msgstr "_ตั้งค่าวันที่และเวลา…"
+
+#: src/gui/gcal-window.blp:384
+msgid "_Online Accounts…"
+msgstr "บัญชี_ออนไลน์…"
+
+#: src/gui/gcal-window.blp:399
+msgid "_Keyboard Shortcuts"
+msgstr "ปุ่ม_ลัดแป้นพิมพ์"
+
+#: src/gui/gcal-window.blp:404
+msgid "_About Calendar"
+msgstr "เ_กี่ยวกับ “ปฏิทิน”"
+
+#: src/gui/gcal-window.c:255
+msgid "Previous Week"
+msgstr "สัปดาห์ที่แล้ว"
+
+#: src/gui/gcal-window.c:286
+msgid "Next Week"
+msgstr "สัปดาห์ถัดไป"
+
+#: src/gui/gcal-window.c:408
+msgid "Week"
+msgstr "สัปดาห์"
+
+#: src/gui/gcal-window.c:414
+msgid "Agenda"
+msgstr "กำหนดการ"
+
+#: src/gui/gcal-window.c:992
+msgid "Another event deleted"
+msgstr "ลบงานกิจกรรมอื่นแล้ว"
+
+#: src/gui/gcal-window.c:992
+msgid "Event deleted"
+msgstr "ลบงานกิจกรรมแล้ว"
+
+#: src/gui/gcal-window.c:1057
+msgid "Could not import some files: Not ICS files"
+msgstr "ไม่สามารถนำเข้าบางไฟล์ได้: ไม่ใช่ไฟล์ ICS"
+
+#: src/gui/gcal-window.c:1062
+#, c-format
+msgid "Could not import “%s”: Not an ICS file"
+msgstr "ไม่สามารถนำเข้า “%s” ได้: ไม่ใช่ไฟล์ ICS"
+
+#: src/gui/importer/gcal-import-dialog.blp:5
+msgid "Import Files…"
+msgstr "นำเข้าไฟล์…"
+
+#: src/gui/importer/gcal-import-dialog.blp:25
+msgid "_Import"
+msgstr "นำเ_ข้า"
+
+#: src/gui/importer/gcal-import-dialog.blp:51
+msgid "C_alendar"
+msgstr "_ปฏิทิน"
+
+#: src/gui/importer/gcal-import-dialog.c:338
+#, c-format
+msgid "Import %d event"
+msgid_plural "Import %d events"
+msgstr[0] "นำเข้า %d งานกิจกรรม"
+
+#: src/gui/importer/gcal-import-file-row.c:181
+msgid "Starts"
+msgstr "เริ่มต้น"
+
+#: src/gui/importer/gcal-import-file-row.c:182
+msgid "Ends"
+msgstr "สิ้นสุด"
+
+#: src/gui/importer/gcal-import-file-row.c:183
+msgid "Description"
+msgstr "คำบรรยาย"
+
+#: src/gui/importer/gcal-importer.c:34
+msgid "No error"
+msgstr "ไม่มีข้อผิดพลาด"
+
+#: src/gui/importer/gcal-importer.c:37
+msgid "Bad argument to function"
+msgstr "อาร์กิวเมนต์ที่ส่งให้ฟังก์ชันไม่ถูกต้อง"
+
+#: src/gui/importer/gcal-importer.c:41
+msgid "Failed to allocate a new object in memory"
+msgstr "จัดสรรอ็อบเจกต์ใหม่ในหน่วยความจำไม่สำเร็จ"
+
+#: src/gui/importer/gcal-importer.c:44
+msgid "File is malformed, invalid, or corrupted"
+msgstr "ไฟล์ผิดรูปแบบ ไม่ถูกต้อง หรือชำรุด"
+
+#: src/gui/importer/gcal-importer.c:47
+msgid "Failed to parse the calendar contents"
+msgstr "แจงเนื้อหาปฏิทินไม่สำเร็จ"
+
+#: src/gui/importer/gcal-importer.c:50
+msgid "Failed to read file"
+msgstr "อ่านไฟล์ไม่สำเร็จ"
+
+#: src/gui/importer/gcal-importer.c:57
+msgid "Internal error"
+msgstr "ข้อผิดพลาดภายใน"
+
+#: src/gui/importer/gcal-importer.c:112
+msgid "File is not an iCalendar (.ics) file"
+msgstr "ไฟล์ไม่ใช่ไฟล์ iCalendar (.ics)"
+
+#: src/gui/shortcuts-dialog.blp:6
+msgctxt "shortcut dialog"
+msgid "General"
+msgstr "ทั่วไป"
+
+#: src/gui/shortcuts-dialog.blp:9
+msgctxt "shortcut dialog"
+msgid "Open Main Menu"
+msgstr "เปิดเมนูหลัก"
+
+#: src/gui/shortcuts-dialog.blp:14
+msgctxt "shortcut dialog"
+msgid "Toggle Sidebar"
+msgstr "เปิด/ปิดแถบข้าง"
+
+#: src/gui/shortcuts-dialog.blp:19
+msgctxt "shortcut dialog"
+msgid "New Event"
+msgstr "งานกิจกรรมใหม่"
+
+#: src/gui/shortcuts-dialog.blp:24
+msgctxt "shortcut dialog"
+msgid "Manage Calendars"
+msgstr "จัดการปฏิทิน"
+
+#: src/gui/shortcuts-dialog.blp:29
+msgctxt "shortcut dialog"
+msgid "Synchronize Calendars"
+msgstr "ปรับข้อมูลปฏิทินให้ตรงกัน"
+
+#: src/gui/shortcuts-dialog.blp:34
+msgctxt "shortcut dialog"
+msgid "Close Window"
+msgstr "ปิดหน้าต่าง"
+
+#: src/gui/shortcuts-dialog.blp:39
+msgctxt "shortcut dialog"
+msgid "Search"
+msgstr "ค้นหา"
+
+#: src/gui/shortcuts-dialog.blp:44
+msgctxt "shortcut dialog"
+msgid "Show Help"
+msgstr "แสดงวิธีใช้"
+
+#: src/gui/shortcuts-dialog.blp:49
+msgctxt "shortcut dialog"
+msgid "Shortcuts"
+msgstr "ปุ่มลัด"
+
+#: src/gui/shortcuts-dialog.blp:55
+msgctxt "shortcut dialog"
+msgid "Navigation"
+msgstr "การท่องดู"
+
+#: src/gui/shortcuts-dialog.blp:58
+msgctxt "shortcut dialog"
+msgid "Go Back"
+msgstr "ย้อนกลับ"
+
+#: src/gui/shortcuts-dialog.blp:63
+msgctxt "shortcut dialog"
+msgid "Go Forward"
+msgstr "ต่อไป"
+
+#: src/gui/shortcuts-dialog.blp:68
+msgctxt "shortcut dialog"
+msgid "Show Today"
+msgstr "แสดงวันนี้"
+
+#: src/gui/shortcuts-dialog.blp:73
+msgctxt "shortcut dialog"
+msgid "Next View"
+msgstr "มุมมองถัดไป"
+
+#: src/gui/shortcuts-dialog.blp:78
+msgctxt "shortcut dialog"
+msgid "Previous View"
+msgstr "มุมมองก่อนหน้า"
+
+#: src/gui/shortcuts-dialog.blp:84
+msgctxt "shortcut dialog"
+msgid "View"
+msgstr "มุมมอง"
+
+#: src/gui/shortcuts-dialog.blp:87
+msgctxt "shortcut dialog"
+msgid "Month View"
+msgstr "มุมมองเดือน"
+
+#: src/gui/shortcuts-dialog.blp:92
+msgctxt "shortcut dialog"
+msgid "Week View"
+msgstr "มุมมองสัปดาห์"
+
+#: src/gui/views/gcal-agenda-view.blp:27
+msgid "No events"
+msgstr "ไม่มีงานกิจกรรม"
+
+#.
+#. * Translators: %A is the full day name, %B is the month name
+#. * and %d is the day of the month as a number between 0 and 31.
+#. * More formats can be found on the doc:
+#. * https://docs.gtk.org/glib/method.DateTime.format.html
+#.
+#: src/gui/views/gcal-agenda-view.c:210
+msgid "%A %B %d"
+msgstr "วัน%Aที่ %d %B"
+
+#: src/gui/views/gcal-agenda-view.c:415
+msgid "On-going"
+msgstr "กำลังเกิด"
+
+#: src/gui/views/gcal-month-popover.blp:58
+msgid "New Event…"
+msgstr "งานกิจกรรมใหม่…"
+
+#: src/gui/views/gcal-week-header.c:479
+#, c-format
+msgid "Other event"
+msgid_plural "Other %d events"
+msgstr[0] "งานกิจกรรมอื่น %d งาน"
+
+#: src/gui/views/gcal-week-view.c:241
+msgid "Hide Additional Events"
+msgstr "ซ่อนงานกิจกรรมเพิ่มเติม"
+
+#: src/gui/views/gcal-week-view.c:243
+msgid "Show Additional Events"
+msgstr "แสดงงานกิจกรรมเพิ่มเติม"
+
+#: src/utils/gcal-utils.c:1209
+msgid "Modify Multiple Events?"
+msgstr "ต้องการแก้ไขงานกิจกรรมหลายงานหรือไม่?"
+
+#: src/utils/gcal-utils.c:1210
+msgid ""
+"The event you are trying to modify is recurring. The changes you have selected should be "
+"applied to:"
+msgstr "งานกิจกรรมที่คุณกำลังจะแก้ไขเป็นงานกิจกรรมที่เกิดซ้ำ การเปลี่ยนแปลงที่คุณเลือกควรนำไปใช้กับ:"
+
+#: src/utils/gcal-utils.c:1214
+msgid "_Only This Event"
+msgstr "เ_ฉพาะงานกิจกรรมนี้"
+
+#: src/utils/gcal-utils.c:1220
+msgid "_Subsequent Events"
+msgstr "งานกิจกรรมที่_ตามมา"
+
+#: src/utils/gcal-utils.c:1223
+msgid "_All Events"
+msgstr "_ทุกงานกิจกรรม"
+
+#. Conferencing
+#: src/utils/gcal-utils.c:1326
+msgid "BlueJeans"
+msgstr "BlueJeans"
+
+#: src/utils/gcal-utils.c:1327 src/utils/gcal-utils.c:1328
+msgid "BigBlueButton"
+msgstr "BigBlueButton"
+
+#: src/utils/gcal-utils.c:1329
+msgid "Google Meet"
+msgstr "Google Meet"
+
+#: src/utils/gcal-utils.c:1330 src/utils/gcal-utils.c:1331
+msgid "Jitsi"
+msgstr "Jitsi"
+
+#: src/utils/gcal-utils.c:1332
+msgid "Uber Conference"
+msgstr "Uber Conference"
+
+#: src/utils/gcal-utils.c:1333
+msgid "GNOME Meet"
+msgstr "GNOME Meet"
+
+#: src/utils/gcal-utils.c:1334
+msgid "Microsoft Teams"
+msgstr "Microsoft Teams"
+
+#: src/utils/gcal-utils.c:1335
+msgid "Whereby"
+msgstr "Whereby"
+
+#: src/utils/gcal-utils.c:1336
+msgid "Webex"
+msgstr "Webex"
+
+#: src/utils/gcal-utils.c:1337
+msgid "Zoom"
+msgstr "Zoom"
+
+#. Map
+#: src/utils/gcal-utils.c:1340
+msgid "View Map"
+msgstr "ดูแผนที่"
+
+#: src/utils/gcal-utils.c:1341
+msgid "OpenStreetMap"
+msgstr "OpenStreetMap"
+
+#: src/utils/gcal-utils.c:1342 src/utils/gcal-utils.c:1343
+msgid "Google Maps"
+msgstr "Google Maps"
+
+#: src/utils/gcal-utils.c:1344
+msgid "Bing Maps"
+msgstr "Bing Maps"
+
+#~ msgid "Toggle Alarm Sound"
+#~ msgstr "เปิด-ปิดใช้เสียงแจ้งเตือน"
+
+#~ msgid "Add"
+#~ msgstr "เพิ่ม"
+
+#, c-format
+#~ msgid "%s (this calendar is read-only)"
+#~ msgstr "%s (ปฏิทินนี้อ่านได้อย่างเดียว)"
+
+#~ msgid "Default _Calendar"
+#~ msgstr "_ปฏิทินปริยาย"
+
+#~ msgid "Add new events to this calendar by default"
+#~ msgstr "เพิ่มงานกิจกรรมใหม่ในปฏิทินนี้โดยปริยาย"
+
+#~ msgid "_Calendars"
+#~ msgstr "_ปฏิทิน"
+
+#~ msgid "_Manage Calendars…"
+#~ msgstr "_จัดการปฏิทิน…"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Open Calendars Menu"
+#~ msgstr "เปิดเมนูปฏิทิน"
+
+#~ msgctxt "shortcut window"
+#~ msgid "New Event"
+#~ msgstr "งานกิจกรรมใหม่"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Manage Calendars"
+#~ msgstr "จัดการปฏิทิน"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Search"
+#~ msgstr "ค้นหา"
+
+#, c-format
+#~ msgid "Week %d"
+#~ msgstr "สัปดาห์ที่ %d"
+
+#~ msgid "The GNOME Project"
+#~ msgstr "The GNOME Project"
+
+#~ msgid "Done"
+#~ msgstr "เสร็จ"
+
+#~ msgid "Select Calendar"
+#~ msgstr "เลือกปฏิทิน"
+
+#~ msgid "Schedule"
+#~ msgstr "กำหนดการ"
+
+#, c-format
+#~ msgid "Last %A"
+#~ msgstr "%Aที่ผ่านมา"
+
+#, c-format
+#~ msgid "This %A"
+#~ msgstr "%Aนี้"
+
+#~ msgid "00 AM"
+#~ msgstr "00 AM"
+
+#~ msgid "00:00"
+#~ msgstr "00:00"
+
+#~ msgid ""
+#~ "Alternatively, enter the web address of an online calendar you want to import, or open a "
+#~ "supported calendar file."
+#~ msgstr "นอกจากนี้คุณยังสามารถป้อนที่อยู่เว็บของปฏิทินออนไลน์ที่คุณต้องการจะนำเข้า หรือเปิดไฟล์ปฏิทินที่รองรับก็ได้"
+
+#~ msgid "Open a File"
+#~ msgstr "เปิดไฟล์"
+
+#~ msgid "Calendar files"
+#~ msgstr "ไฟล์ปฏิทิน"
+
+#~ msgid "_Add Calendar…"
+#~ msgstr "เ_พิ่มปฏิทิน…"
+
+#~ msgid "No event information"
+#~ msgstr "ไม่มีข้อมูลงานกิจกรรม"
+
+#~ msgid "Edit…"
+#~ msgstr "แก้ไข…"
+
+#~ msgid "Toggles the sound of the alarm"
+#~ msgstr "เปิด/ปิดเสียงเตือน"
+
+#~ msgid "Click to select the calendar"
+#~ msgstr "คลิกเพื่อเลือกปฏิทิน"
+
+#~ msgid "1 hour"
+#~ msgstr "1 ชั่วโมง"
+
+#~ msgid "1 day"
+#~ msgstr "1 วัน"
+
+#~ msgid "2 days"
+#~ msgstr "2 วัน"
+
+#~ msgid "3 days"
+#~ msgstr "3 วัน"
+
+#~ msgid "1 week"
+#~ msgstr "1 สัปดาห์"
+
+#~ msgid "No. of occurrences"
+#~ msgstr "จำนวนครั้งที่เกิด"
+
+#~ msgid "Unnamed event"
+#~ msgstr "งานกิจกรรมไม่มีชื่อ"
+
+#, fuzzy
+#~| msgid "Manage your calendars"
+#~ msgctxt "shortcut window"
+#~ msgid "Manage calendars"
+#~ msgstr "จัดการปฏิทินต่างๆ ของคุณ"
+
+#, fuzzy
+#~| msgid "_Synchronize"
+#~ msgctxt "shortcut window"
+#~ msgid "Synchronize calendars"
+#~ msgstr "_ปรับข้อมูลให้ตรงกัน"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Go back"
+#~ msgstr "ย้อนกลับ"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Week view"
+#~ msgstr "มุมมองสัปดาห์"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Month view"
+#~ msgstr "มุมมองเดือน"
+
+#~ msgid "Calendar for GNOME"
+#~ msgstr "ปฏิทินสำหรับ GNOME"
+
+#~ msgid ""
+#~ "GNOME Calendar is a simple and beautiful calendar application designed to perfectly fit the "
+#~ "GNOME desktop. By reusing the components which the GNOME desktop is build on, Calendar "
+#~ "nicely integrates with the GNOME ecosystem."
+#~ msgstr ""
+#~ "ปฏิทินของ GNOME เป็นโปรแกรมปฏิทินที่เรียบง่ายและสวยงาม ออกแบบมาให้เข้ากันกับเดสก์ท็อป GNOME อย่างเหมาะเจาะ "
+#~ "ด้วยการใช้องค์ประกอบเดียวกับที่ใช้สร้างเดสก์ท็อป GNOME \"ปฏิทิน\" จึงเชื่อมรวมกับระบบนิเวศของ GNOME ได้เป็นอย่างดี"
+
+#~ msgid ""
+#~ "We aim to find the perfect balance between nicely crafted features and user-centred "
+#~ "usability. No excess, no lacks. You'll feel comfortable using Calendar, like you've been "
+#~ "using it for ages!"
+#~ msgstr ""
+#~ "เรามุ่งที่จะหาความสมดุลอย่างเหมาะเจาะระหว่างความสามารถที่สร้างขึ้นอย่างดี กับความสะดวกใช้ที่ผู้ใช้เป็นศูนย์กลาง "
+#~ "ไม่ขาดไม่เกิน คุณจะรู้สึกสะดวกสบายในการใช้ \"ปฏิทิน\" เหมือนที่คุณเคยใช้มาแต่เล็กแต่น้อย!"
+
+#~ msgid "Calendar management"
+#~ msgstr "การจัดการปฏิทิน"
+
+#~ msgid "Window position"
+#~ msgstr "ตำแหน่งหน้าต่าง"
+
+#~ msgid "Window position (x and y)."
+#~ msgstr "ตำแหน่งหน้าต่าง (x และ y)"
+
+#~ msgid "List of the disabled sources"
+#~ msgstr "รายชื่อของแหล่งที่ปิดใช้"
+
+#~ msgid "Sources disabled last time Calendar ran"
+#~ msgstr "แหล่งที่ถูกปิดใช้เมื่อครั้งสุดท้ายที่ปฏิทินทำงาน"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Year view"
+#~ msgstr "มุมมองปี"
+
+#~ msgid "Add Eve_nt…"
+#~ msgstr "เพิ่ม_งานกิจกรรม…"
+
+#~ msgid "_Search…"
+#~ msgstr "_ค้นหา…"
+
+#~ msgid "_About"
+#~ msgstr "เ_กี่ยวกับ"
+
+#~ msgid "_Quit"
+#~ msgstr "_ออก"
+
+#~ msgid "From Web…"
+#~ msgstr "จากเว็บ…"
+
+#~ msgid "Try a different search"
+#~ msgstr "ลองค้นหาด้วยคำอื่น"
+
+#~ msgid "Click to set up"
+#~ msgstr "คลิกเพื่อตั้งค่า"
+
+#~ msgid "Nextcloud"
+#~ msgstr "Nextcloud"
+
+#~ msgid "Overview"
+#~ msgstr "ภาพรวม"
+
+#~ msgid "Settings"
+#~ msgstr "ค่าตั้ง"
+
+#~ msgid "Calendar Address"
+#~ msgstr "ที่อยู่ปฏิทิน"
+
+#~ msgid "- Calendar management"
+#~ msgstr "- การจัดการปฏิทิน"
+
+#, c-format
+#~ msgid "Copyright © %d The Calendar authors"
+#~ msgstr "Copyright © %d The Calendar authors"
+
+#, c-format
+#~ msgid "%d week before"
+#~ msgid_plural "%d weeks before"
+#~ msgstr[0] "%d สัปดาห์ก่อน"
+
+#~ msgid "Other events"
+#~ msgstr "งานกิจกรรมอื่นๆ"
+
+#, c-format
+#~ msgid "New Event from %s to %s"
+#~ msgstr "งานกิจกรรมใหม่ตั้งแต่ %s ถึง %s"
+
+#~ msgid "All day"
+#~ msgstr "ทุกวัน"
+
+#~ msgid "Use the entry above to search for events."
+#~ msgstr "ใช้ช่องข้างบนเพื่อค้นหางานกิจกรรม"
+
+#~ msgid "Open"
+#~ msgstr "เปิด"
+
+#~ msgid "Unnamed Calendar"
+#~ msgstr "ปฏิทินไม่มีชื่อ"
+
+#~ msgid "Off"
+#~ msgstr "ปิด"
+
+#~ msgid "On"
+#~ msgstr "เปิด"
+
+#, c-format
+#~ msgid "%s AM"
+#~ msgstr "%s AM"
+
+#, c-format
+#~ msgid "%s PM"
+#~ msgstr "%s PM"
+
+#~ msgid "Midnight"
+#~ msgstr "เที่ยงคืน"
+
+#~ msgid "Noon"
+#~ msgstr "เที่ยงวัน"
+
+#~ msgid "00:00 PM"
+#~ msgstr "00:00 PM"
+
+#~ msgid "Create"
+#~ msgstr "สร้าง"
+
+#~ msgid "%.2d:%.2d AM"
+#~ msgstr "%.2d:%.2d AM"
+
+#~ msgid "%.2d:%.2d PM"
+#~ msgstr "%.2d:%.2d PM"
+
+#~ msgid "Max Content Height"
+#~ msgstr "ความสูงสูงสุดของเนื้อหา"
+
+#~ msgid "The maximum height request that can be made."
+#~ msgstr "ความสูงสูงสุดที่สามารถร้องขอได้"
+
+#~ msgid "Max Content Width"
+#~ msgstr "ความกว้างสูงสุดของเนื้อหา"
+
+#~ msgid "The maximum width request that can be made."
+#~ msgstr "ความกว้างสูงสุดที่สามารถร้องขอได้"
+
+#~ msgid "%m/%d/%y"
+#~ msgstr "%d/%m/%Ey"
+
+#~ msgid "%.2d:%.2d %s"
+#~ msgstr "%.2d:%.2d %s"

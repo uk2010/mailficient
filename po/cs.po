@@ -1,0 +1,2007 @@
+# Czech translation for gnome-calendar.
+# Copyright (C) 2013 gnome-calendar's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-calendar package.
+#
+# Adam Matoušek <adamatousek@gmail.com>, 2013.
+# Marek Černocký <marek@manet.cz>, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023.
+# Patrik Sivek <sivekpatrik@gmail.com>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-calendar\n"
+"Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gnome-calendar/issues\n"
+"POT-Creation-Date: 2026-07-22 14:27+0000\n"
+"PO-Revision-Date: 2026-07-28 19:47+0200\n"
+"Last-Translator: Patrik Sivek <sivekpatrik@gmail.com>\n"
+"Language-Team: Czech\n"
+"Language: cs\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+"X-Generator: Gtranslator 50.0\n"
+
+#: data/org.gnome.Calendar.desktop.in.in:2
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:13
+#: src/gui/common/gcal-calendar-combo-row.blp:5 src/gui/gcal-window.blp:5
+#: src/gui/gcal-window.c:414 src/main.c:35
+msgid "Calendar"
+msgstr "Kalendář"
+
+#: data/org.gnome.Calendar.desktop.in.in:3
+msgid "Access and manage your calendars"
+msgstr "Zobrazte si a spravujte své kalendáře"
+
+#. Translators: Search terms to find this application. Do NOT translate or localize the semicolons! The list MUST also end with a semicolon!
+#: data/org.gnome.Calendar.desktop.in.in:12
+msgid "Calendar;Event;Reminder;"
+msgstr "kalendář;událost;upomínka;připomenutí;"
+
+#: data/org.gnome.calendar.gschema.xml.in:6
+msgid "Window maximized"
+msgstr "Maximalizované okno"
+
+#: data/org.gnome.calendar.gschema.xml.in:7
+msgid "Window maximized state"
+msgstr "Stav maximalizace okna"
+
+#: data/org.gnome.calendar.gschema.xml.in:11
+msgid "Window size"
+msgstr "Velikost okna"
+
+#: data/org.gnome.calendar.gschema.xml.in:12
+msgid "Window size (width and height)."
+msgstr "Velikost okna (šířka a výška)."
+
+#: data/org.gnome.calendar.gschema.xml.in:16
+msgid "Type of the active view"
+msgstr "Typ aktivního zobrazení"
+
+#: data/org.gnome.calendar.gschema.xml.in:17
+msgid "Type of the active window view, default value is: monthly view"
+msgstr ""
+"Typ aktivního zobrazení okna, výchozí hodnotou je „month“ (zobrazení po "
+"měsících)"
+
+#: data/org.gnome.calendar.gschema.xml.in:21
+msgid "Weather Service Configuration"
+msgstr "Nastavení služby Počasí"
+
+#: data/org.gnome.calendar.gschema.xml.in:22
+msgid ""
+"Whether weather reports are shown, automatic locations are used and a "
+"location-name"
+msgstr ""
+"Zdali je zobrazována předpověď počasí, používáno automatické určení místa a "
+"název místa."
+
+#: data/org.gnome.calendar.gschema.xml.in:26
+msgid "Zoom level of the week grid"
+msgstr "Úroveň přiblížení mřížky týdne"
+
+#: data/org.gnome.calendar.gschema.xml.in:27
+msgid "The current zoom level of the week grid"
+msgstr "Aktuální úroveň přiblížení mřížky týdne"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:10
+msgid "The GNOME Project"
+msgstr "Projekt GNOME"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:14
+msgid "Manage your schedule"
+msgstr "Spravovat svůj rozvrh"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:17
+msgid ""
+"GNOME Calendar is an elegant tool to help you plan and stay on top of your "
+"schedule for upcoming days and weeks, whether your months are filled with "
+"meetings and appointments, public events, travel logistics, or other "
+"commitments in your life."
+msgstr ""
+"Kalendář GNOME je elegantní nástroj, který vám pomůže naplánovat a udržet si "
+"plán na nadcházející dny a týdny, ať už jsou vaše měsíce plné schůzek a "
+"termínů, veřejných událostí, cestovní logistiky nebo jiných závazků ve vašem "
+"životě."
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:22
+msgid ""
+"Easily create and manage unlimited calendars and events with GNOME "
+"Calendar's infinite scrolling month view, week timetable, and scheduling "
+"list view."
+msgstr ""
+"Snadno vytvářejte a spravujte neomezené množství kalendářů a událostí pomocí "
+"nekonečného rolovacího zobrazení měsíce, týdenního rozvrhu a seznamu rozvrhů "
+"Kalendáře GNOME."
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:26
+msgid ""
+"Integrating the latest GNOME technologies and design best practices, GNOME "
+"Calendar builds on top of the mature Evolution data server to manage large "
+"quantities of events and to provide integration with other applications. You "
+"can add calendars from various online calendaring services (like NextCloud, "
+"Google Calendar, and CalDAV / WebDAV servers), enabling you to synchronize "
+"your events across multiple devices and platforms. GNOME Calendar also "
+"supports local and offline calendaring, so you can use it anywhere and "
+"anytime while travelling (or after civilization's collapse.)"
+msgstr ""
+"Kalendář GNOME integruje nejnovější technologie GNOME a osvědčené postupy "
+"návrhu a staví na vyspělém datovém serveru Evolution, aby mohl spravovat "
+"velké množství událostí a poskytovat integraci s dalšími aplikacemi. Můžete "
+"přidat kalendáře z různých online kalendářových služeb (jako NextCloud, "
+"Google Calendar a servery CalDAV / WebDAV), což vám umožní synchronizovat "
+"vaše události mezi více zařízeními a platformami. Kalendář GNOME také "
+"podporuje místní a offline kalendář, takže jej můžete používat kdekoli a "
+"kdykoli na cestách (nebo po kolapsu civilizace.)"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:39
+msgid "calendars"
+msgstr "kalendáře"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:40
+msgid "calendaring"
+msgstr "kalendářování"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:41
+msgid "events"
+msgstr "události"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:42
+msgid "meetings"
+msgstr "zasedání"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:43
+msgid "appointments"
+msgstr "schůzky"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:44
+msgid "scheduling"
+msgstr "rozvrhování"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:45
+msgid "planning"
+msgstr "plánování"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:46
+msgid "agenda"
+msgstr "agenda"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:47
+msgid "reminders"
+msgstr "připomenutí"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:48
+msgid "alarms"
+msgstr "budíky"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:49
+msgid "weather"
+msgstr "počasí"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:50
+msgid "forecasting"
+msgstr "předpověď"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:57
+msgid "Google Calendar"
+msgstr "Kalendář Google"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:63
+msgid "Month view"
+msgstr "Měsíční zobrazení"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:67
+msgid "Week view"
+msgstr "Týdenní zobrazení"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:71
+msgid "Agenda view"
+msgstr "Zobrazení agendy"
+
+#: src/appdata/org.gnome.Calendar.metainfo.xml.in.in:75
+msgid "Event editor"
+msgstr "Úprava události"
+
+#. Translators: %1$s is the start date and %2$s is the end date.
+#. Translators: %1$s is the start date, and %2$s. For example: June 21 – November 29, 2022
+#: src/core/gcal-event.c:1937 src/gui/gcal-event-popover.c:422
+#, c-format
+msgid "%1$s – %2$s"
+msgstr "%1$s–%2$s"
+
+#.
+#. * Translators: %1$s is the start date, %2$s is the start time,
+#. * %3$s is the end date, and %4$s is the end time.
+#.
+#: src/core/gcal-event.c:1945
+#, c-format
+msgid "%1$s %2$s – %3$s %4$s"
+msgstr "%1$s %2$s–%3$s %4$s"
+
+#. Translators: %1$s is a date, %2$s is the start hour, and %3$s is the end hour
+#: src/core/gcal-event.c:1961
+#, c-format
+msgid "%1$s, %2$s – %3$s"
+msgstr "%1$s, %2$s–%3$s"
+
+#: src/gui/calendar-management/calendar-row.blp:20
+msgid "Read-Only Calendar"
+msgstr "Kalendář pouze pro čtení"
+
+#: src/gui/calendar-management/calendar-row.blp:29
+msgid "Display Calendar"
+msgstr "Zobrazit kalendář"
+
+#: src/gui/calendar-management/calendar-row.blp:39
+msgid "Edit calendar"
+msgstr "Upravit kalendář"
+
+#: src/gui/calendar-management/gcal-calendar-management-dialog.blp:5
+msgid "Calendar Settings"
+msgstr "Nastavení kalendáře"
+
+#: src/gui/calendar-management/gcal-calendars-page.blp:5
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:90
+msgid "Calendars"
+msgstr "Kalendáře"
+
+#: src/gui/calendar-management/gcal-calendars-page.blp:37
+msgid "_Add Calendar"
+msgstr "Přid_at kalendář"
+
+#. Create the new toast
+#. TRANSLATORS: %s is a calendar name.
+#: src/gui/calendar-management/gcal-calendars-page.c:349
+#, c-format
+msgid "Calendar “%s” removed"
+msgstr "Kalendář „%s“ byl odstraněn"
+
+#: src/gui/calendar-management/gcal-calendars-page.c:354
+#: src/gui/gcal-window.c:1020
+msgid "_Undo"
+msgstr "_Zpět"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:5
+msgid "Edit Calendar"
+msgstr "Upravit kalendář"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:19
+msgid "Account"
+msgstr "Účet"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:27
+msgid "Open in Settings"
+msgstr "Otevřít v Nastavení"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:43
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:191
+#: src/gui/event-editor/gcal-summary-section.blp:12
+#: src/gui/gcal-event-popover.blp:152
+#: src/gui/importer/gcal-import-file-row.c:176
+msgid "Location"
+msgstr "Umístění"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:54
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:20
+msgid "Calendar Name"
+msgstr "Název kalendáře"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:58
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:25
+msgid "Color"
+msgstr "Barva"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:74
+msgid "_Display Calendar"
+msgstr "_Zobrazit kalendář"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:82
+msgid "_Export Calendar"
+msgstr "_Exportovat kalendář"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.blp:89
+msgid "_Remove Calendar"
+msgstr "Odst_ranit kalendář"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:174
+msgid "Calendar URL"
+msgstr "Adresa URL kalendáře"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:192
+msgid "On This Computer"
+msgstr "Na tomto počítači"
+
+#: src/gui/calendar-management/gcal-edit-calendar-page.c:338
+msgid "Export Calendar"
+msgstr "Exportovat kalendář"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:5
+msgid "New Calendar"
+msgstr "Nový kalendář"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:17
+msgid "Create a Local Calendar"
+msgstr "Vytvořit místní kalendář"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:42
+msgid "Connect to an Online Calendar"
+msgstr "Připojit se k online kalendáři"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:50
+msgid ""
+"HTTPS, CalDAV, or Webcal URLs are supported. Online calendars that can only "
+"be updated by the provider will be added as read-only."
+msgstr ""
+"Podporovány jsou adresy HTTPS, CalDAV nebo Webcal. Online kalendáře, které "
+"může aktualizovat pouze poskytovatel, budou přidány jako pouze pro čtení."
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:111
+msgid ""
+"If the calendar belongs to one of your online accounts, you can add it "
+"through the <a href=\"GOA\">online account settings</a>."
+msgstr ""
+"Pokud kalendář náleží k jednomu z vašich účtů on-line, můžete jej přidat "
+"přes <a href=\"GOA\">nastavení účtů on-line</a>."
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:130
+#: src/gui/calendar-management/gcal-new-calendar-page.c:116
+msgctxt "button"
+msgid "Add Calendar"
+msgstr "Přidat kalendář"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:145
+msgid "Credentials"
+msgstr "Pověření"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:151
+msgid "User"
+msgstr "Uživatel"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:155
+msgid "Password"
+msgstr "Heslo"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:165
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:18
+#: src/gui/importer/gcal-import-dialog.blp:18 src/utils/gcal-utils.c:1295
+msgid "_Cancel"
+msgstr "_Zrušit"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.blp:166
+msgid "_Connect"
+msgstr "_Připojit"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.c:109
+#, c-format
+msgid "Add Calendar"
+msgid_plural "Add %1$u Calendars"
+msgstr[0] "Přidat %1$u kalendář"
+msgstr[1] "Přidat %1$u kalendáře"
+msgstr[2] "Přidat %1$u kalendářů"
+
+#: src/gui/calendar-management/gcal-new-calendar-page.c:324
+msgid "The URL you have entered appears to be invalid."
+msgstr "Adresa URL, kterou jste zadali, se zdá být neplatná."
+
+#: src/gui/calendar-management/gcal-new-calendar-page.c:379
+msgid "A valid user and password are required to connect to this calendar."
+msgstr "Pro připojení k tomuto kalendáři je vyžadován platný uživatel a heslo."
+
+#: src/gui/common/gcal-calendar-row.c:72
+msgid "This calendar is hidden"
+msgstr "Tento kalendář je skrytý"
+
+#: src/gui/common/gcal-date-chooser.blp:15
+#: src/gui/common/gcal-date-chooser.blp:55 src/gui/gcal-window.c:408
+msgid "Month"
+msgstr "Měsíc"
+
+#: src/gui/common/gcal-date-chooser.blp:16
+#: src/gui/common/gcal-date-chooser.blp:56 src/gui/gcal-window.c:253
+msgid "Previous Month"
+msgstr "Předchozí měsíc"
+
+#: src/gui/common/gcal-date-chooser.blp:17
+#: src/gui/common/gcal-date-chooser.blp:57 src/gui/gcal-window.c:284
+msgid "Next Month"
+msgstr "Následující měsíc"
+
+#: src/gui/common/gcal-date-chooser.blp:34
+msgid "Year"
+msgstr "Rok"
+
+#: src/gui/common/gcal-date-chooser.blp:35
+msgid "Previous Year"
+msgstr "Předchozí rok"
+
+#: src/gui/common/gcal-date-chooser.blp:36
+msgid "Next Year"
+msgstr "Následující rok"
+
+#. Translators: Calendar grid abbreviation for Sunday.
+#. *
+#. * NOTE: These grid abbreviations are always shown together
+#. * and in order, e.g. "S M T W T F S".
+#. *
+#. * Please make sure these abbreviations match GNOME Shell's
+#. * abbreviations for your language.
+#.
+#: src/gui/common/gcal-date-chooser.c:333
+msgctxt "grid sunday"
+msgid "S"
+msgstr "Ne"
+
+#. Translators: Calendar grid abbreviation for Monday
+#: src/gui/common/gcal-date-chooser.c:338
+msgctxt "grid monday"
+msgid "M"
+msgstr "Po"
+
+#. Translators: Calendar grid abbreviation for Tuesday
+#: src/gui/common/gcal-date-chooser.c:343
+msgctxt "grid tuesday"
+msgid "T"
+msgstr "Út"
+
+#. Translators: Calendar grid abbreviation for Wednesday
+#: src/gui/common/gcal-date-chooser.c:348
+msgctxt "grid wednesday"
+msgid "W"
+msgstr "St"
+
+#. Translators: Calendar grid abbreviation for Thursday
+#: src/gui/common/gcal-date-chooser.c:353
+msgctxt "grid thursday"
+msgid "T"
+msgstr "Čt"
+
+#. Translators: Calendar grid abbreviation for Friday
+#: src/gui/common/gcal-date-chooser.c:358
+msgctxt "grid friday"
+msgid "F"
+msgstr "Pá"
+
+#. Translators: Calendar grid abbreviation for Saturday
+#: src/gui/common/gcal-date-chooser.c:363
+msgctxt "grid saturday"
+msgid "S"
+msgstr "So"
+
+#: src/gui/event-editor/gcal-alarm-row.blp:8
+msgid "Remove Alarm"
+msgstr "Odebrat budík"
+
+#: src/gui/event-editor/gcal-alarm-row.c:84
+#, c-format
+msgid "%1$u day, %2$u hour, and %3$u minute before"
+msgid_plural "%1$u day, %2$u hour, and %3$u minutes before"
+msgstr[0] "%1$u den, %2$u hodina a %3$u minuta předem"
+msgstr[1] "%1$u den, %2$u hodina a %3$u minuty předem"
+msgstr[2] "%1$u den, %2$u hodina a %3$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:88
+#, c-format
+msgid "%1$u day, %2$u hours, and %3$u minute before"
+msgid_plural "%1$u day, %2$u hours, and %3$u minutes before"
+msgstr[0] "%1$u den, %2$u hodin a %3$u minuta předem"
+msgstr[1] "%1$u den, %2$u hodin a %3$u minuty předem"
+msgstr[2] "%1$u den, %2$u hodin a %3$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:94
+#, c-format
+msgid "%1$u days, %2$u hour, and %3$u minute before"
+msgid_plural "%1$u days, %2$u hour, and %3$u minutes before"
+msgstr[0] "%1$u dní, %2$u hodina a %3$u minuta předem"
+msgstr[1] "%1$u dní, %2$u hodina a %3$u minuty předem"
+msgstr[2] "%1$u dní, %2$u hodina a %3$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:98
+#, c-format
+msgid "%1$u days, %2$u hours, and %3$u minute before"
+msgid_plural "%1$u days, %2$u hours, and %3$u minutes before"
+msgstr[0] "%1$u dní, %2$u hodin a %3$u minuta předem"
+msgstr[1] "%1$u dní, %2$u hodin a %3$u minuty předem"
+msgstr[2] "%1$u dní, %2$u hodin a %3$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:113
+#, c-format
+msgid "%1$u day and %2$u hour before"
+msgid_plural "%1$u day and %2$u hours before"
+msgstr[0] "%1$u den a %2$u hodina předem"
+msgstr[1] "%1$u den a %2$u hodiny předem"
+msgstr[2] "%1$u den a %2$u hodin předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:117
+#, c-format
+msgid "%1$u days and %2$u hour before"
+msgid_plural "%1$u days and %2$u hours before"
+msgstr[0] "%1$u dní a %2$u hodina předem"
+msgstr[1] "%1$u dní a %2$u hodiny předem"
+msgstr[2] "%1$u dní a %2$u hodin předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:133
+#, c-format
+msgid "%1$u day and %2$u minute before"
+msgid_plural "%1$u day and %2$u minutes before"
+msgstr[0] "%1$u den a %2$u minuta předem"
+msgstr[1] "%1$u den a %2$u minuty předem"
+msgstr[2] "%1$u den a %2$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:137
+#, c-format
+msgid "%1$u days and %2$u minute before"
+msgid_plural "%1$u days and %2$u minutes before"
+msgstr[0] "%1$u dní a %2$u minuta předem"
+msgstr[1] "%1$u dní a %2$u minuty předem"
+msgstr[2] "%1$u dní a %2$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:147
+#, c-format
+msgid "%1$u day before"
+msgid_plural "%1$u days before"
+msgstr[0] "%1$u den předem"
+msgstr[1] "%1$u dny předem"
+msgstr[2] "%1$u dní předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:165
+#, c-format
+msgid "%1$u hour and %2$u minute before"
+msgid_plural "%1$u hour and %2$u minutes before"
+msgstr[0] "%1$u hodina a %2$u minuta předem"
+msgstr[1] "%1$u hodina a %2$u minuty předem"
+msgstr[2] "%1$u hodina a %2$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:169
+#, c-format
+msgid "%1$u hours and %2$u minute before"
+msgid_plural "%1$u hours and %2$u minutes before"
+msgstr[0] "%1$u hodin a %2$u minuta předem"
+msgstr[1] "%1$u hodin a %2$u minuty předem"
+msgstr[2] "%1$u hodin a %2$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:179
+#, c-format
+msgid "%1$u hour before"
+msgid_plural "%1$u hours before"
+msgstr[0] "%1$u hodina předem"
+msgstr[1] "%1$u hodiny předem"
+msgstr[2] "%1$u hodin předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:191
+#, c-format
+msgid "%1$u minute before"
+msgid_plural "%1$u minutes before"
+msgstr[0] "%1$u minuta předem"
+msgstr[1] "%1$u minuty předem"
+msgstr[2] "%1$u minut předem"
+
+#: src/gui/event-editor/gcal-alarm-row.c:198
+msgid "Event start time"
+msgstr "Čas začátku události"
+
+#: src/gui/event-editor/gcal-attendee-row.blp:25
+#: src/gui/event-editor/gcal-organizer-row.blp:25
+msgid "Copy email"
+msgstr "Kopírovat e-mail"
+
+#: src/gui/event-editor/gcal-attendee-row.c:108
+msgid "Delegated to: "
+msgstr "Delegováno na: "
+
+#: src/gui/event-editor/gcal-attendee-row.c:124
+msgid "optional"
+msgstr "volitelné"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:5
+#: src/gui/event-editor/gcal-attendees-section.blp:9
+msgid "Participants"
+msgstr "Účastníci"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:16
+msgid "Accepted"
+msgstr "Přijali"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:21
+msgid "Tentative"
+msgstr "Orientační"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:26
+msgid "Declined"
+msgstr "Odmítli"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:31
+msgid "Delegated"
+msgstr "Delegovali"
+
+#: src/gui/event-editor/gcal-attendee-details-page.blp:36
+msgid "Not responded"
+msgstr "Bez odpovědi"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:112
+#, c-format
+msgid "%1$u accepted"
+msgid_plural "%1$u accepted"
+msgstr[0] "%1$u přijali"
+msgstr[1] "%1$u přijali"
+msgstr[2] "%1$u přijalo"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:113
+#, c-format
+msgid "%1$u maybe"
+msgid_plural "%1$u maybe"
+msgstr[0] "%1$u možná"
+msgstr[1] "%1$u možná"
+msgstr[2] "%1$u možná"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:114
+#, c-format
+msgid "%1$u declined"
+msgid_plural "%1$u declined"
+msgstr[0] "%1$u odmítli"
+msgstr[1] "%1$u odmítli"
+msgstr[2] "%1$u odmítlo"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:115
+#, c-format
+msgid "%1$u delegated"
+msgid_plural "%1$u delegated"
+msgstr[0] "%1$u delegovali"
+msgstr[1] "%1$u delegovali"
+msgstr[2] "%1$u delegovalo"
+
+#: src/gui/event-editor/gcal-attendee-summary-row.c:116
+#, c-format
+msgid "%1$u not responded"
+msgid_plural "%1$u not responded"
+msgstr[0] "%1$u bez odpovědi"
+msgstr[1] "%1$u bez odpovědi"
+msgstr[2] "%1$u bez odpovědi"
+
+#: src/gui/event-editor/gcal-attendees-section.blp:15
+msgid "Resources"
+msgstr "Zdroje"
+
+#: src/gui/event-editor/gcal-date-chooser-row.blp:12
+msgid "Edit Date"
+msgstr "Upravit datum"
+
+#: src/gui/event-editor/gcal-date-chooser-row.blp:33
+msgid "Edit date"
+msgstr "Upravit datum"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:6
+msgid "Date"
+msgstr "Datum"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:12
+msgid "Time"
+msgstr "Čas"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:22
+msgid "Edit Time"
+msgstr "Upravit čas"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:55
+msgid ":"
+msgstr "∶"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:73
+#: src/gui/event-editor/gcal-date-time-chooser.c:208
+#: src/gui/event-editor/gcal-date-time-chooser.c:273
+#: src/gui/views/gcal-week-hour-bar.c:57
+msgid "AM"
+msgstr "dop."
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:78
+#: src/gui/event-editor/gcal-date-time-chooser.c:208
+#: src/gui/views/gcal-week-hour-bar.c:57
+msgid "PM"
+msgstr "odp."
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:88
+#: src/gui/event-editor/gcal-date-time-chooser.blp:97
+msgid "Change Timezone"
+msgstr "Změnit časové pásmo"
+
+#: src/gui/event-editor/gcal-date-time-chooser.blp:106
+msgid "Edit time"
+msgstr "Upravit čas"
+
+#. Translators: "%1$s" is the timezone identifier (e.g. UTC, America/Sao_Paulo)
+#. * and "%2$s" is the timezone offset (e.g. UTC-3).
+#.
+#: src/gui/event-editor/gcal-date-time-chooser.c:144
+#, c-format
+msgid "%1$s (%2$s)"
+msgstr "%1$s (%2$s)"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:25
+#: src/gui/event-editor/gcal-event-editor-dialog.c:124
+msgid "_Done"
+msgstr "_Hotovo"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:36
+msgid "This event is in a read-only calendar. It cannot be edited or deleted."
+msgstr ""
+"Tato událost je v kalendáři pouze pro čtení. Nemůže být upravena ani smazána."
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:60
+msgid "Reminders"
+msgstr "Připomenutí"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.blp:72
+msgid "_Delete Event"
+msgstr "Smazat u_dálost"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:124
+msgid "_Save"
+msgstr "_Uložit"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:155
+msgid "New Event"
+msgstr "Nová událost"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:157
+msgid "Event Details"
+msgstr "Podrobnosti o události"
+
+#: src/gui/event-editor/gcal-event-editor-dialog.c:159
+msgid "Edit Event"
+msgstr "Upravit událost"
+
+#: src/gui/event-editor/gcal-organizer-row.blp:5
+msgid "Organizer"
+msgstr "Organizátor"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:14
+msgid "Add Reminder"
+msgstr "Přidat připomenutí"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:36
+msgid "Event start"
+msgstr "Začátek události"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:41
+msgid "5 Minutes"
+msgstr "5 minut"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:46
+msgid "10 Minutes"
+msgstr "10 minut"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:51
+msgid "15 Minutes"
+msgstr "15 minut"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:56
+msgid "30 Minutes"
+msgstr "30 minut"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:61
+msgid "1 Hour"
+msgstr "1 hodina"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:66
+msgid "1 Day"
+msgstr "1 den"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:71
+msgid "2 Days"
+msgstr "2 dny"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:76
+msgid "3 Days"
+msgstr "3 dny"
+
+#: src/gui/event-editor/gcal-reminders-section.blp:81
+msgid "1 Week"
+msgstr "1 týden"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:16
+msgid "_All Day"
+msgstr "_Celý den"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:24
+#: src/gui/event-editor/gcal-schedule-section.blp:47
+msgid "Start Date"
+msgstr "Datum zahájení"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:30
+#: src/gui/event-editor/gcal-schedule-section.blp:54
+msgid "End Date"
+msgstr "Datum ukončení"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:38
+msgid "_Time Slot"
+msgstr "Č_asové okno"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:48
+msgid "Start Time"
+msgstr "Čas zahájení"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:55
+msgid "End Time"
+msgstr "Čas ukončení"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:68
+msgid "Repeat"
+msgstr "Opakovat"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:73
+msgid "No Repeat"
+msgstr "Bez opakování"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:74
+msgid "Daily"
+msgstr "Denně"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:75
+msgid "Monday – Friday"
+msgstr "Pondělí až pátek"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:76
+msgid "Weekly"
+msgstr "Týdně"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:77
+msgid "Monthly"
+msgstr "Měsíčně"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:78
+msgid "Yearly"
+msgstr "Ročně"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:86
+msgid "End Repeat"
+msgstr "Konec opakování"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:91
+msgid "Forever"
+msgstr "Na pořád"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:92
+#: src/gui/event-editor/gcal-schedule-section.blp:102
+msgid "Number of Occurrences"
+msgstr "Počet opakování"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:93
+msgid "Until Date"
+msgstr "Do data"
+
+#: src/gui/event-editor/gcal-schedule-section.blp:116
+msgid "End Repeat Date"
+msgstr "Datum konce opakování"
+
+#: src/gui/event-editor/gcal-summary-section.blp:6
+#: src/gui/gcal-quick-add-popover.blp:44
+#: src/gui/importer/gcal-import-file-row.c:175
+msgid "Title"
+msgstr "Název"
+
+#: src/gui/event-editor/gcal-time-zone-dialog.blp:5
+msgid "Select Timezone"
+msgstr "Vybrat časové pásmo"
+
+#: src/gui/event-editor/gcal-time-zone-dialog.blp:16
+msgid "Search Locations"
+msgstr "hledat umístění"
+
+#: src/gui/event-editor/gcal-time-zone-dialog.blp:29
+msgid "Search for a Timezone"
+msgstr "Hledat časové pásmo"
+
+#. Translators: "%1$s" is the city / region name, and
+#. * "%2$s" is the country name (already localized).
+#.
+#: src/gui/event-editor/gcal-time-zone-dialog.c:84
+#, c-format
+msgid "%1$s, %2$s"
+msgstr "%1$s, %2$s"
+
+#: src/gui/gcal-application.c:58
+msgid "Quit GNOME Calendar"
+msgstr "Ukončit kalendář GNOME"
+
+#: src/gui/gcal-application.c:63
+msgid "Display version number"
+msgstr "Zobrazit číslo verze"
+
+#: src/gui/gcal-application.c:68
+msgid "Enable debug messages"
+msgstr "Povolit ladicí zprávy"
+
+#: src/gui/gcal-application.c:73
+msgid "Open calendar on the passed date"
+msgstr "Otevřít kalendář na zadaném datu"
+
+#: src/gui/gcal-application.c:78
+msgid "Open calendar showing the passed event"
+msgstr "Otevřít kalendář na zadané události"
+
+#: src/gui/gcal-application.c:144
+#, c-format
+msgid "Copyright © 2012–%d The Calendar authors"
+msgstr "Copyright © 2012–%d autoři Kalendáře"
+
+#: src/gui/gcal-application.c:242
+msgid "translator-credits"
+msgstr ""
+"Adam Matoušek <adamatousek@gmail.com>\n"
+"Marek Černocký <marek@manet.cz>\n"
+"Patrik Sivek <sivekpatrik@gmail.com>"
+
+#: src/gui/gcal-application.c:246 src/gui/gcal-window.blp:391
+msgid "Weather"
+msgstr "Počasí"
+
+#.
+#. * Translators: %OB is the month name and %Y is the year.
+#. * More formats can be found on the doc:
+#. * https://docs.gtk.org/glib/method.DateTime.format.html
+#.
+#: src/gui/gcal-calendar-navigation-button.c:106
+msgid "%OB %Y"
+msgstr "%OB %Y"
+
+#: src/gui/gcal-event-popover.blp:59
+msgid ""
+"<b>This event is part of a read-only calendar</b>\n"
+"    You cannot delete or change this event."
+msgstr ""
+"<b>Tato událost je součástí kalendáře pouze pro čtení</b>\n"
+"    Tuto událost nemůžete smazat ani změnit."
+
+#: src/gui/gcal-event-popover.blp:77 src/gui/gcal-event-popover.c:591
+msgid "Export Event"
+msgstr "Exportovat událost"
+
+#: src/gui/gcal-event-popover.blp:104
+msgid "No event notes"
+msgstr "Žádné poznámky k události"
+
+#: src/gui/gcal-event-popover.blp:170
+msgid "Open Location"
+msgstr "Otevřít umístění"
+
+#: src/gui/gcal-event-popover.c:125 src/gui/gcal-quick-add-popover.c:199
+msgid "January"
+msgstr "ledna"
+
+#: src/gui/gcal-event-popover.c:126 src/gui/gcal-quick-add-popover.c:200
+msgid "February"
+msgstr "února"
+
+#: src/gui/gcal-event-popover.c:127 src/gui/gcal-quick-add-popover.c:201
+msgid "March"
+msgstr "března"
+
+#: src/gui/gcal-event-popover.c:128 src/gui/gcal-quick-add-popover.c:202
+msgid "April"
+msgstr "dubna"
+
+#: src/gui/gcal-event-popover.c:129 src/gui/gcal-quick-add-popover.c:203
+msgid "May"
+msgstr "května"
+
+#: src/gui/gcal-event-popover.c:130 src/gui/gcal-quick-add-popover.c:204
+msgid "June"
+msgstr "června"
+
+#: src/gui/gcal-event-popover.c:131 src/gui/gcal-quick-add-popover.c:205
+msgid "July"
+msgstr "července"
+
+#: src/gui/gcal-event-popover.c:132 src/gui/gcal-quick-add-popover.c:206
+msgid "August"
+msgstr "srpna"
+
+#: src/gui/gcal-event-popover.c:133 src/gui/gcal-quick-add-popover.c:207
+msgid "September"
+msgstr "září"
+
+#: src/gui/gcal-event-popover.c:134 src/gui/gcal-quick-add-popover.c:208
+msgid "October"
+msgstr "října"
+
+#: src/gui/gcal-event-popover.c:135 src/gui/gcal-quick-add-popover.c:209
+msgid "November"
+msgstr "listopadu"
+
+#: src/gui/gcal-event-popover.c:136 src/gui/gcal-quick-add-popover.c:210
+msgid "December"
+msgstr "prosince"
+
+#: src/gui/gcal-event-popover.c:161
+#, c-format
+msgid "Today %s"
+msgstr "Dnes %s"
+
+#: src/gui/gcal-event-popover.c:165
+#, c-format
+msgid "Tomorrow %s"
+msgstr "Zítra %s"
+
+#: src/gui/gcal-event-popover.c:169
+#, c-format
+msgid "Yesterday %s"
+msgstr "Včera %s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, and %3$ is the hour. This format string results in dates
+#. * like "November 21, 22:00".
+#.
+#: src/gui/gcal-event-popover.c:178
+#, c-format
+msgid "%1$s %2$d, %3$s"
+msgstr "%2$d. %1$s %3$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, %3$d is the year, and %4$s is the hour. This format string
+#. * results in dates like "November 21, 2020, 22:00".
+#.
+#: src/gui/gcal-event-popover.c:190
+#, c-format
+msgid "%1$s %2$d, %3$d, %4$s"
+msgstr "%2$d. %1$s %3$d, %4$s"
+
+#: src/gui/gcal-event-popover.c:202 src/gui/gcal-event-popover.c:316
+#: src/gui/views/gcal-agenda-view-day-row.c:77
+msgid "Today"
+msgstr "Dnes"
+
+#: src/gui/gcal-event-popover.c:206 src/gui/gcal-event-popover.c:320
+#: src/gui/gcal-window.c:286 src/gui/views/gcal-agenda-view-day-row.c:79
+msgid "Tomorrow"
+msgstr "Zítra"
+
+#: src/gui/gcal-event-popover.c:210 src/gui/gcal-event-popover.c:324
+#: src/gui/gcal-window.c:255 src/gui/views/gcal-agenda-view-day-row.c:81
+msgid "Yesterday"
+msgstr "Včera"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), and %2$d is
+#. * the day of month. This format string results in dates like
+#. * "November 21".
+#.
+#: src/gui/gcal-event-popover.c:219 src/gui/gcal-event-popover.c:333
+#, c-format
+msgid "%1$s %2$d"
+msgstr "%2$d. %1$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, and %3$d is the year. This format string results in dates
+#. * like "November 21, 2020".
+#.
+#: src/gui/gcal-event-popover.c:230 src/gui/gcal-event-popover.c:344
+#, c-format
+msgid "%1$s %2$d, %3$d"
+msgstr "%2$d. %1$s %3$d"
+
+#.
+#. * Translators: %1$s is the start hour, and %2$s is the end hour, for
+#. * example: "Today, 19:00 – 22:00"
+#.
+#: src/gui/gcal-event-popover.c:264
+#, c-format
+msgid "Today, %1$s – %2$s"
+msgstr "Dnes, %1$s–%2$s"
+
+#.
+#. * Translators: %1$s is the start hour, and %2$s is the end hour, for
+#. * example: "Tomorrow, 19:00 – 22:00"
+#.
+#: src/gui/gcal-event-popover.c:272
+#, c-format
+msgid "Tomorrow, %1$s – %2$s"
+msgstr "Zítra, %1$s–%2$s"
+
+#.
+#. * Translators: %1$s is the start hour, and %2$s is the end hour, for
+#. * example: "Tomorrow, 19:00 – 22:00"
+#.
+#: src/gui/gcal-event-popover.c:280
+#, c-format
+msgid "Yesterday, %1$s – %2$s"
+msgstr "Včera, %1$s–%2$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, %3$s is the start hour, and %4$s is the end hour. This
+#. * format string results in dates like "November 21, 19:00 – 22:00".
+#.
+#: src/gui/gcal-event-popover.c:289
+#, c-format
+msgid "%1$s %2$d, %3$s – %4$s"
+msgstr "%2$d. %1$s, %3$s–%4$s"
+
+#.
+#. * Translators: %1$s is a month name (e.g. November), %2$d is the day
+#. * of month, %3$d is the year, %4$s is the start hour, and %5$s is the
+#. * end hour. This format string results in dates like:
+#. *
+#. * "November 21, 2021, 19:00 – 22:00".
+#.
+#: src/gui/gcal-event-popover.c:304
+#, c-format
+msgid "%1$s %2$d, %3$d, %4$s – %5$s"
+msgstr "%2$d. %1$s %3$d, %4$s–%5$s"
+
+#: src/gui/gcal-event-popover.c:369
+msgid "View Additional Details"
+msgstr "Zobrazit další podrobnosti"
+
+#: src/gui/gcal-event-popover.c:374
+msgid "Edit Additional Details"
+msgstr "Upravit další údaje"
+
+#. Translators: %s is the meeting service name for the event (e.g. "Google Meet")
+#: src/gui/gcal-event-widget.c:384
+#, c-format
+msgid ""
+"\n"
+"\n"
+"On %s"
+msgstr ""
+"\n"
+"\n"
+"na %s"
+
+#. Translators: %s is a URL informed as the location of the event
+#. Translators: %s is the location of the event (e.g. "Downtown, 3rd Avenue")
+#: src/gui/gcal-event-widget.c:398 src/gui/gcal-event-widget.c:404
+#, c-format
+msgid ""
+"\n"
+"\n"
+"At %s"
+msgstr ""
+"\n"
+"\n"
+"v místě %s"
+
+#.
+#. * Translators: %a is the abbreviated day name, %B is the month name
+#. * and %d is the day of the month as a number between 0 and 31.
+#. * More formats can be found on the doc:
+#. * https://docs.gtk.org/glib/method.DateTime.format.html
+#.
+#: src/gui/gcal-event-widget.c:465
+msgid "%a %B %d"
+msgstr "%a, %d. %B"
+
+#: src/gui/gcal-meeting-row.blp:34
+msgid "_Join"
+msgstr "Připo_jit se"
+
+#: src/gui/gcal-meeting-row.c:72
+msgid "Unknown Service"
+msgstr "Neznámá služba"
+
+#: src/gui/gcal-quick-add-popover.blp:86
+msgid "_Edit Details"
+msgstr "_Upravit podrobnosti"
+
+#: src/gui/gcal-quick-add-popover.blp:98
+msgid "_Save Event"
+msgstr "Uložit událo_st"
+
+#: src/gui/gcal-quick-add-popover.c:177
+msgid "from next Monday"
+msgstr "od příštího pondělí"
+
+#: src/gui/gcal-quick-add-popover.c:178
+msgid "from next Tuesday"
+msgstr "od příštího úterý"
+
+#: src/gui/gcal-quick-add-popover.c:179
+msgid "from next Wednesday"
+msgstr "od příští středy"
+
+#: src/gui/gcal-quick-add-popover.c:180
+msgid "from next Thursday"
+msgstr "od příštího čtvrtka"
+
+#: src/gui/gcal-quick-add-popover.c:181
+msgid "from next Friday"
+msgstr "od příštího pátku"
+
+#: src/gui/gcal-quick-add-popover.c:182
+msgid "from next Saturday"
+msgstr "od příští soboty"
+
+#: src/gui/gcal-quick-add-popover.c:183
+msgid "from next Sunday"
+msgstr "od příští neděle"
+
+#: src/gui/gcal-quick-add-popover.c:188
+msgid "to next Monday"
+msgstr "do příštího pondělí"
+
+#: src/gui/gcal-quick-add-popover.c:189
+msgid "to next Tuesday"
+msgstr "do příštího úterý"
+
+#: src/gui/gcal-quick-add-popover.c:190
+msgid "to next Wednesday"
+msgstr "od příští středy"
+
+#: src/gui/gcal-quick-add-popover.c:191
+msgid "to next Thursday"
+msgstr "od příštího čtvrtka"
+
+#: src/gui/gcal-quick-add-popover.c:192
+msgid "to next Friday"
+msgstr "od příštího pátku"
+
+#: src/gui/gcal-quick-add-popover.c:193
+msgid "to next Saturday"
+msgstr "od příští soboty"
+
+#: src/gui/gcal-quick-add-popover.c:194
+msgid "to next Sunday"
+msgstr "od příští neděle"
+
+#: src/gui/gcal-quick-add-popover.c:218
+#, c-format
+msgid "from Today"
+msgstr "ode dneška"
+
+#: src/gui/gcal-quick-add-popover.c:222
+#, c-format
+msgid "from Tomorrow"
+msgstr "od zítřka"
+
+#: src/gui/gcal-quick-add-popover.c:226
+#, c-format
+msgid "from Yesterday"
+msgstr "od včerejška"
+
+#. Translators:
+#. * this is the format string for representing a date consisting of a month
+#. * name and a date of month.
+#.
+#: src/gui/gcal-quick-add-popover.c:244
+#, c-format
+msgid "from %1$s %2$s"
+msgstr "od %2$s. %1$s"
+
+#: src/gui/gcal-quick-add-popover.c:253
+#, c-format
+msgid "to Today"
+msgstr "do dneška"
+
+#: src/gui/gcal-quick-add-popover.c:257
+#, c-format
+msgid "to Tomorrow"
+msgstr "do zítřka"
+
+#: src/gui/gcal-quick-add-popover.c:261
+#, c-format
+msgid "to Yesterday"
+msgstr "do včerejška"
+
+#. Translators:
+#. * this is the format string for representing a date consisting of a month
+#. * name and a date of month.
+#.
+#: src/gui/gcal-quick-add-popover.c:279
+#, c-format
+msgid "to %1$s %2$s"
+msgstr "do %1$s %2$s"
+
+#. Translators: %1$s is the start date (e.g. "from Today") and %2$s is the end date (e.g. "to Tomorrow")
+#: src/gui/gcal-quick-add-popover.c:285
+#, c-format
+msgid "New Event %1$s %2$s"
+msgstr "Nová událost %1$s %2$s"
+
+#: src/gui/gcal-quick-add-popover.c:302
+#, c-format
+msgid "New Event Today"
+msgstr "Nová událost dnes"
+
+#: src/gui/gcal-quick-add-popover.c:306
+#, c-format
+msgid "New Event Tomorrow"
+msgstr "Nová událost zítra"
+
+#: src/gui/gcal-quick-add-popover.c:310
+#, c-format
+msgid "New Event Yesterday"
+msgstr "Nová událost včera"
+
+#: src/gui/gcal-quick-add-popover.c:316
+msgid "New Event next Monday"
+msgstr "Nová událost příští pondělí"
+
+#: src/gui/gcal-quick-add-popover.c:317
+msgid "New Event next Tuesday"
+msgstr "Nová událost příští úterý"
+
+#: src/gui/gcal-quick-add-popover.c:318
+msgid "New Event next Wednesday"
+msgstr "Nová událost příští středu"
+
+#: src/gui/gcal-quick-add-popover.c:319
+msgid "New Event next Thursday"
+msgstr "Nová událost příští čtvrtek"
+
+#: src/gui/gcal-quick-add-popover.c:320
+msgid "New Event next Friday"
+msgstr "Nová událost příští pátek"
+
+#: src/gui/gcal-quick-add-popover.c:321
+msgid "New Event next Saturday"
+msgstr "Nová událost příští sobotu"
+
+#: src/gui/gcal-quick-add-popover.c:322
+msgid "New Event next Sunday"
+msgstr "Nová událost příští neděli"
+
+#. Translators: %d is the numeric day of month
+#: src/gui/gcal-quick-add-popover.c:334
+#, c-format
+msgid "New Event on January %d"
+msgstr "Nová událost %d. ledna"
+
+#: src/gui/gcal-quick-add-popover.c:335
+#, c-format
+msgid "New Event on February %d"
+msgstr "Nová událost %d. února"
+
+#: src/gui/gcal-quick-add-popover.c:336
+#, c-format
+msgid "New Event on March %d"
+msgstr "Nová událost %d. března"
+
+#: src/gui/gcal-quick-add-popover.c:337
+#, c-format
+msgid "New Event on April %d"
+msgstr "Nová událost %d. dubna"
+
+#: src/gui/gcal-quick-add-popover.c:338
+#, c-format
+msgid "New Event on May %d"
+msgstr "Nová událost %d. května"
+
+#: src/gui/gcal-quick-add-popover.c:339
+#, c-format
+msgid "New Event on June %d"
+msgstr "Nová událost %d. června"
+
+#: src/gui/gcal-quick-add-popover.c:340
+#, c-format
+msgid "New Event on July %d"
+msgstr "Nová událost %d. července"
+
+#: src/gui/gcal-quick-add-popover.c:341
+#, c-format
+msgid "New Event on August %d"
+msgstr "Nová událost %d. srpna"
+
+#: src/gui/gcal-quick-add-popover.c:342
+#, c-format
+msgid "New Event on September %d"
+msgstr "Nová událost %d. září"
+
+#: src/gui/gcal-quick-add-popover.c:343
+#, c-format
+msgid "New Event on October %d"
+msgstr "Nová událost %d. října"
+
+#: src/gui/gcal-quick-add-popover.c:344
+#, c-format
+msgid "New Event on November %d"
+msgstr "Nová událost %d. listopadu"
+
+#: src/gui/gcal-quick-add-popover.c:345
+#, c-format
+msgid "New Event on December %d"
+msgstr "Nová událost %d. prosince"
+
+#. Translators: %1$s is the event name, %2$s is the start hour, and %3$s is the end hour.
+#. * To avoid spurious line wrapping, use non-breaking space characters around the en dash.
+#: src/gui/gcal-quick-add-popover.c:415
+#, c-format
+msgid "%1$s, %2$s – %3$s"
+msgstr "%1$s, %2$s – %3$s"
+
+#: src/gui/gcal-search-button.blp:26
+msgid "Search Events"
+msgstr "Hledat události"
+
+#: src/gui/gcal-search-button.blp:44
+msgid "Search events"
+msgstr "hledat události"
+
+#: src/gui/gcal-search-button.c:169
+msgid "No results found"
+msgstr "Nenalezeny žádné výsledky"
+
+#: src/gui/gcal-search-button.c:169
+#, c-format
+msgid "One result found"
+msgid_plural "%u results found"
+msgstr[0] "Nalezen jeden výsledek"
+msgstr[1] "Nalezeny %u výsledky"
+msgstr[2] "Nalezeno %u výsledků"
+
+#: src/gui/gcal-sync-indicator.blp:19
+msgctxt "tooltip"
+msgid "Synchronizing Remote Calendars"
+msgstr "Synchronizují se vzdálené kalendáře"
+
+#: src/gui/gcal-weather-settings.blp:17
+msgid "Show Weather"
+msgstr "Zobrazovat počasí"
+
+#: src/gui/gcal-weather-settings.blp:31
+msgid "Automatic Location"
+msgstr "Místo automaticky"
+
+#: src/gui/gcal-weather-settings.blp:40
+msgid "Search locations"
+msgstr "hledat umístění"
+
+#: src/gui/gcal-window.blp:126
+msgid "Drop Event Files to Import"
+msgstr "Přetáhněte soubory událostí, které chcete importovat"
+
+#: src/gui/gcal-window.blp:178
+msgid "Toggle Sidebar"
+msgstr "Přepnout postranní lištu"
+
+#: src/gui/gcal-window.blp:203
+msgid "Main Menu"
+msgstr "Hlavní nabídka"
+
+#: src/gui/gcal-window.blp:209
+msgctxt "tooltip"
+msgid "Search"
+msgstr "Hledat"
+
+#: src/gui/gcal-window.blp:224
+msgid "_Month"
+msgstr "_Měsíc"
+
+#: src/gui/gcal-window.blp:238
+msgid "_Week"
+msgstr "_Týden"
+
+#: src/gui/gcal-window.blp:251
+msgid "_Agenda"
+msgstr "_Agenda"
+
+#: src/gui/gcal-window.blp:286
+msgid "_Today"
+msgstr "_Dnes"
+
+#: src/gui/gcal-window.blp:290
+msgid "Go to Today"
+msgstr "Přejít na dnešní den"
+
+#: src/gui/gcal-window.blp:306
+msgctxt "tooltip"
+msgid "Add Event"
+msgstr "Přidat událost"
+
+#: src/gui/gcal-window.blp:312
+msgid "Manage Calendars"
+msgstr "Spravovat kalendáře"
+
+#: src/gui/gcal-window.blp:374
+msgid "_Synchronize Calendars"
+msgstr "_Synchronizovat kalendáře"
+
+#: src/gui/gcal-window.blp:381
+msgid "_Date & Time Settings…"
+msgstr "Nastavení _data a času…"
+
+#: src/gui/gcal-window.blp:386
+msgid "_Online Accounts…"
+msgstr "Účty _on-line…"
+
+#: src/gui/gcal-window.blp:401
+msgid "_Keyboard Shortcuts"
+msgstr "_Klávesové zkratky"
+
+#: src/gui/gcal-window.blp:406
+msgid "_About Calendar"
+msgstr "O _aplikaci Kalendář"
+
+#: src/gui/gcal-window.c:251
+msgid "Previous Week"
+msgstr "Předchozí týden"
+
+#: src/gui/gcal-window.c:282
+msgid "Next Week"
+msgstr "Následující týden"
+
+#: src/gui/gcal-window.c:405
+msgid "Week"
+msgstr "Týden"
+
+#: src/gui/gcal-window.c:411
+msgid "Agenda"
+msgstr "Agenda"
+
+#: src/gui/gcal-window.c:1018
+msgid "Another event deleted"
+msgstr "Smazána ještě jedna událost"
+
+#: src/gui/gcal-window.c:1018
+msgid "Event deleted"
+msgstr "Událost smazána"
+
+#: src/gui/gcal-window.c:1083
+msgid "Could not import some files: Not ICS files"
+msgstr "Nelze importovat některé soubory: Nejedná se o soubory ICS"
+
+#: src/gui/gcal-window.c:1088
+#, c-format
+msgid "Could not import “%s”: Not an ICS file"
+msgstr "Nelze importovat „%s“: Nejedná se o soubor ICS"
+
+#: src/gui/importer/gcal-import-dialog.blp:5
+msgid "Import Files…"
+msgstr "Import souborů…"
+
+#: src/gui/importer/gcal-import-dialog.blp:25
+msgid "_Import"
+msgstr "Na_importovat"
+
+#: src/gui/importer/gcal-import-dialog.blp:51
+msgid "C_alendar"
+msgstr "K_alendář"
+
+#: src/gui/importer/gcal-import-dialog.c:328
+#, c-format
+msgid "Import %d event"
+msgid_plural "Import %d events"
+msgstr[0] "Import %d události"
+msgstr[1] "Import %d událostí"
+msgstr[2] "Import %d událostí"
+
+#: src/gui/importer/gcal-import-file-row.c:177
+msgid "Starts"
+msgstr "Začíná"
+
+#: src/gui/importer/gcal-import-file-row.c:178
+msgid "Ends"
+msgstr "Končí"
+
+#: src/gui/importer/gcal-import-file-row.c:179
+msgid "Description"
+msgstr "Popis"
+
+#: src/gui/importer/gcal-importer.c:34
+msgid "No error"
+msgstr "Bez chyb"
+
+#: src/gui/importer/gcal-importer.c:37
+msgid "Bad argument to function"
+msgstr "Chybný argument funkce"
+
+#: src/gui/importer/gcal-importer.c:41
+msgid "Failed to allocate a new object in memory"
+msgstr "Selhala alokace nového objektu v paměti"
+
+#: src/gui/importer/gcal-importer.c:44
+msgid "File is malformed, invalid, or corrupted"
+msgstr "Soubor má chybný formát, je neplatný nebo je poškozený."
+
+#: src/gui/importer/gcal-importer.c:47
+msgid "Failed to parse the calendar contents"
+msgstr "Selhalo zpracování obsahu kalendáře"
+
+#: src/gui/importer/gcal-importer.c:50
+msgid "Failed to read file"
+msgstr "Selhalo čtení souboru"
+
+#: src/gui/importer/gcal-importer.c:57
+msgid "Internal error"
+msgstr "Interní chyba"
+
+#: src/gui/importer/gcal-importer.c:112
+msgid "File is not an iCalendar (.ics) file"
+msgstr "Soubor není iCalendar (.ics)"
+
+#: src/gui/shortcuts-dialog.blp:6
+msgctxt "shortcut dialog"
+msgid "General"
+msgstr "Obecné"
+
+#: src/gui/shortcuts-dialog.blp:9
+msgctxt "shortcut dialog"
+msgid "Open Main Menu"
+msgstr "Otevřít hlavní nabídku"
+
+#: src/gui/shortcuts-dialog.blp:14
+msgctxt "shortcut dialog"
+msgid "Toggle Sidebar"
+msgstr "Přepnout postranní lištu"
+
+#: src/gui/shortcuts-dialog.blp:19
+msgctxt "shortcut dialog"
+msgid "New Event"
+msgstr "Nová událost"
+
+#: src/gui/shortcuts-dialog.blp:24
+msgctxt "shortcut dialog"
+msgid "Manage Calendars"
+msgstr "Spravovat kalendáře"
+
+#: src/gui/shortcuts-dialog.blp:29
+msgctxt "shortcut dialog"
+msgid "Synchronize Calendars"
+msgstr "Synchronizovat kalendáře"
+
+#: src/gui/shortcuts-dialog.blp:34
+msgctxt "shortcut dialog"
+msgid "Close Window"
+msgstr "Zavřít okno"
+
+#: src/gui/shortcuts-dialog.blp:39
+msgctxt "shortcut dialog"
+msgid "Search"
+msgstr "Hledat"
+
+#: src/gui/shortcuts-dialog.blp:44
+msgctxt "shortcut dialog"
+msgid "Show Help"
+msgstr "Zobrazit nápovědu"
+
+#: src/gui/shortcuts-dialog.blp:49
+msgctxt "shortcut dialog"
+msgid "Shortcuts"
+msgstr "Klávesové zkratky"
+
+#: src/gui/shortcuts-dialog.blp:55
+msgctxt "shortcut dialog"
+msgid "Navigation"
+msgstr "Ovládání"
+
+#: src/gui/shortcuts-dialog.blp:58
+msgctxt "shortcut dialog"
+msgid "Go Back"
+msgstr "Přejít zpět"
+
+#: src/gui/shortcuts-dialog.blp:63
+msgctxt "shortcut dialog"
+msgid "Go Forward"
+msgstr "Přejít vpřed"
+
+#: src/gui/shortcuts-dialog.blp:68
+msgctxt "shortcut dialog"
+msgid "Show Today"
+msgstr "Zobrazit dnešní den"
+
+#: src/gui/shortcuts-dialog.blp:73
+msgctxt "shortcut dialog"
+msgid "Next View"
+msgstr "Následující zobrazení"
+
+#: src/gui/shortcuts-dialog.blp:78
+msgctxt "shortcut dialog"
+msgid "Previous View"
+msgstr "Předchozí zobrazení"
+
+#: src/gui/shortcuts-dialog.blp:84
+msgctxt "shortcut dialog"
+msgid "View"
+msgstr "Zobrazení"
+
+#: src/gui/shortcuts-dialog.blp:87
+msgctxt "shortcut dialog"
+msgid "Month View"
+msgstr "Měsíční zobrazení"
+
+#: src/gui/shortcuts-dialog.blp:92
+msgctxt "shortcut dialog"
+msgid "Week View"
+msgstr "Týdenní zobrazení"
+
+#: src/gui/views/gcal-agenda-view-day-row.blp:25
+msgid "No events"
+msgstr "Žádné události"
+
+#.
+#. * Translators: %A is the full day name, %B is the month name
+#. * and %d is the day of the month as a number between 0 and 31.
+#. * More formats can be found on the doc:
+#. * https://docs.gtk.org/glib/method.DateTime.format.html
+#.
+#: src/gui/views/gcal-agenda-view-day-row.c:89
+msgid "%A %B %d"
+msgstr "%A, %d. %B"
+
+#: src/gui/views/gcal-month-popover.blp:58
+msgid "New Event…"
+msgstr "Nová událost…"
+
+#: src/gui/views/gcal-week-header.c:473
+#, c-format
+msgid "Other event"
+msgid_plural "Other %d events"
+msgstr[0] "Další událost"
+msgstr[1] "Další %d události"
+msgstr[2] "Další %d událostí"
+
+#: src/gui/views/gcal-week-view.c:235
+msgid "Hide Additional Events"
+msgstr "Skrýt další události"
+
+#: src/gui/views/gcal-week-view.c:237
+msgid "Show Additional Events"
+msgstr "Zobrazit další události"
+
+#: src/utils/gcal-utils.c:1291
+msgid "Modify Multiple Events?"
+msgstr "Upravit více událostí?"
+
+#: src/utils/gcal-utils.c:1292
+msgid ""
+"The event you are trying to modify is recurring. The changes you have "
+"selected should be applied to:"
+msgstr ""
+"Událost, kterou se snažíte změnit, se opakuje. Mají se změny, které jste "
+"zvolili, použít:"
+
+#: src/utils/gcal-utils.c:1296
+msgid "_Only This Event"
+msgstr "Jen na tut_o událost"
+
+#: src/utils/gcal-utils.c:1302
+msgid "_Subsequent Events"
+msgstr "I na navazující událo_sti"
+
+#: src/utils/gcal-utils.c:1305
+msgid "_All Events"
+msgstr "_Všechny události"
+
+#. Conferencing
+#: src/utils/gcal-utils.c:1408
+msgid "BlueJeans"
+msgstr "BlueJeans"
+
+#: src/utils/gcal-utils.c:1409 src/utils/gcal-utils.c:1410
+msgid "BigBlueButton"
+msgstr "BigBlueButton"
+
+#: src/utils/gcal-utils.c:1411
+msgid "Google Meet"
+msgstr "Google Meet"
+
+#: src/utils/gcal-utils.c:1412 src/utils/gcal-utils.c:1413
+msgid "Jitsi"
+msgstr "Jitsi"
+
+#: src/utils/gcal-utils.c:1414
+msgid "Uber Conference"
+msgstr "Uber Conference"
+
+#: src/utils/gcal-utils.c:1415
+msgid "GNOME Meet"
+msgstr "GNOME Meet"
+
+#: src/utils/gcal-utils.c:1416
+msgid "Microsoft Teams"
+msgstr "Microsoft Teams"
+
+#: src/utils/gcal-utils.c:1417
+msgid "Whereby"
+msgstr "Whereby"
+
+#: src/utils/gcal-utils.c:1418
+msgid "Webex"
+msgstr "Webex"
+
+#: src/utils/gcal-utils.c:1419
+msgid "Zoom"
+msgstr "Zoom"
+
+#. Map
+#: src/utils/gcal-utils.c:1422
+msgid "View Map"
+msgstr "Zobrazit mapu"
+
+#: src/utils/gcal-utils.c:1423
+msgid "OpenStreetMap"
+msgstr "OpenStreetMap"
+
+#: src/utils/gcal-utils.c:1424 src/utils/gcal-utils.c:1425
+msgid "Google Maps"
+msgstr "Mapy Google"
+
+#: src/utils/gcal-utils.c:1426
+msgid "Bing Maps"
+msgstr "Mapy Bing"
+
+#~ msgid "Notes"
+#~ msgstr "Poznámky"
+
+#~ msgid "On-going"
+#~ msgstr "Stále"
+
+#, c-format
+#~ msgid "Previous %1$s"
+#~ msgstr "Předchozí %1$s"
+
+#, c-format
+#~ msgid "Next %1$s"
+#~ msgstr "Další %1$s"
+
+#~ msgid "Toggle Alarm Sound"
+#~ msgstr "Přepnout zvuk budíku"
+
+#~ msgid "Add"
+#~ msgstr "Přidat"
+
+#, c-format
+#~ msgid "%s (this calendar is read-only)"
+#~ msgstr "%s (tento kalendář je pouze ke čtení)"
+
+#~ msgid "Default _Calendar"
+#~ msgstr "Výchozí _kalendář"
+
+#~ msgid "Add new events to this calendar by default"
+#~ msgstr "Standardně přidávat nové události do tohoto kalendáře"
+
+#~ msgid "_Calendars"
+#~ msgstr "_Kalendáře"
+
+#~ msgid "_Manage Calendars…"
+#~ msgstr "_Spravovat kalendáře…"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Open Calendars Menu"
+#~ msgstr "Otevřít nabídku kalendáře"
+
+#~ msgctxt "shortcut window"
+#~ msgid "New Event"
+#~ msgstr "Nová událost"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Manage Calendars"
+#~ msgstr "Spravovat kalendáře"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Search"
+#~ msgstr "Hledat"
+
+#~ msgid "00 AM"
+#~ msgstr "00 dop."
+
+#~ msgid "00:00"
+#~ msgstr "00∶00"
+
+#, c-format
+#~ msgid "Week %d"
+#~ msgstr "%d. týden"
+
+#~ msgid "Done"
+#~ msgstr "Hotovo"
+
+#~ msgid "Select Calendar"
+#~ msgstr "Vyberte kalendář"
+
+#, c-format
+#~ msgid "Last %A"
+#~ msgstr "%A minulý týden"
+
+#, c-format
+#~ msgid "This %A"
+#~ msgstr "%A tento týden"
+
+#~ msgid ""
+#~ "Alternatively, enter the web address of an online calendar you want to "
+#~ "import, or open a supported calendar file."
+#~ msgstr ""
+#~ "Případně zadejte webovou adresu on-line kalendáře, který chcete "
+#~ "importovat, nebo otevřete podporovaný kalendářový soubor."
+
+#~ msgid "Open a File"
+#~ msgstr "Otevření kalendáře"
+
+#~ msgid "Calendar files"
+#~ msgstr "Kalendářové soubory"
+
+#~ msgid "_Add Calendar…"
+#~ msgstr "Přid_at kalendář…"
+
+#~ msgid "No event information"
+#~ msgstr "Bez informací o události"
+
+#~ msgid "Edit…"
+#~ msgstr "Upravit…"
+
+#~ msgid "Unnamed event"
+#~ msgstr "Událost bez názvu"
+
+#~ msgid "Toggles the sound of the alarm"
+#~ msgstr "Zapnout/vypnout zvuk budíku"
+
+#~ msgid "Click to select the calendar"
+#~ msgstr "Kliknutím vyberete kalendář"
+
+#~ msgid "1 hour"
+#~ msgstr "1 hodninu"
+
+#~ msgid "1 day"
+#~ msgstr "1 den"
+
+#~ msgid "2 days"
+#~ msgstr "2 dny"
+
+#~ msgid "3 days"
+#~ msgstr "3 dny"
+
+#~ msgid "1 week"
+#~ msgstr "1 týden"
+
+#~ msgid "No. of occurrences"
+#~ msgstr "Počet opakování"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Manage calendars"
+#~ msgstr "Správa kalendářů"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Synchronize calendars"
+#~ msgstr "Synchronizovat kalendáře"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Go back"
+#~ msgstr "Přejít zpět"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Week view"
+#~ msgstr "Týdenní zobrazení"
+
+#~ msgctxt "shortcut window"
+#~ msgid "Month view"
+#~ msgstr "Měsíční zobrazení"
+
+#~ msgid "Calendar for GNOME"
+#~ msgstr "Kalendář pro GNOME"
+
+#~ msgid ""
+#~ "GNOME Calendar is a simple and beautiful calendar application designed to "
+#~ "perfectly fit the GNOME desktop. By reusing the components which the "
+#~ "GNOME desktop is built on, Calendar nicely integrates with the GNOME "
+#~ "ecosystem."
+#~ msgstr ""
+#~ "Kalendář GNOME je jednoduchá a hezká kalendářová aplikace navržená tak, "
+#~ "aby skvěle zapadla do pracovního prostředí GNOME. Díky využití komponent, "
+#~ "na kterých je pracovní prostředí GNOME vybudováno, Kalendář krásně pasuje "
+#~ "do celého ekosystému."
+
+#~ msgid ""
+#~ "We aim to find the perfect balance between nicely crafted features and "
+#~ "user-centred usability. No excess, nothing missing. You’ll feel "
+#~ "comfortable using Calendar, like you’ve been using it for ages!"
+#~ msgstr ""
+#~ "Cílem vývojářů bylo najít rovnováhu mezi propracovanými funkcemi a "
+#~ "použitelností pro uživatele. Nic nepřebývá, nic neschází. Používání "
+#~ "Kalendáře vám sedne, jako byste jej používali už věky."
+
+#~ msgid "Window position"
+#~ msgstr "Umístění okna"
+
+#~ msgid "Window position (x and y)."
+#~ msgstr "Umístění okna (x a y)."
+
+#~ msgid "Undo"
+#~ msgstr "Zpět"
+
+#~ msgid "Calendar name"
+#~ msgstr "Název kalendáře"
+
+#~ msgid "Cancel"
+#~ msgstr "Zrušit"
+
+#~ msgid "Open"
+#~ msgstr "Otevřít"

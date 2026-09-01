@@ -1,0 +1,82 @@
+include:
+  - project: "GNOME/citemplates"
+    file: "templates/default-rules.yml"
+  - project: 'gnome/citemplates'
+    file: 'flatpak/flatpak_ci_initiative.yml'
+  - component: gitlab.gnome.org/GNOME/citemplates/release-service@master
+    inputs:
+      dist-job-name: "build-flatpak"
+  - component: "gitlab.gnome.org/gnome/citemplates/gnomeos-basic-ci@master"
+    inputs:
+      meson-options: "-Dtracing=true -Dprofile=development"
+      grcov-c-options: '--ignore "tests/*"'
+
+variables:
+  APP_ID: "org.gnome.Calendar.Devel"
+  BUNDLE: "org.gnome.Calendar.Devel.flatpak"
+  FLATPAK_MODULE: "gnome-calendar"
+  GIT_SUBMODULE_STRATEGY: 'normal'
+  MANIFEST_PATH: "build-aux/org.gnome.Calendar.json"
+  RUNTIME_REPO: "https://nightly.gnome.org/gnome-nightly.flatpakrepo"
+
+stages:
+  - check
+  - build
+  - analysis
+  - deploy
+
+style-check-diff:
+  image: fedora:latest
+  stage: check
+  before_script:
+    - dnf install -y clang-tools-extra git python
+  script:
+    - .gitlab-ci/run-style-check-diff.sh
+  allow_failure: true
+
+blueprint-format:
+  image: quay.io/gnome_infrastructure/gnome-build-meta:core-nightly
+  stage: check
+  before_script:
+    - shopt -s globstar
+  script:
+    - blueprint-compiler format **/*.blp
+
+build-flatpak:
+  extends: '.flatpak@x86_64'
+  stage: build
+  before_script: []
+
+build-flatpak-aarch64:
+  extends: '.flatpak@aarch64'
+  stage: build
+  before_script: []
+  when: manual
+
+nightly:
+  extends: '.publish_nightly'
+  needs: ['build-flatpak']
+
+nightly-aarch64:
+  extends: '.publish_nightly'
+  needs: ['build-flatpak-aarch64']
+  when: manual
+
+pages:
+  stage: deploy
+  needs: [ "build-gnomeos-grcov-c", "build-gnomeos-scan-build" ]
+  script:
+    - mkdir -p public
+    - cp .gitlab-ci/landing-page.html public/index.html
+    - mv public_scanbuild/ public/scanbuild
+    - mv public_grcov/cobertura.xml public/
+    - mv public_grcov/html public/coverage
+  artifacts:
+    paths:
+      - public
+    expire_in: 1 day
+  rules:
+    # Restrict to the main branch so not every branch tries to deploy the web site
+    - if: ($CI_DEFAULT_BRANCH == $CI_COMMIT_BRANCH)
+    # Alternatively, restrict it to the GNOME namespace to avoid every fork pushing a set of pages by default
+    # - if: ($CI_DEFAULT_BRANCH == $CI_COMMIT_BRANCH && $CI_PROJECT_NAMESPACE == "GNOME")
