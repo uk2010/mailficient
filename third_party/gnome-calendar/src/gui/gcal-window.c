@@ -1544,6 +1544,15 @@ gcal_window_take_content (GcalWindow *self)
   if (content == NULL)
     return NULL;
 
+  /* Popovers are normally parented to GcalWindow.  Move the quick-add
+   * popover with the content before detaching it so it remains in the same
+   * native window as the embedded calendar and can receive input correctly. */
+  if (self->quick_add_popover != NULL)
+    {
+      gtk_widget_unparent (self->quick_add_popover);
+      gtk_widget_set_parent (self->quick_add_popover, content);
+    }
+
   g_object_ref (content);
   gtk_window_set_child (GTK_WINDOW (self), NULL);
   return content;
