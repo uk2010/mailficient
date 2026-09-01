@@ -306,6 +306,19 @@ menubutton.app-menu-button > button:hover { background: alpha(currentColor, .12)
 .task-row.overdue .task-metadata { color: var(--error-color); }
 .task-row.overdue { box-shadow: inset 3px 0 var(--error-color); }
 .task-row button.flat { min-width: 32px; min-height: 32px; border-radius: 999px; }
+.calendar-view { background: var(--window-bg-color); }
+.calendar-view-header { border-bottom: 1px solid alpha(currentColor, .10); }
+.calendar-event-row { border-bottom: 1px solid alpha(currentColor, .08); }
+.calendar-event-row:hover { background: alpha(currentColor, .05); }
+.calendar-event-row button.flat { min-width: 30px; min-height: 30px; border-radius: 999px; }
+.calendar-event-title { font-weight: 600; }
+.calendar-event-dot, .calendar-day-events { color: var(--accent-bg-color); }
+.calendar-weekday { color: alpha(currentColor, .58); font-size: .86em; font-weight: 600; }
+.calendar-day { min-width: 0; min-height: 52px; padding: 5px 2px; border-radius: 9px; }
+.calendar-day:hover { background: alpha(currentColor, .08); }
+.calendar-day-selected { background: alpha(var(--accent-bg-color), .20); }
+.calendar-day-today .calendar-day-number { color: var(--accent-bg-color); font-weight: 700; }
+.calendar-day-outside { color: alpha(currentColor, .38); }
 .message-row { padding: 10px 12px 10px 9px; border-left: 3px solid transparent; border-bottom: 1px solid alpha(currentColor, .08); }
 .message-row:selected { border-left-color: var(--accent-bg-color); }
 .message-row.unread .sender, .message-row.unread .subject { font-weight: 700; }

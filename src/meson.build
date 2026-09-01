@@ -100,6 +100,7 @@ sources = files(
   'ui/dialog-errors.vala',
   'ui/mail-window.vala',
   'ui/task-view.vala',
+  'ui/calendar-view.vala',
   'ui/toolbar-customization-dialog.vala',
   'ui/startup-error-window.vala',
   'ui/pane-resize-handle.vala',

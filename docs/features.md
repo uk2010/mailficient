@@ -52,7 +52,7 @@ Open **Preferences → Smart Mailboxes** to save searches such as `is:unread has
 
 ## Calendar invitations and meeting drafts
 
-**Calendar** in Favorites opens GNOME Calendar. Mailficient remains mail-focused: Evolution Data Server and the desktop calendar remain the authoritative event store, with no second calendar database or embedded calendar view.
+**Calendar** in Favorites opens Mailficient's embedded agenda and month view. Evolution Data Server remains the authoritative event store shared with GNOME Calendar, with no second calendar database. Changes made in either application are reflected by the other.
 
 An inline `text/calendar` part or `.ics` attachment is parsed within strict input, line, component, and attendee limits. The reader presents its title, local time or all-day range, location, organizer, recurrence, description, cancellation state, and the account's current participation. If the organizer address differs from the email sender, a warning appears before any response action.
 
@@ -66,7 +66,7 @@ Snooze removes selected mail from ordinary views until the chosen time and keeps
 
 **Today**, **Events**, and **Calendar** are reorderable direct Favorites even before an email account is added. Today shows occurrences from all enabled GNOME calendars for the current local day. Events shows upcoming occurrences, grouped by date. Recurring masters are expanded by Evolution Data Server, so both views mirror the instances GNOME Calendar displays.
 
-Use **New Event** to choose a title, date, time or all-day range, location, notes, and optional daily, weekly, monthly, or yearly recurrence. New events are written directly to the writable default GNOME calendar. Edits and deletes go back to the source calendar; recurring-series edits open GNOME Calendar when its richer occurrence controls are needed. Select an email and choose **More → Create Event from Message…** to prefill the same calendar-backed editor. Mailficient does not store an event or task copy in its mail database.
+Use **New Event** to choose a title, date, time or all-day range, location, notes, and optional daily, weekly, monthly, or yearly recurrence. New events are written directly to the writable default GNOME calendar. Edits and deletes go back to the source calendar; recurring-series edits can still open GNOME Calendar when its richer occurrence controls are needed. Select an email and choose **More → Create Event from Message…** to prefill the same calendar-backed editor. Mailficient does not store an event or task copy in its mail database.
 
 Task data and reminder-delivery state are durable in Mailficient's local database. Reminders are checked on startup and once per minute while Mailficient is running; selecting one opens the exact task. The service exposes a provider-sync boundary, but this build does not claim EDS/CalDAV task synchronization: no task-capable libecal provider or authorized CalDAV/GOA account is currently wired. Local create, edit, recurrence, reminder, and email-link behavior do not depend on external credentials.
 

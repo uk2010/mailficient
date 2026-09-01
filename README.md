@@ -127,8 +127,10 @@ desktop calendar and likewise never sends an invitation automatically. The
 than a nested sidebar group. Today and Events query enabled Evolution Data
 Server calendars, expand recurring occurrences, and write changes directly to
 the selected event's calendar; new events go to the writable default calendar.
-**Calendar** opens GNOME Calendar directly. No event copy is stored in the mail
-database. GNOME Calendar must be installed
+**Calendar** opens an embedded agenda and month calendar. It reads and writes
+the same Evolution Data Server store used by GNOME Calendar, so either app
+sees the same events immediately. No event copy is stored in the mail
+database. GNOME Calendar's data service must be installed
 separately for Flatpak and Snap because their sandboxes cannot install another
 desktop application as a runtime dependency. The Flatpak manifest enables the
 EDS integration and grants access only to its calendar service.

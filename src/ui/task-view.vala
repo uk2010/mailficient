@@ -5,6 +5,7 @@ namespace Mailficient {
 public class TaskView : Gtk.Box {
     public signal void toast_requested (string message);
     public signal void operation_failed (Error error);
+    public signal void event_changed ();
 
     private CalendarIntegrationService service;
     private TaskViewMode mode = TaskViewMode.TODAY;
@@ -95,6 +96,16 @@ public class TaskView : Gtk.Box {
     }
 
     public void new_task () { edit_event.begin (null, null); }
+
+    // CalendarView delegates its editor actions here so Today, Events, and
+    // the embedded Calendar page share one validated EDS-backed editor.
+    public void edit_existing_event (CalendarEventOccurrence event) {
+        edit_event.begin (event, null);
+    }
+
+    public void delete_existing_event (CalendarEventOccurrence event) {
+        confirm_delete.begin (event);
+    }
 
     public void create_from_message (Message message) {
         edit_event.begin (null, message);
@@ -420,6 +431,7 @@ public class TaskView : Gtk.Box {
             toast_requested (event == null ?
                 "Event saved to GNOME Calendar" :
                 "Event updated in GNOME Calendar");
+            event_changed ();
             reload ();
         } catch (Error error) { operation_failed (error); }
     }
@@ -441,6 +453,7 @@ public class TaskView : Gtk.Box {
             toast_requested (event.recurring ?
                 "Event series deleted from GNOME Calendar" :
                 "Event deleted from GNOME Calendar");
+            event_changed ();
             reload ();
         } catch (Error error) { operation_failed (error); }
     }

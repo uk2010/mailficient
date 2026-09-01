@@ -29,6 +29,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private MessageList message_list;
     private ReadingPane reader;
     private TaskView task_view;
+    private CalendarView calendar_view;
     private Gtk.SearchEntry search = new Gtk.SearchEntry ();
     private Gtk.SearchEntry task_search = new Gtk.SearchEntry ();
     private CacheDatabase cache;
@@ -293,6 +294,7 @@ public class MailWindow : Adw.ApplicationWindow {
         });
         message_list.get_mail_requested.connect (() => synchronize.begin ());
         task_view = new TaskView (calendar_service);
+        calendar_view = new CalendarView (calendar_service);
         var toolbar = new Adw.ToolbarView ();
         toolbar.add_css_class ("mail-shell-toolbar-view");
         toolbar.overflow = Gtk.Overflow.HIDDEN;
@@ -305,8 +307,17 @@ public class MailWindow : Adw.ApplicationWindow {
             DebugTrace.log ("navigation", "mailbox_selected target=%s previous=%s".printf (
                 mailbox.id, previous_mailbox_id));
             if (mailbox.id == CachedMailRepository.GNOME_CALENDAR_ID) {
-                open_gnome_calendar (previous_mailbox_id);
-                DebugTrace.duration ("navigation", "open_gnome_calendar_complete", selection_started);
+                active_mailbox = mailbox;
+                last_selected_mailbox_id = mailbox.id;
+                selected_message = null;
+                reader.suspend ();
+                workspace_stack.visible_child_name = "calendar";
+                toolbar_stack.visible_child_name = "tasks";
+                calendar_view.reload ();
+                sort_button.sensitive = false;
+                message_back.visible = false;
+                if (mailbox_split.collapsed) mailbox_split.show_sidebar = false;
+                DebugTrace.duration ("navigation", "calendar_view_complete", selection_started);
                 return;
             }
             active_mailbox = mailbox;
@@ -451,9 +462,16 @@ public class MailWindow : Adw.ApplicationWindow {
         task_view.toast_requested.connect ((message) =>
             toast_overlay.add_toast (new Adw.Toast (message)));
         task_view.operation_failed.connect ((error) => show_operation_error (error));
+        task_view.event_changed.connect (() => calendar_view.reload ());
+        calendar_view.create_requested.connect (() => task_view.new_task ());
+        calendar_view.edit_requested.connect ((event) => task_view.edit_existing_event (event));
+        calendar_view.delete_requested.connect ((event) => task_view.delete_existing_event (event));
+        calendar_view.operation_failed.connect ((error) => show_operation_error (error));
         notify["is-active"].connect (() => {
             if (is_active && active_mailbox != null &&
                 is_task_mailbox (active_mailbox.id)) task_view.reload ();
+            if (is_active && active_mailbox != null &&
+                is_calendar_mailbox (active_mailbox.id)) calendar_view.reload ();
         });
         outbound_service.undo_send_available.connect ((draft_id, account_id, undo_until) =>
             show_undo_send (draft_id, account_id, undo_until));
@@ -554,6 +572,7 @@ public class MailWindow : Adw.ApplicationWindow {
         workspace_stack.transition_type = Gtk.StackTransitionType.NONE;
         workspace_stack.add_named (message_split, "mail");
         workspace_stack.add_named (task_view, "tasks");
+        workspace_stack.add_named (calendar_view, "calendar");
         workspace_stack.visible_child_name = "mail";
         mailbox_split.content = workspace_stack;
         workspace_overlay.add_css_class ("mail-workspace-overlay");
@@ -1453,13 +1472,15 @@ public class MailWindow : Adw.ApplicationWindow {
     }
 
     private void set_active_search_text (string value) {
-        if (active_mailbox != null && is_task_mailbox (active_mailbox.id))
+        if (active_mailbox != null && (is_task_mailbox (active_mailbox.id) ||
+            is_calendar_mailbox (active_mailbox.id)))
             task_search.text = value;
         else search.text = value;
     }
 
     private async void search_server () {
-        if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) return;
+        if (active_mailbox != null && (is_task_mailbox (active_mailbox.id) ||
+            is_calendar_mailbox (active_mailbox.id))) return;
         string requested = search.text.strip (); if (requested == "") return;
         if (!search_service.server_search_available) {
             toast_overlay.add_toast (new Adw.Toast ("Server search is unavailable in this build")); return;
@@ -1630,7 +1651,12 @@ public class MailWindow : Adw.ApplicationWindow {
         task_search.valign = Gtk.Align.CENTER;
         task_search.add_css_class ("apple-toolbar-search");
         Accessibility.label (task_search, "Search events");
-        task_search.search_changed.connect (() => task_view.set_query (task_search.text));
+        task_search.search_changed.connect (() => {
+            if (active_mailbox != null && is_calendar_mailbox (active_mailbox.id))
+                calendar_view.set_query (task_search.text);
+            else
+                task_view.set_query (task_search.text);
+        });
 
         var sort_menu = new Menu (); sort_menu.append ("Newest First", "win.sort::newest");
         sort_menu.append ("Oldest First", "win.sort::oldest"); sort_menu.append ("Sender", "win.sort::sender");
@@ -2902,8 +2928,7 @@ public class MailWindow : Adw.ApplicationWindow {
         } else {
             set_message_content_visible (true);
         }
-        toolbar_stack.visible_child_name =
-            workspace_stack.visible_child_name == "tasks" ? "tasks" : "mail";
+        toolbar_stack.visible_child_name = workspace_uses_task_toolbar () ? "tasks" : "mail";
 
         // This method already runs from the deferred close source, outside
         // the Done button and GtkDropDown dispatch. Finish the tiny in-memory
@@ -3060,6 +3085,7 @@ public class MailWindow : Adw.ApplicationWindow {
         task_search.set_width_chars (-1);
         task_search.set_max_width_chars (-1);
         task_view.set_compact_layout (false);
+        calendar_view.set_compact_layout (false);
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
         set_message_content_visible (true);
         message_back.visible = false;
@@ -3078,6 +3104,7 @@ public class MailWindow : Adw.ApplicationWindow {
         task_search.set_width_chars (-1);
         task_search.set_max_width_chars (-1);
         task_view.set_compact_layout (false);
+        calendar_view.set_compact_layout (false);
         mailbox_split.collapsed = false; mailbox_split.show_sidebar = settings.sidebar_visible;
         set_message_content_visible (true);
         message_back.visible = false;
@@ -3100,6 +3127,7 @@ public class MailWindow : Adw.ApplicationWindow {
         task_search.set_width_chars (-1);
         task_search.set_max_width_chars (-1);
         task_view.set_compact_layout (false);
+        calendar_view.set_compact_layout (false);
         compact_toolbar = true;
         mailbox_split.collapsed = true;
         mailbox_split.show_sidebar = false;
@@ -3118,6 +3146,7 @@ public class MailWindow : Adw.ApplicationWindow {
         task_search.set_width_chars (6);
         task_search.set_max_width_chars (6);
         task_view.set_compact_layout (true);
+        calendar_view.set_compact_layout (true);
         compact_toolbar = true;
         mailbox_split.collapsed = true;
         mailbox_split.show_sidebar = false;
@@ -3168,7 +3197,8 @@ public class MailWindow : Adw.ApplicationWindow {
         var about = new SimpleAction ("about", null); about.activate.connect (() => show_about ()); add_action (about);
         var focus_search = new SimpleAction ("search", null);
         focus_search.activate.connect (() => {
-            if (active_mailbox != null && is_task_mailbox (active_mailbox.id))
+            if (active_mailbox != null && (is_task_mailbox (active_mailbox.id) ||
+                is_calendar_mailbox (active_mailbox.id)))
                 task_search.grab_focus ();
             else search.grab_focus ();
         });
@@ -3921,7 +3951,8 @@ public class MailWindow : Adw.ApplicationWindow {
             string selected_id = selected_message == null ? "" : selected_message.id;
             DebugTrace.log ("refresh", "reload sidebar and message list selected=%s".printf (selected_id));
             if (!skip_sidebar_refresh) sidebar.refresh_counts ();
-            if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) {
+            if (active_mailbox != null && (is_task_mailbox (active_mailbox.id) ||
+                is_calendar_mailbox (active_mailbox.id))) {
                 // Today/Events has no visible mail widgets. Defer the expensive
                 // message model rebuild until show_mailbox() makes mail visible
                 // again; counts remain current in the shared sidebar.
@@ -4013,6 +4044,15 @@ public class MailWindow : Adw.ApplicationWindow {
             id == CachedMailRepository.TASK_PLANNED_ID;
     }
 
+    private static bool is_calendar_mailbox (string id) {
+        return id == CachedMailRepository.GNOME_CALENDAR_ID;
+    }
+
+    private bool workspace_uses_task_toolbar () {
+        return workspace_stack.visible_child_name == "tasks" ||
+            workspace_stack.visible_child_name == "calendar";
+    }
+
     private void qa_assert_favorite_switch_bounds (int transitions) {
         DebugTrace.log ("qa", "favorite_switch_live transitions=%d rows=%d models=%d reader_actions=%d".printf (
             transitions, MessageRow.qa_live_instances,
@@ -4073,23 +4113,6 @@ public class MailWindow : Adw.ApplicationWindow {
         foreach (var mailbox in mailboxes)
             if (mailbox.id != CachedMailRepository.GNOME_CALENDAR_ID &&
                 sidebar.select_mailbox (mailbox.id)) return;
-    }
-
-    private void open_gnome_calendar (string previous_mailbox_id) {
-        try {
-            // Use the same calendar backend that stores meeting events. This
-            // keeps the Calendar favorite and event creation on one EDS/GNOME
-            // Calendar integration boundary.
-            calendar_service.open_calendar ();
-        } catch (Error error) {
-            toast_overlay.add_toast (new Adw.Toast (error.message));
-        }
-
-        // The launcher is an action, not a mailbox. Restore the previous mail
-        // selection so it is never persisted or reopened during a refresh.
-        if (previous_mailbox_id != "" && previous_mailbox_id != CachedMailRepository.GNOME_CALENDAR_ID &&
-            sidebar.select_mailbox (previous_mailbox_id)) return;
-        sidebar.clear_selection ();
     }
 
     private void show_reader_empty_state () {
@@ -4367,7 +4390,8 @@ public class MailWindow : Adw.ApplicationWindow {
     private Gee.List<Message> action_messages () {
         // A task workspace deliberately retains the hidden mail selection so
         // returning to mail is instant. It must not keep mail actions enabled.
-        if (active_mailbox != null && is_task_mailbox (active_mailbox.id))
+        if (active_mailbox != null && (is_task_mailbox (active_mailbox.id) ||
+            is_calendar_mailbox (active_mailbox.id)))
             return new Gee.ArrayList<Message> ();
         var selected = message_list.selected_messages ();
         if (selected.size > 0) return selected;
