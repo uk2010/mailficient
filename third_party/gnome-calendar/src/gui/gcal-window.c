@@ -827,13 +827,25 @@ show_new_event_widget (GcalView   *view,
   graphene_point_t p;
   GdkRectangle rect;
   GtkRoot *root;
+  GtkWidget *coordinate_target;
 
   GCAL_ENTRY;
 
   g_assert (range != NULL);
 
-  root = gtk_widget_get_root (GTK_WIDGET (window));
-  g_set_weak_pointer (&window->last_focused_widget, gtk_root_get_focus (root));
+  /*
+   * When Calendar is embedded, the view is reparented into Mailficient's
+   * window while the internal GcalWindow remains hidden.  Coordinate
+   * conversion must therefore use the view's actual root, not the detached
+   * GcalWindow, otherwise GTK quite correctly reports that the widgets do
+   * not share a hierarchy.
+   */
+  root = gtk_widget_get_root (GTK_WIDGET (view));
+  coordinate_target = GTK_WIDGET (root);
+  if (coordinate_target == NULL)
+    coordinate_target = GTK_WIDGET (window);
+  if (root != NULL)
+    g_set_weak_pointer (&window->last_focused_widget, gtk_root_get_focus (root));
 
   /* 1st and 2nd steps */
   set_new_event_mode (window, TRUE);
@@ -856,12 +868,15 @@ show_new_event_widget (GcalView   *view,
                                     window->event_creation_data->range);
 
   /* Position and place the quick add popover */
-  if (!gtk_widget_compute_point (window->views[window->active_view],
-                                 GTK_WIDGET (window),
+  if (!gtk_widget_compute_point (GTK_WIDGET (view),
+                                 coordinate_target,
                                  &GRAPHENE_POINT_INIT (x, y),
                                  &p))
     {
-      g_assert_not_reached ();
+      /* The event still has a valid range; use the origin of the active
+       * embedded surface as a safe fallback for the quick-add popover. */
+      p.x = 0;
+      p.y = 0;
     }
 
   /* Place popover over the given (x,y) position */
