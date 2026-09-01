@@ -47,6 +47,8 @@ struct _GcalApplication
   GcalContext        *context;
 };
 
+static GcalApplication *default_application;
+
 G_DEFINE_TYPE (GcalApplication, gcal_application, ADW_TYPE_APPLICATION);
 
 static gboolean show_version = FALSE;
@@ -270,6 +272,9 @@ static void
 gcal_application_finalize (GObject *object)
 {
  GcalApplication *self = GCAL_APPLICATION (object);
+
+  if (default_application == self)
+    default_application = NULL;
 
   GCAL_ENTRY;
 
@@ -630,11 +635,24 @@ gcal_application_init (GcalApplication *self)
 GcalApplication*
 gcal_application_new (void)
 {
-  return g_object_new (gcal_application_get_type (),
+  GcalApplication *application;
+
+  application = g_object_new (gcal_application_get_type (),
                        "resource-base-path", "/org/gnome/calendar",
                        "application-id", APPLICATION_ID,
                        "flags", G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_HANDLES_OPEN,
                        NULL);
+
+  if (default_application == NULL)
+    default_application = application;
+
+  return application;
+}
+
+GcalApplication*
+gcal_application_get_default (void)
+{
+  return default_application;
 }
 
 /**

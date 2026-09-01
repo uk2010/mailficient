@@ -32,7 +32,7 @@
 #define MINUTES_PER_DAY 1440
 #define MAX_MINUTES     (N_WEEKDAYS * MINUTES_PER_DAY)
 
-#define GCAL_DEFAULT_APPLICATION GCAL_APPLICATION (g_application_get_default ())
+#define GCAL_DEFAULT_APPLICATION gcal_application_get_default ()
 
 #define gcal_clear_timeout(pp) { if (pp && *pp) { g_source_remove (*pp); *pp = 0; } }
 #define gcal_clear_signal_handler(pp,instance) { if (pp && *pp > 0) { g_signal_handler_disconnect (instance, *pp); *pp = 0; } }

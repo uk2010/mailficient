@@ -7,7 +7,7 @@ template $GcalAgendaViewDayRow: Adw.Bin {
 
     Label title_label {
       xalign: 0.0;
-      label: bind $datetime_to_string_func(template.day as <$GcalAgendaViewDay>.date);
+      label: bind $datetime_to_string_func(template.day as <$GcalAgendaViewDay>.date) as <string>;
 
       styles [
         "caption-heading",

@@ -30,6 +30,7 @@ public class MailWindow : Adw.ApplicationWindow {
     private ReadingPane reader;
     private TaskView task_view;
     private CalendarView calendar_view;
+    private GnomeCalendarSurface? gnome_calendar_surface;
     private Gtk.SearchEntry search = new Gtk.SearchEntry ();
     private Gtk.SearchEntry task_search = new Gtk.SearchEntry ();
     private CacheDatabase cache;
@@ -295,6 +296,7 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.get_mail_requested.connect (() => synchronize.begin ());
         task_view = new TaskView (calendar_service);
         calendar_view = new CalendarView (calendar_service);
+        gnome_calendar_surface = new GnomeCalendarSurface ();
         var toolbar = new Adw.ToolbarView ();
         toolbar.add_css_class ("mail-shell-toolbar-view");
         toolbar.overflow = Gtk.Overflow.HIDDEN;
@@ -572,7 +574,7 @@ public class MailWindow : Adw.ApplicationWindow {
         workspace_stack.transition_type = Gtk.StackTransitionType.NONE;
         workspace_stack.add_named (message_split, "mail");
         workspace_stack.add_named (task_view, "tasks");
-        workspace_stack.add_named (calendar_view, "calendar");
+        workspace_stack.add_named (gnome_calendar_surface, "calendar");
         workspace_stack.visible_child_name = "mail";
         mailbox_split.content = workspace_stack;
         workspace_overlay.add_css_class ("mail-workspace-overlay");

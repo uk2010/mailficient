@@ -82,6 +82,7 @@ sources = files(
   'services/account-provisioning-service.vala',
   'services/mobileconfig-importer.vala',
   'services/mobileconfig-decoder.c',
+  'services/gnome-calendar-embedded.c',
   'security/html-sanitizer.vala',
   'security/html-content-policy.vala',
   'security/attachment-safety.vala',
@@ -101,6 +102,7 @@ sources = files(
   'ui/mail-window.vala',
   'ui/task-view.vala',
   'ui/calendar-view.vala',
+  'ui/gnome-calendar-surface.vala',
   'ui/toolbar-customization-dialog.vala',
   'ui/startup-error-window.vala',
   'ui/pane-resize-handle.vala',
@@ -175,7 +177,8 @@ if calendar.found()
   sources += files('services/eds-calendar-backend.vala')
   deps += calendar
   calendar_vala_args = ['--define=HAVE_CALENDAR']
-  calendar_c_args = ['-DLIBICAL_GLIB_UNSTABLE_API=1']
+  calendar_c_args = ['-DLIBICAL_GLIB_UNSTABLE_API=1',
+                     '-I' + meson.project_source_root() / 'flatpak-build-x86/files/include']
 else
   calendar_vala_args = []
   calendar_c_args = []
@@ -183,7 +186,8 @@ endif
 
 executable('mailficient', sources, mailficient_resources,
   dependencies: deps,
-  vala_args: ['--target-glib=2.76'] + camel_vala_args + addressbook_vala_args + calendar_vala_args,
-  c_args: calendar_c_args,
+  link_args: gcal_link_args,
+  vala_args: ['--target-glib=2.76', '--vapidir=' + meson.project_source_root() / '.vapi'] + camel_vala_args + addressbook_vala_args + calendar_vala_args,
+  c_args: calendar_c_args + (gcal_archive != '' ? ['-DMAILFICIENT_EMBEDDED_GCAL=1'] : []),
   install: true,
 )

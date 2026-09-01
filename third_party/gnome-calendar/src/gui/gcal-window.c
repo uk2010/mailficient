@@ -1518,6 +1518,22 @@ gcal_window_new_with_date (GcalApplication *app,
                        NULL);
 }
 
+GtkWidget*
+gcal_window_take_content (GcalWindow *self)
+{
+  GtkWidget *content;
+
+  g_return_val_if_fail (GCAL_IS_WINDOW (self), NULL);
+
+  content = gtk_window_get_child (GTK_WINDOW (self));
+  if (content == NULL)
+    return NULL;
+
+  g_object_ref (content);
+  gtk_window_set_child (GTK_WINDOW (self), NULL);
+  return content;
+}
+
 /**
  * gcal_window_set_search_query:
  * @self: a #GcalWindow

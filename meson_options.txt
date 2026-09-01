@@ -3,3 +3,5 @@ option('webkit', type: 'feature', value: 'auto', description: 'Build WebKitGTK H
 option('secret', type: 'feature', value: 'auto', description: 'Build libsecret credential storage')
 option('addressbook', type: 'feature', value: 'auto', description: 'Use GNOME Evolution Data Server address books')
 option('calendar', type: 'feature', value: 'auto', description: 'Use Evolution Data Server calendars for invitations and meeting creation')
+option('gcal-archive', type: 'string', value: '', description: 'Path to the built GNOME Calendar static library')
+option('gcal-libdir', type: 'string', value: '', description: 'Library directory containing GNOME Calendar runtime dependencies')

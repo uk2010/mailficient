@@ -13,7 +13,7 @@ template $GcalEventWidget: Widget {
   DragSource drag_source {
     propagation-phase: bind $read_only_to_propagation_phase_cb(
       template.event as <$GcalEvent>.calendar as <$GcalCalendar>.read-only
-      );
+      ) as <Gtk.PropagationPhase>;
     prepare => $on_drag_source_prepare_cb(template) not-swapped;
     begin => $on_drag_source_begin_cb(template) not-swapped;
   }

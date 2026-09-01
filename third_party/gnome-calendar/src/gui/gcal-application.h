@@ -32,6 +32,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (GcalApplication, gcal_application, GCAL, APPLICATION, AdwApplication)
 
 GcalApplication*     gcal_application_new                        (void);
+GcalApplication*     gcal_application_get_default                (void);
 
 GcalContext*         gcal_application_get_context                (GcalApplication    *self);
 

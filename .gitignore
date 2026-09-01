@@ -19,3 +19,12 @@ release-app*/
 *.snap
 __pycache__/
 *.py[cod]
+.gcal-debs/
+.gcal-pc/
+.gcal-runtime/
+.gcal-schemas/
+.gcal-schemas.compiled
+.gcal50-src/
+.gcal50-build/
+.vapi/
+libgcal-private-normal.a

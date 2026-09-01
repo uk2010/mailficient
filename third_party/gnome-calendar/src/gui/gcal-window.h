@@ -32,6 +32,8 @@ G_DECLARE_FINAL_TYPE (GcalWindow, gcal_window, GCAL, WINDOW, AdwApplicationWindo
 GtkWidget*           gcal_window_new_with_date                  (GcalApplication     *app,
                                                                  GDateTime           *date);
 
+GtkWidget*           gcal_window_take_content                    (GcalWindow          *self);
+
 void                 gcal_window_set_search_query               (GcalWindow          *self,
                                                                 const gchar          *query);
 

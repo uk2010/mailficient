@@ -156,7 +156,11 @@ add_project_arguments(common_flags, language: 'c')
 libical_dep = dependency('libical', version: '>= 1.0')
 config_h.set('HAVE_LIBICAL', libical_dep.found())
 
-assert(cc.has_function('icaltime_days_in_year', dependencies: libical_dep),
+# Newer libical exposes this helper through a header macro, which makes
+# Meson's generic has_function() probe reject an otherwise usable library.
+# Probe the declaration instead; the link test performed by the compiler
+# still catches genuinely missing implementations.
+assert(cc.has_header_symbol('libical/ical.h', 'icaltime_days_in_year', dependencies: libical_dep),
        'Error: icaltime_days_in_year() not found in libical!. Upgrade your libical library.')
 
 gsettings_desktop_schemas_dep = dependency('gsettings-desktop-schemas', version: '>= 3.21.2')

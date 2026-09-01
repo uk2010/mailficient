@@ -40,7 +40,7 @@ template $GcalNotesSection: $GcalEventEditorSection {
           label: _("Notes");
           xalign: 0.0;
           yalign: 0.0;
-          visible: bind $empty_string(notes_text.buffer.text);
+          visible: bind $empty_string(notes_text.buffer.text) as <bool>;
           margin-top: 12;
           margin-bottom: 12;
 
