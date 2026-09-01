@@ -65,6 +65,64 @@ private void test_optional_response_flags () {
         ECal.OperationFlags.DISABLE_ITIP_MESSAGE) != 0);
 }
 
+private void test_event_component_preserves_calendar_fields () {
+    var start = new DateTime.local (2026, 9, 10, 13, 30, 0);
+    var draft = new CalendarEventDraft (" Team sync ", "Agenda", "Room 4",
+        start, start.add_minutes (45), false,
+        CalendarEventRecurrence.WEEKLY, 2);
+    var component = EdsCalendarBackend.event_component (draft,
+        "mailficient-test@example.net");
+    assert (component.get_uid () == "mailficient-test@example.net");
+    assert (component.get_summary () == "Team sync");
+    assert (component.get_description () == "Agenda");
+    assert (component.get_location () == "Room 4");
+    assert (!component.get_dtstart ().is_date ());
+    assert (component.get_dtstart ().as_timet () == (time_t) start.to_unix ());
+    assert (component.get_dtend ().as_timet () ==
+        (time_t) start.add_minutes (45).to_unix ());
+    assert (component.count_properties (ICal.PropertyKind.RRULE_PROPERTY) == 1);
+}
+
+private void test_all_day_event_uses_exclusive_date_end () {
+    var start = new DateTime.local (2026, 9, 12, 0, 0, 0);
+    var draft = new CalendarEventDraft ("All day", "", "", start,
+        start.add_days (1), true);
+    var component = EdsCalendarBackend.event_component (draft, "all-day@example.net");
+    assert (component.get_dtstart ().is_date ());
+    assert (component.get_dtstart ().get_day () == 12);
+    assert (component.get_dtend ().is_date ());
+    assert (component.get_dtend ().get_day () == 13);
+}
+
+private ICal.Component recurring_component (string rule) {
+    var component = new ICal.Component (ICal.ComponentKind.VEVENT_COMPONENT);
+    component.set_uid ("recurrence-bound@example.net");
+    component.set_dtstart (new ICal.Time.from_timet_with_zone (
+        (time_t) 1789045200, 0, ICal.Timezone.get_utc_timezone ()));
+    component.add_property (new ICal.Property.rrule (
+        new ICal.Recurrence.from_string (rule)));
+    return component;
+}
+
+private void test_recurrence_expansion_is_bounded () {
+    int64 estimate;
+    int64 two_years = 2 * 366 * 86400;
+    assert (EdsCalendarBackend.recurrence_expansion_is_bounded (
+        recurring_component ("FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR"),
+        two_years, EdsCalendarBackend.MAX_RECURRENCE_EXPANSION,
+        out estimate));
+    assert (estimate > 0 && estimate <
+        EdsCalendarBackend.MAX_RECURRENCE_EXPANSION);
+
+    assert (!EdsCalendarBackend.recurrence_expansion_is_bounded (
+        recurring_component ("FREQ=SECONDLY"), two_years,
+        EdsCalendarBackend.MAX_RECURRENCE_EXPANSION, out estimate));
+    assert (EdsCalendarBackend.recurrence_expansion_is_bounded (
+        recurring_component ("FREQ=HOURLY;COUNT=24"), two_years,
+        EdsCalendarBackend.MAX_RECURRENCE_EXPANSION, out estimate));
+    assert (estimate <= 25);
+}
+
 int main (string[] args) {
     Test.init (ref args);
     Test.add_func ("/calendar/eds/exact-attendee-transform",
@@ -73,5 +131,11 @@ int main (string[] args) {
         test_response_rejects_unlisted_identity);
     Test.add_func ("/calendar/eds/optional-response-flags",
         test_optional_response_flags);
+    Test.add_func ("/calendar/eds/event-component-fields",
+        test_event_component_preserves_calendar_fields);
+    Test.add_func ("/calendar/eds/all-day-exclusive-end",
+        test_all_day_event_uses_exclusive_date_end);
+    Test.add_func ("/calendar/eds/recurrence-expansion-bound",
+        test_recurrence_expansion_is_bounded);
     return Test.run ();
 }

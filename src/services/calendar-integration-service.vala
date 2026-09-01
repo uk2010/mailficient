@@ -6,6 +6,7 @@ public enum CalendarCreateDisposition {
 
 public interface CalendarBackend : Object {
     public abstract bool can_respond_directly { get; }
+    public abstract bool can_manage_events { get; }
     public abstract async void respond (CalendarInvitation invitation,
                                         string identity_email,
                                         CalendarParticipation participation,
@@ -13,6 +14,17 @@ public interface CalendarBackend : Object {
                                         Cancellable? cancellable = null) throws Error;
     public abstract async CalendarCreateDisposition create_meeting (
         CalendarMeetingDraft meeting, Cancellable? cancellable = null) throws Error;
+    public abstract async Gee.ArrayList<CalendarEventOccurrence> list_events (
+        DateTime range_start, DateTime range_end,
+        Cancellable? cancellable = null) throws Error;
+    public abstract async void create_event (
+        CalendarEventDraft draft, Cancellable? cancellable = null) throws Error;
+    public abstract async void update_event (
+        CalendarEventOccurrence event, CalendarEventDraft draft,
+        Cancellable? cancellable = null) throws Error;
+    public abstract async void delete_event (
+        CalendarEventOccurrence event,
+        Cancellable? cancellable = null) throws Error;
     public abstract void launch_calendar () throws Error;
 }
 
@@ -22,6 +34,7 @@ public interface CalendarBackend : Object {
 // is unavailable.
 public class DesktopCalendarBackend : Object, CalendarBackend {
     public bool can_respond_directly { get { return false; } }
+    public bool can_manage_events { get { return false; } }
 
     public async void respond (CalendarInvitation invitation, string identity_email,
                                CalendarParticipation participation, bool send_response,
@@ -45,6 +58,33 @@ public class DesktopCalendarBackend : Object, CalendarBackend {
                 "The meeting could not be opened in the desktop calendar: %s".printf (
                     error.message));
         }
+    }
+
+    public async Gee.ArrayList<CalendarEventOccurrence> list_events (
+        DateTime range_start, DateTime range_end,
+        Cancellable? cancellable = null) throws Error {
+        throw event_store_unavailable ();
+    }
+
+    public async void create_event (CalendarEventDraft draft,
+                                    Cancellable? cancellable = null) throws Error {
+        throw event_store_unavailable ();
+    }
+
+    public async void update_event (CalendarEventOccurrence event,
+                                    CalendarEventDraft draft,
+                                    Cancellable? cancellable = null) throws Error {
+        throw event_store_unavailable ();
+    }
+
+    public async void delete_event (CalendarEventOccurrence event,
+                                    Cancellable? cancellable = null) throws Error {
+        throw event_store_unavailable ();
+    }
+
+    private static CalendarError event_store_unavailable () {
+        return new CalendarError.UNSUPPORTED (
+            "Today and Events require Evolution Data Server calendar support");
     }
 
     public void launch_calendar () throws Error {
@@ -116,7 +156,11 @@ public class DesktopCalendarBackend : Object, CalendarBackend {
 }
 
 public class CalendarIntegrationService : Object {
+    public const int EVENT_LOOKAHEAD_YEARS = 2;
     public const int MAX_DISPLAYED_INVITATIONS = 5;
+    public const int MAX_EVENT_TITLE_BYTES = 240;
+    public const int MAX_EVENT_DESCRIPTION_BYTES = 16 * 1024;
+    public const int MAX_EVENT_LOCATION_BYTES = 2048;
     private CacheDatabase cache;
     private ReceivedAttachmentService attachments;
     private CalendarBackend backend;
@@ -130,6 +174,73 @@ public class CalendarIntegrationService : Object {
     }
 
     public bool can_respond_directly { get { return backend.can_respond_directly; } }
+    public bool can_manage_events { get { return backend.can_manage_events; } }
+
+    public void open_calendar () throws Error {
+        backend.launch_calendar ();
+    }
+
+    public async Gee.ArrayList<CalendarEventOccurrence> list_events (
+        DateTime range_start, DateTime range_end,
+        Cancellable? cancellable = null) throws Error {
+        if (range_end.compare (range_start) <= 0)
+            throw new CalendarError.INVALID_INVITATION (
+                "The calendar range must end after it starts");
+        return yield backend.list_events (range_start, range_end, cancellable);
+    }
+
+    public async void create_event (CalendarEventDraft draft,
+                                    Cancellable? cancellable = null) throws Error {
+        validate_event_draft (draft);
+        yield backend.create_event (draft, cancellable);
+    }
+
+    public async void update_event (CalendarEventOccurrence event,
+                                    CalendarEventDraft draft,
+                                    Cancellable? cancellable = null) throws Error {
+        if (!event.writable)
+            throw new CalendarError.CREATE_FAILED (
+                "This calendar is read-only");
+        validate_event_draft (draft);
+        yield backend.update_event (event, draft, cancellable);
+    }
+
+    public async void delete_event (CalendarEventOccurrence event,
+                                    Cancellable? cancellable = null) throws Error {
+        if (!event.writable)
+            throw new CalendarError.CREATE_FAILED (
+                "This calendar is read-only");
+        yield backend.delete_event (event, cancellable);
+    }
+
+    private static void validate_event_draft (CalendarEventDraft draft)
+        throws CalendarError {
+        if (draft.summary.strip () == "")
+            throw new CalendarError.CREATE_FAILED ("An event title is required");
+        if (draft.summary.length > MAX_EVENT_TITLE_BYTES)
+            throw new CalendarError.CREATE_FAILED (
+                "Event titles can contain up to 240 characters");
+        if (draft.description.length > MAX_EVENT_DESCRIPTION_BYTES)
+            throw new CalendarError.CREATE_FAILED (
+                "Event descriptions are limited to 16 KiB");
+        if (draft.location.length > MAX_EVENT_LOCATION_BYTES)
+            throw new CalendarError.CREATE_FAILED (
+                "Event locations are limited to 2 KiB");
+        if (draft.end.compare (draft.start) <= 0)
+            throw new CalendarError.CREATE_FAILED (
+                "The event must end after it starts");
+        if (draft.recurrence_interval < 1 || draft.recurrence_interval > 99)
+            throw new CalendarError.CREATE_FAILED (
+                "Event recurrence must be between 1 and 99");
+    }
+
+    internal static string bounded_event_text (string value, int maximum_bytes) {
+        if (value.length <= maximum_bytes) return value;
+        int boundary = maximum_bytes;
+        while (boundary > 0 && ((((uint8) value[boundary]) & 0xc0) == 0x80))
+            boundary--;
+        return value.substring (0, boundary).make_valid ();
+    }
 
     public CalendarAttendee? account_attendee (Message message,
                                                CalendarInvitation invitation) {

@@ -3,14 +3,15 @@ public class MessageSecurityService : Object {
     public const int MAX_RAW_HEADER_BYTES = 64 * 1024;
     private const int MAX_UNSUBSCRIBE_URI_BYTES = 2048;
 
-    public MessageSecurityAssessment assess (Message message, bool sender_is_safe = false) {
+    public MessageSecurityAssessment assess (Message message, bool sender_is_safe = false,
+                                             bool authentication_trusted = false) {
         var assessment = new MessageSecurityAssessment (sender_is_safe);
         string sender_domain = address_domain (message.sender_address);
         string reply_domain = address_domain (message.reply_to);
         string display_domain = display_name_domain (message.sender_name);
         string auth = unfold (message.authentication_results).down ();
 
-        if (auth != "") {
+        if (auth != "" && authentication_trusted) {
             assessment.authentication_reported = true;
             if (has_auth_result (auth, "dmarc", "fail"))
                 assessment.add (MessageThreatLevel.DANGER,
@@ -25,6 +26,9 @@ public class MessageSecurityService : Object {
                 has_auth_result (auth, "spf", "pass") || has_auth_result (auth, "dkim", "pass")))
                 assessment.add (MessageThreatLevel.NOTICE,
                     "Your mail server reports at least one passing authentication check.");
+        } else if (auth != "") {
+            assessment.add (MessageThreatLevel.NOTICE,
+                "An unverified Authentication-Results header was present and was not used as proof of sender identity.");
         }
 
         if (sender_domain.has_prefix ("xn--") || sender_domain.contains (".xn--"))
@@ -32,7 +36,8 @@ public class MessageSecurityService : Object {
                 "The sender uses an internationalized (punycode) domain. Check it carefully.");
 
         if (reply_domain != "" && sender_domain != "" && !domains_related (reply_domain, sender_domain)) {
-            var mismatch_level = (!sender_is_safe || auth_failure (auth)) ?
+            var mismatch_level = (!sender_is_safe ||
+                (authentication_trusted && auth_failure (auth))) ?
                 MessageThreatLevel.CAUTION : MessageThreatLevel.NOTICE;
             assessment.add (mismatch_level,
                 "Replies go to %s, not the sender domain %s.".printf (reply_domain, sender_domain));
@@ -60,6 +65,80 @@ public class MessageSecurityService : Object {
             }
         }
         return assessment;
+    }
+
+    public static bool authentication_results_are_trusted (string value,
+                                                           string incoming_host) {
+        string authserv = authentication_service_id (value);
+        string host = normalized_hostname (incoming_host);
+        if (authserv == "" || host == "") return false;
+        // An arbitrary IMAP host is not proof that a same-named header was
+        // inserted at the trusted boundary; a sender can write that text into
+        // their own message. Only providers whose receiving pipeline is known
+        // to own and normalize Authentication-Results are eligible.
+        string trusted_domain = provider_authentication_domain (host);
+        return trusted_domain != "" &&
+            (authserv == trusted_domain || authserv.has_suffix ("." + trusted_domain));
+    }
+
+    public static bool authenticated_from_domain (string value,
+                                                   string sender_address) {
+        string sender_domain = normalized_hostname (address_domain (sender_address));
+        if (sender_domain == "") return false;
+        string auth = unfold (value).down ();
+        try {
+            var passed_dmarc = new Regex (
+                "(?:^|;)\\s*dmarc\\s*=\\s*pass\\b([^;]*)",
+                RegexCompileFlags.CASELESS);
+            var header_from = new Regex (
+                "(?:^|\\s)header\\.from\\s*=\\s*([^\\s;()]+)",
+                RegexCompileFlags.CASELESS);
+            MatchInfo matches;
+            if (!passed_dmarc.match (auth, 0, out matches)) return false;
+            do {
+                MatchInfo domain_match;
+                string details = matches.fetch (1);
+                if (!header_from.match (details, 0, out domain_match)) continue;
+                string authenticated_domain = normalized_hostname (
+                    domain_match.fetch (1));
+                if (authenticated_domain == sender_domain) return true;
+            } while (matches.next ());
+        } catch (RegexError error) { }
+        return false;
+    }
+
+    private static string authentication_service_id (string value) {
+        string unfolded = unfold (value).strip ();
+        if (unfolded == "") return "";
+        string candidate = unfolded.split (";", 2)[0].strip ().down ();
+        int comment = candidate.index_of_char ('(');
+        if (comment >= 0) candidate = candidate.substring (0, comment).strip ();
+        return normalized_hostname (candidate);
+    }
+
+    private static string normalized_hostname (string value) {
+        string host = value.strip ().down ();
+        while (host.has_suffix (".")) host = host.substring (0, host.length - 1);
+        if (host == "" || host.length > 253 || host.contains ("..")) return "";
+        foreach (string label in host.split (".")) {
+            if (label == "" || label.length > 63 || label.has_prefix ("-") ||
+                label.has_suffix ("-")) return "";
+            for (int index = 0; index < label.length; index++) {
+                char character = label[index];
+                if (!(character.isalnum () || character == '-')) return "";
+            }
+        }
+        return host;
+    }
+
+    private static string provider_authentication_domain (string incoming_host) {
+        if (incoming_host == "imap.gmail.com" ||
+            incoming_host == "imap.googlemail.com") return "google.com";
+        if (incoming_host == "outlook.office365.com") return "outlook.com";
+        if (incoming_host.has_suffix (".mail.yahoo.com")) return "yahoo.com";
+        if (incoming_host.has_suffix (".mail.me.com")) return "me.com";
+        if (incoming_host.has_suffix (".aol.com")) return "aol.com";
+        return "";
     }
 
     public Gee.ArrayList<UnsubscribeTarget> unsubscribe_targets (Message message) {
@@ -136,6 +215,7 @@ public class MessageSecurityService : Object {
         bool email = lower.has_prefix ("mailto:");
         bool web = lower.has_prefix ("https://");
         if (!email && !web) return;
+        if (web && !HtmlContentPolicy.is_safe_remote_image_uri (uri)) return;
         foreach (var existing in result) if (existing.uri.down () == lower) return;
         string label = email ? "Email the list owner" : "Open the subscription page";
         result.add (new UnsubscribeTarget (uri, label, email, web && one_click));

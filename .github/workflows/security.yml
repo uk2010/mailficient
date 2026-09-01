@@ -1,0 +1,60 @@
+name: Security and regression checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+
+  flatpak-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check security invariants and secrets
+        run: tools/security-check.sh
+
+      - name: Install Flatpak build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+
+      - name: Install GNOME 50 SDK and runtime
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --assumeyes flathub \
+            org.gnome.Platform//50 org.gnome.Sdk//50
+
+      - name: Build with patched dependencies and run all tests
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          source = Path("packaging/com.local.Mailficient.Devel.json")
+          manifest = json.loads(source.read_text())
+          app = next(module for module in manifest["modules"]
+                     if module["name"] == "mailficient")
+          app.setdefault("config-opts", []).append("-Db_sanitize=address,undefined")
+          app["build-options"] = {
+              "env": {"ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
+                      "UBSAN_OPTIONS": "halt_on_error=1"}
+          }
+          Path("packaging/security-generated.json").write_text(
+              json.dumps(manifest, indent=2) + "\n")
+          PY
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            flatpak-security-build packaging/security-generated.json

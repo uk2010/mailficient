@@ -28,7 +28,6 @@ public class MailWindow : Adw.ApplicationWindow {
     private MailSearchService search_service;
     private MessageList message_list;
     private ReadingPane reader;
-    private TaskService task_service;
     private TaskView task_view;
     private Gtk.SearchEntry search = new Gtk.SearchEntry ();
     private Gtk.SearchEntry task_search = new Gtk.SearchEntry ();
@@ -210,7 +209,6 @@ public class MailWindow : Adw.ApplicationWindow {
         this.repository = repository;
         this.search_service = search_service;
         this.cache = cache;
-        task_service = new TaskService (cache, repository);
         this.attachment_service = attachment_service;
         this.received_attachment_service = received_attachment_service;
         this.calendar_service = calendar_service;
@@ -294,14 +292,13 @@ public class MailWindow : Adw.ApplicationWindow {
             search.grab_focus ();
         });
         message_list.get_mail_requested.connect (() => synchronize.begin ());
-        task_view = new TaskView (task_service);
+        task_view = new TaskView (calendar_service);
         var toolbar = new Adw.ToolbarView ();
         toolbar.add_css_class ("mail-shell-toolbar-view");
         toolbar.overflow = Gtk.Overflow.HIDDEN;
         var header = build_header (); toolbar.add_top_bar (header);
         header.hexpand = true; header.halign = Gtk.Align.FILL;
         sidebar = new MailboxSidebar (repository, cache); sidebar.set_size_request (220, -1);
-        task_service.changed.connect (() => sidebar.refresh_counts ());
         sidebar.mailbox_selected.connect ((mailbox) => {
             int64 selection_started = DebugTrace.mark ();
             string previous_mailbox_id = active_mailbox == null ? "" : active_mailbox.id;
@@ -434,10 +431,11 @@ public class MailWindow : Adw.ApplicationWindow {
         });
         reader.remote_content_failed.connect ((error) => show_operation_error (error));
         reader.remote_sender_trusted.connect ((address) =>
-            toast_overlay.add_toast (new Adw.Toast ("Images will load automatically from %s".printf (address))));
+            toast_overlay.add_toast (new Adw.Toast (
+                "Images will load for authenticated mail from %s".printf (address))));
         reader.safe_sender_changed.connect ((address, safe) => {
             toast_overlay.add_toast (new Adw.Toast (safe ?
-                "%s added to Safe Senders — remote images will load automatically".printf (address) :
+                "%s added to Safe Senders".printf (address) :
                 "%s removed from Safe Senders".printf (address)));
             // Rebuild through the window so grouped conversations, VIP state,
             // and the current HTML-display settings are all preserved. The
@@ -450,10 +448,13 @@ public class MailWindow : Adw.ApplicationWindow {
         reader.calendar_action_completed.connect ((message) =>
             toast_overlay.add_toast (new Adw.Toast (message)));
         reader.calendar_action_failed.connect ((error) => show_operation_error (error));
-        task_view.open_message_requested.connect (open_message);
         task_view.toast_requested.connect ((message) =>
             toast_overlay.add_toast (new Adw.Toast (message)));
         task_view.operation_failed.connect ((error) => show_operation_error (error));
+        notify["is-active"].connect (() => {
+            if (is_active && active_mailbox != null &&
+                is_task_mailbox (active_mailbox.id)) task_view.reload ();
+        });
         outbound_service.undo_send_available.connect ((draft_id, account_id, undo_until) =>
             show_undo_send (draft_id, account_id, undo_until));
         outbound_service.delivered.connect ((draft_id) => {
@@ -547,7 +548,7 @@ public class MailWindow : Adw.ApplicationWindow {
         workspace_stack.add_css_class ("mail-workspace");
         // A crossfade snapshots the complete mail workspace, including the
         // active WebKit view. Rich or very tall HTML messages can make that
-        // snapshot block the GTK main thread long enough for Today/Planned to
+        // snapshot block the GTK main thread long enough for Today/Events to
         // feel unresponsive. These are separate workspaces, so switch them
         // directly and keep lightweight transitions inside each workspace.
         workspace_stack.transition_type = Gtk.StackTransitionType.NONE;
@@ -711,7 +712,7 @@ public class MailWindow : Adw.ApplicationWindow {
         string qa_message = Environment.get_variable ("MAILFICIENT_QA_MESSAGE") ?? "";
         string qa_search = Environment.get_variable ("MAILFICIENT_QA_SEARCH") ?? "";
         string qa_mailbox = Environment.get_variable ("MAILFICIENT_QA_MAILBOX") ?? "";
-        // Sequence QA navigation explicitly. Today/Planned can now be the
+        // Sequence QA navigation explicitly. Today/Events can now be the
         // startup view, and selecting a mailbox clears its old query by
         // design; independent timers made message-focused states racy.
         if (qa_mailbox != "") Idle.add (() => {
@@ -734,21 +735,11 @@ public class MailWindow : Adw.ApplicationWindow {
         }
         if (Environment.get_variable ("MAILFICIENT_QA_TASK_STRESS") == "1")
             Idle.add (() => {
-                try {
-                    string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
-                    var task = task_service.create ("Today navigation stress", today);
-                    // Reproduce the old lifecycle race deterministically: a
-                    // focus idle was queued for a row that the next reload
-                    // immediately removed from its list box.
-                    for (int index = 0; index < 250; index++) {
-                        task_view.set_mode (index % 2 == 0 ?
-                            TaskViewMode.TODAY : TaskViewMode.PLANNED);
-                        task_view.focus_task (task.id);
-                        task_view.reload ();
-                        task_view.set_mode (index % 2 == 0 ?
-                            TaskViewMode.PLANNED : TaskViewMode.TODAY);
-                        task_view.reload ();
-                    }
+                for (int index = 0; index < 250; index++) {
+                    task_view.set_mode (index % 2 == 0 ?
+                        TaskViewMode.TODAY : TaskViewMode.PLANNED);
+                    task_view.reload ();
+                }
                     // Exercise the complete navigation path as well: the
                     // toolbar switches between persistent mail/task layouts
                     // and the reader hides an HTML renderer on every trip into Today.
@@ -782,9 +773,6 @@ public class MailWindow : Adw.ApplicationWindow {
                         }
                         return Source.CONTINUE;
                     });
-                } catch (Error error) {
-                    critical ("Task navigation stress setup failed: %s", error.message);
-                }
                 return Source.REMOVE;
             });
         if (Environment.get_variable ("MAILFICIENT_QA_EMPTY_JUNK_STRESS") == "1")
@@ -1637,11 +1625,11 @@ public class MailWindow : Adw.ApplicationWindow {
         filter_menu.append ("From Selected Sender", "win.add-search-filter::sender");
         filter_menu.append ("Past 7 Days", "win.add-search-filter::week");
 
-        task_search.placeholder_text = "Search Tasks";
+        task_search.placeholder_text = "Search Events";
         task_search.set_size_request (300, -1);
         task_search.valign = Gtk.Align.CENTER;
         task_search.add_css_class ("apple-toolbar-search");
-        Accessibility.label (task_search, "Search tasks");
+        Accessibility.label (task_search, "Search events");
         task_search.search_changed.connect (() => task_view.set_query (task_search.text));
 
         var sort_menu = new Menu (); sort_menu.append ("Newest First", "win.sort::newest");
@@ -1674,7 +1662,7 @@ public class MailWindow : Adw.ApplicationWindow {
         more_flag_colors.append ("Clear Flag", "win.clear-flag");
         more_menu.append_submenu ("Flag Color", more_flag_colors);
         more_menu.append ("Create Rule from Message…", "win.create-rule-from-message");
-        more_menu.append ("Create Task from Message…", "win.create-task");
+        more_menu.append ("Create Event from Message…", "win.create-task");
         rebuild_quick_steps_menu ();
         more_menu.append_submenu ("Quick Steps", quick_steps_menu);
         more_toggle_read_item = new MenuItem ("Mark as Read", "win.toggle-read");
@@ -1749,7 +1737,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var mail_menu = new Menu ();
         mail_menu.append ("New Message", "win.compose");
         mail_menu.append ("New Folder…", "win.new-mailbox");
-        mail_menu.append ("New Task", "win.new-task");
+        mail_menu.append ("New Event", "win.new-task");
         mail_menu.append ("Get Mail", "win.refresh");
         app_menu.append_section ("Mail", mail_menu);
 
@@ -3712,18 +3700,6 @@ public class MailWindow : Adw.ApplicationWindow {
         present ();
     }
 
-    public void open_task (int64 id) {
-        try {
-            var task = task_service.find (id); if (task == null) return;
-            string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
-            string mailbox_id = !task.completed && task.due_on_or_before (today) ?
-                CachedMailRepository.TASK_TODAY_ID : CachedMailRepository.TASK_PLANNED_ID;
-            sidebar.select_mailbox (mailbox_id);
-            task_view.focus_task (id);
-            present ();
-        } catch (Error error) { show_operation_error (error); }
-    }
-
     private void compose_response (ComposeMode mode) {
         if (selected_message == null) return;
         var source = repository.find_message (selected_message.id) ?? selected_message;
@@ -3946,7 +3922,7 @@ public class MailWindow : Adw.ApplicationWindow {
             DebugTrace.log ("refresh", "reload sidebar and message list selected=%s".printf (selected_id));
             if (!skip_sidebar_refresh) sidebar.refresh_counts ();
             if (active_mailbox != null && is_task_mailbox (active_mailbox.id)) {
-                // Today/Planned has no visible mail widgets. Defer the expensive
+                // Today/Events has no visible mail widgets. Defer the expensive
                 // message model rebuild until show_mailbox() makes mail visible
                 // again; counts remain current in the shared sidebar.
                 message_list.defer_refresh_until_shown ();
@@ -3979,7 +3955,7 @@ public class MailWindow : Adw.ApplicationWindow {
         var dialog = new Adw.AboutDialog ();
         dialog.add_css_class ("about-dialog");
         dialog.application_name = "Mailficient"; dialog.application_icon = "com.local.Mailficient";
-        dialog.version = "0.5.0-beta.1"; dialog.developer_name = "Mailficient Contributors";
+        dialog.version = "0.6.0-beta.1"; dialog.developer_name = "Mailficient Contributors";
         dialog.comments = "A focused native email client for the Linux desktop.";
         dialog.license_type = Gtk.License.GPL_3_0; dialog.present (this);
     }
@@ -4101,7 +4077,10 @@ public class MailWindow : Adw.ApplicationWindow {
 
     private void open_gnome_calendar (string previous_mailbox_id) {
         try {
-            GnomeCalendarLauncher.launch ();
+            // Use the same calendar backend that stores meeting events. This
+            // keeps the Calendar favorite and event creation on one EDS/GNOME
+            // Calendar integration boundary.
+            calendar_service.open_calendar ();
         } catch (Error error) {
             toast_overlay.add_toast (new Adw.Toast (error.message));
         }
@@ -4129,12 +4108,10 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.invalidate_cached_view ("unified-flagged");
         message_list.invalidate_current_view ();
         repository.begin_batch ();
-        int protected_tasks = 0;
         var unflagged_ids = new Gee.ArrayList<string> ();
         applying_message_state = true;
         try {
             foreach (var message in messages) {
-                if (!flag && has_open_linked_task (message.id)) { protected_tasks++; continue; }
                 bool was_flagged = message.flagged;
                 repository.set_flagged (message.id, flag);
                 if (was_flagged == flag) continue;
@@ -4152,9 +4129,6 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.remove_unflagged_messages (unflagged_ids);
         message_list.finish_bulk_action ();
         update_flag_button_color ();
-        if (protected_tasks > 0) toast_overlay.add_toast (new Adw.Toast (protected_tasks == 1 ?
-            "Complete or delete the linked task to clear this flag" :
-            "%d flags belong to open tasks".printf (protected_tasks)));
     }
 
     private void clear_selected_flags () {
@@ -4162,12 +4136,10 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.invalidate_cached_view ("unified-flagged");
         message_list.invalidate_current_view ();
         repository.begin_batch ();
-        int protected_tasks = 0;
         var unflagged_ids = new Gee.ArrayList<string> ();
         applying_message_state = true;
         try {
             foreach (var message in messages) {
-                if (has_open_linked_task (message.id)) { protected_tasks++; continue; }
                 bool was_flagged = message.flagged;
                 repository.set_flagged (message.id, false);
                 if (!was_flagged) continue;
@@ -4185,18 +4157,6 @@ public class MailWindow : Adw.ApplicationWindow {
         message_list.remove_unflagged_messages (unflagged_ids);
         message_list.finish_bulk_action ();
         update_flag_button_color ();
-        if (protected_tasks > 0) toast_overlay.add_toast (new Adw.Toast (protected_tasks == 1 ?
-            "Complete or delete the linked task to clear this flag" :
-            "%d flags belong to open tasks".printf (protected_tasks)));
-    }
-
-    private bool has_open_linked_task (string message_id) {
-        try { return task_service.open_task_for_message (message_id) != null; }
-        catch (Error error) {
-            show_operation_error (error);
-            // Preserve the flag when the durable task state cannot be read.
-            return true;
-        }
     }
 
     private void set_selected_flag_color (string color) {

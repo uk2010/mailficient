@@ -1,9 +1,16 @@
 namespace Mailficient {
+internal class PrivateWebView : WebKit.WebView {
+    public PrivateWebView (WebKit.NetworkSession network_session) {
+        Object (network_session: network_session);
+    }
+}
+
 public class HtmlMessageView : Gtk.Box {
     public signal void link_requested (string uri);
     public signal void layout_changed ();
     private signal void resources_settled ();
     private WebKit.WebView? web_view;
+    private WebKit.NetworkSession? network_session;
     private bool allow_remote_content;
     private ulong permission_handler;
     private ulong resource_handler;
@@ -51,7 +58,12 @@ public class HtmlMessageView : Gtk.Box {
         settings.enable_page_cache = false;
         settings.enable_webgl = false;
         settings.print_backgrounds = true;
-        web_view = new WebKit.WebView ();
+        network_session = new WebKit.NetworkSession.ephemeral ();
+        network_session.set_persistent_credential_storage_enabled (false);
+        network_session.set_itp_enabled (true);
+        network_session.get_cookie_manager ().set_accept_policy (
+            WebKit.CookieAcceptPolicy.NEVER);
+        web_view = new PrivateWebView (network_session);
         web_view.set_settings (settings);
         web_view.focusable = false;
         web_view.hexpand = true; web_view.halign = Gtk.Align.FILL;

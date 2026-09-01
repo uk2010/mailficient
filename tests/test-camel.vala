@@ -836,6 +836,48 @@ private void test_remote_attachment_part_addressing () {
     }
 }
 
+private void test_mime_tree_depth_is_bounded () {
+    string root = Path.build_filename (Environment.get_tmp_dir (),
+        "mailficient-mime-depth-%s".printf (Uuid.string_random ()));
+    assert (DirUtils.create_with_parents (root, 0700) == 0);
+    try {
+        Camel.DataWrapper nested = new Camel.MimePart ();
+        ((Camel.MimePart) nested).set_content ("leaf".data,
+            "text/plain; charset=utf-8");
+        for (int depth = 0; depth < CamelMailEngine.MAX_MIME_TREE_DEPTH + 2;
+             depth++) {
+            var multipart = new Camel.Multipart ();
+            multipart.set_mime_type ("multipart/mixed");
+            var container = new Camel.MimePart ();
+            ((Camel.Medium) container).set_content (nested);
+            multipart.add_part (container);
+            nested = multipart;
+        }
+        var engine = new CamelMailEngine (new EmptyCredentialStore (),
+            Path.build_filename (root, "data"), Path.build_filename (root, "cache"),
+            Path.build_filename (root, "received"));
+        string plain = "";
+        string html = "";
+        bool has_attachment = false;
+        int attachment_index = 0;
+        int64 remaining = AttachmentService.MAX_TOTAL_ATTACHMENT_SIZE;
+        var attachments = new Gee.ArrayList<Attachment> ();
+        Error? failure = null;
+        try {
+            engine.extract_content (nested, ref plain, ref html,
+                ref has_attachment, attachments, "mailbox:deep",
+                ref attachment_index, ref remaining, null);
+        } catch (Error error) { failure = error; }
+        assert (failure is IOError.MESSAGE_TOO_LARGE);
+
+        int current_index = 0;
+        assert (CamelMailEngine.attachment_content_at (
+            nested, 1, ref current_index) == null);
+    } catch (Error error) {
+        GLib.error ("MIME tree bound test failed: %s", error.message);
+    }
+}
+
 private void test_received_inline_content_id () {
     string root = Path.build_filename (Environment.get_tmp_dir (),
         "mailficient-inline-part-%s".printf (Uuid.string_random ()));
@@ -1157,6 +1199,8 @@ int main (string[] args) {
     Test.add_func ("/camel/cooperative-yield-honors-cancellation",
         Mailficient.test_cooperative_yield_honors_cancellation);
     Test.add_func ("/camel/remote-attachment-part-addressing", Mailficient.test_remote_attachment_part_addressing);
+    Test.add_func ("/camel/mime-tree-depth-is-bounded",
+        Mailficient.test_mime_tree_depth_is_bounded);
     Test.add_func ("/camel/received-inline-content-id", Mailficient.test_received_inline_content_id);
     Test.add_func ("/camel/mime-privacy-and-binary-attachment", Mailficient.test_mime_privacy_and_binary_attachment);
     Test.add_func ("/camel/mime-attachment-aggregate-limit", Mailficient.test_mime_attachment_aggregate_limit);

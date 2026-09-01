@@ -13,7 +13,7 @@ esac
 if [ -n "${MAILFICIENT_SDK_LIB:-}" ]; then
     sdk_lib=$MAILFICIENT_SDK_LIB
 else
-    sdk_location=$(flatpak info -l org.gnome.Sdk//49)
+    sdk_location=$(flatpak info -l org.gnome.Sdk//50)
     case "$rpm_architecture" in
         x86_64) sdk_multiarch=x86_64-linux-gnu ;;
         aarch64) sdk_multiarch=aarch64-linux-gnu ;;

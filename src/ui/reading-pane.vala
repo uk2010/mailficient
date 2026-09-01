@@ -380,8 +380,10 @@ public class ReadingPane : Gtk.Box {
             });
             html_layout_handlers.add (layout_handler);
         }
+        bool authenticated_sender = sender_authenticated_for_remote_content (message);
         bool sender_trusted = always_load_remote_content ||
-            (message.has_remote_content && remote_content_policy.is_sender_trusted (message.sender_address));
+            (message.has_remote_content && authenticated_sender &&
+                remote_content_policy.is_sender_trusted (message.sender_address));
         if (message.has_remote_content && !sender_trusted) {
             var notice_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0); notice_box.hexpand = true; notice_box.halign = Gtk.Align.FILL;
             notice_box.add_css_class ("remote-notice");
@@ -401,11 +403,11 @@ public class ReadingPane : Gtk.Box {
             });
             notice_box.append (notice_text);
             notice_box.append (load);
-            var trust = new Gtk.Button.with_label ("Always Load for This Sender");
+            var trust = new Gtk.Button.with_label ("Always Load for Authenticated Mail from This Sender");
             trust.halign = Gtk.Align.START; trust.add_css_class ("flat"); trust.add_css_class ("caption");
             trust.set_margin_top (4); Accessibility.label (trust,
-                "Always load remote images from " + message.sender_address);
-            trust.tooltip_text = "Always load remote images from " + message.sender_address;
+                "Always load remote images from authenticated mail sent by " + message.sender_address);
+            trust.tooltip_text = "Future messages must pass trusted DMARC authentication before images load automatically.";
             trust.clicked.connect (() => {
                 try {
                     remote_content_policy.trust_sender (message.sender_address);
@@ -437,7 +439,7 @@ public class ReadingPane : Gtk.Box {
     }
 
     // The workspace stack hides the reader while tasks are open. Preserve the
-    // complete reader tree and its selection so opening Today/Planned does no
+    // complete reader tree and its selection so opening Today/Events does no
     // WebKit or GtkListView teardown, and returning to mail does not reload the
     // same HTML message.
     public void suspend () {
@@ -638,8 +640,28 @@ public class ReadingPane : Gtk.Box {
         catch (Error error) { warning ("Could not inspect Safe Senders: %s", error.message); return false; }
     }
 
+    private bool authentication_results_trusted (Message message) {
+        try {
+            var account = cache.find_account (message.account_id);
+            return account != null &&
+                MessageSecurityService.authentication_results_are_trusted (
+                    message.authentication_results, account.incoming_host);
+        } catch (Error error) {
+            warning ("Could not validate the Authentication-Results trust boundary: %s",
+                error.message);
+            return false;
+        }
+    }
+
+    private bool sender_authenticated_for_remote_content (Message message) {
+        return authentication_results_trusted (message) &&
+            MessageSecurityService.authenticated_from_domain (
+                message.authentication_results, message.sender_address);
+    }
+
     private void append_identity_security (Message message, Gtk.Box target) {
-        var assessment = message_security.assess (message, sender_is_safe (message));
+        var assessment = message_security.assess (message, sender_is_safe (message),
+            authentication_results_trusted (message));
         if (!assessment.should_show_inline_warning) return;
         var card = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
         card.hexpand = true; card.halign = Gtk.Align.FILL;
@@ -691,7 +713,9 @@ public class ReadingPane : Gtk.Box {
         var parent = get_root () as Gtk.Window;
         if (parent == null) return;
         bool safe = sender_is_safe (message);
-        var assessment = message_security.assess (message, safe);
+        bool trusted_authentication = authentication_results_trusted (message);
+        var assessment = message_security.assess (message, safe,
+            trusted_authentication);
 
         var dialog = new Adw.Dialog ();
         dialog.title = "Message Security";
@@ -853,8 +877,10 @@ public class ReadingPane : Gtk.Box {
         auth_title.hexpand = true;
         auth_title.add_css_class ("heading");
         auth_heading.append (auth_title);
-        var auth_source = new Gtk.Label (
-            assessment.authentication_reported ? "Results found in message headers" : "No results retained");
+        bool has_authentication_header = message.authentication_results.strip () != "";
+        var auth_source = new Gtk.Label (trusted_authentication ?
+            "Verified receiving-server results" :
+            (has_authentication_header ? "Unverified header — not trusted" : "No results retained"));
         auth_source.add_css_class ("caption");
         auth_source.add_css_class ("dim-label");
         auth_heading.append (auth_source);
@@ -880,15 +906,19 @@ public class ReadingPane : Gtk.Box {
         var auth_grid = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
         auth_grid.homogeneous = true;
         auth_grid.add_css_class ("message-security-auth-grid");
+        string displayed_authentication = trusted_authentication ? message.authentication_results : "";
         auth_grid.append (build_authentication_item (
-            "SPF", authentication_result (message.authentication_results, "spf")));
+            "SPF", authentication_result (displayed_authentication, "spf")));
         auth_grid.append (build_authentication_item (
-            "DKIM", authentication_result (message.authentication_results, "dkim")));
+            "DKIM", authentication_result (displayed_authentication, "dkim")));
         auth_grid.append (build_authentication_item (
-            "DMARC", authentication_result (message.authentication_results, "dmarc")));
+            "DMARC", authentication_result (displayed_authentication, "dmarc")));
         authentication.append (auth_grid);
-        var auth_notice = new Gtk.Label (
-            "Header results help identify where mail came from; they do not make links or attachments safe.");
+        var auth_notice = new Gtk.Label (trusted_authentication ?
+            "These results were added by the configured receiving service. They do not make links or attachments safe." :
+            (has_authentication_header ?
+                "Mailficient ignored these results because their authentication service could not be tied to the configured receiving server." :
+                "The receiving service did not retain authentication results for this message."));
         auth_notice.xalign = 0;
         auth_notice.wrap = true;
         auth_notice.add_css_class ("message-security-auth-notice");

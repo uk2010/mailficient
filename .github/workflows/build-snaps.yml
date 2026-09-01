@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 jobs:
   snap:
@@ -20,11 +22,11 @@ jobs:
             runner: ubuntu-24.04-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build snap
         id: snapcraft
-        uses: snapcore/action-build@v1
+        uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
         with:
           snapcraft-args: --platform=${{ matrix.platform }}
 
@@ -33,10 +35,15 @@ jobs:
         run: sha256sum "${{ steps.snapcraft.outputs.snap }}" > "${{ steps.snapcraft.outputs.snap }}.sha256"
 
       - name: Upload snap
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mailficient-${{ matrix.platform }}-snap
           path: |
             ${{ steps.snapcraft.outputs.snap }}
             ${{ steps.snapcraft.outputs.snap }}.sha256
           if-no-files-found: error
+
+      - name: Attest snap provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.snapcraft.outputs.snap }}

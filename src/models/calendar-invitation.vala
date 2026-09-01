@@ -197,4 +197,83 @@ public class CalendarMeetingDraft : Object {
                 attendee_email: attendee_email, start: start, end: end);
     }
 }
+
+// One expanded VEVENT occurrence from an Evolution Data Server calendar.
+// Identity stays in EDS terms so edits and deletes never depend on the mail
+// cache or on a synthetic local database row.
+public class CalendarEventOccurrence : Object {
+    public string source_uid { get; construct; }
+    public string uid { get; construct; }
+    public string recurrence_id { get; construct; }
+    public string calendar_name { get; construct; }
+    public string calendar_color { get; construct; }
+    public string summary { get; construct; }
+    public string description { get; construct; }
+    public string location { get; construct; }
+    public DateTime start { get; construct; }
+    public DateTime end { get; construct; }
+    public bool all_day { get; construct; }
+    public bool recurring { get; construct; }
+    public bool writable { get; construct; }
+
+    public CalendarEventOccurrence (string source_uid, string uid,
+                                    string recurrence_id, string calendar_name,
+                                    string calendar_color, string summary,
+                                    string description, string location,
+                                    DateTime start, DateTime end, bool all_day,
+                                    bool recurring, bool writable) {
+        Object (source_uid: source_uid, uid: uid,
+                recurrence_id: recurrence_id, calendar_name: calendar_name,
+                calendar_color: calendar_color, summary: summary,
+                description: description, location: location, start: start,
+                end: end, all_day: all_day, recurring: recurring,
+                writable: writable);
+    }
+
+    public string identity () {
+        return "%s\n%s\n%s\n%s".printf (source_uid, uid, recurrence_id,
+            start.to_unix ().to_string ());
+    }
+}
+
+public enum CalendarEventRecurrence {
+    NONE,
+    DAILY,
+    WEEKLY,
+    MONTHLY,
+    YEARLY;
+
+    public string label () {
+        switch (this) {
+        case DAILY: return "Daily";
+        case WEEKLY: return "Weekly";
+        case MONTHLY: return "Monthly";
+        case YEARLY: return "Yearly";
+        default: return "Does not repeat";
+        }
+    }
+}
+
+public class CalendarEventDraft : Object {
+    public string summary { get; construct; }
+    public string description { get; construct; }
+    public string location { get; construct; }
+    public DateTime start { get; construct; }
+    public DateTime end { get; construct; }
+    public bool all_day { get; construct; }
+    public CalendarEventRecurrence recurrence { get; construct; }
+    public int recurrence_interval { get; construct; }
+
+    public CalendarEventDraft (string summary, string description,
+                               string location, DateTime start, DateTime end,
+                               bool all_day,
+                               CalendarEventRecurrence recurrence =
+                                   CalendarEventRecurrence.NONE,
+                               int recurrence_interval = 1) {
+        Object (summary: summary, description: description,
+                location: location, start: start, end: end,
+                all_day: all_day, recurrence: recurrence,
+                recurrence_interval: int.max (1, recurrence_interval));
+    }
+}
 }

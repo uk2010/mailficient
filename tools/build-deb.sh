@@ -11,7 +11,7 @@ multiarch=${MAILFICIENT_DEB_MULTIARCH:-$(dpkg-architecture -qDEB_HOST_MULTIARCH)
 if [ -n "${MAILFICIENT_SDK_LIB:-}" ]; then
     sdk_lib=$MAILFICIENT_SDK_LIB
 else
-    sdk_location=$(flatpak info -l org.gnome.Sdk//49)
+    sdk_location=$(flatpak info -l org.gnome.Sdk//50)
     sdk_lib="$sdk_location/files/lib/$multiarch"
 fi
 runtime_lib=${MAILFICIENT_RUNTIME_LIB_DIR:-"$app_tree/lib"}
@@ -77,7 +77,12 @@ install -m 0755 "$root_dir/packaging/debian/mailficient" "$stage/usr/bin/mailfic
 install -m 0755 "$root_dir/packaging/debian/mailficient-addressbook-probe" \
     "$stage/usr/bin/mailficient-addressbook-probe"
 
-cp -a "$runtime_lib"/*.so* "$private_lib/"
+for app_library in "$runtime_lib"/*.so*; do
+    case "$(basename "$app_library")" in
+        libwebkitgtk-6.0.so*|libjavascriptcoregtk-6.0.so*) continue ;;
+    esac
+    cp -a "$app_library" "$private_lib/"
+done
 cp -a "$provider_dir" \
     "$private_lib/evolution-data-server/"
 if [ -e "$eds_private_lib" ]; then

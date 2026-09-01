@@ -1,27 +1,28 @@
 namespace Mailficient {
+// Today and Events are calendar projections. They intentionally do not read
+// or write CacheDatabase task rows: Evolution Data Server is the sole event
+// store shared with GNOME Calendar.
 public class TaskView : Gtk.Box {
-    public signal void open_message_requested (string message_id);
     public signal void toast_requested (string message);
     public signal void operation_failed (Error error);
 
-    private TaskService service;
+    private CalendarIntegrationService service;
     private TaskViewMode mode = TaskViewMode.TODAY;
     private Gtk.Label heading = new Gtk.Label ("");
     private Gtk.Label summary = new Gtk.Label ("");
-    private Gtk.ListBox task_list = new Gtk.ListBox ();
+    private Gtk.ListBox event_list = new Gtk.ListBox ();
     private Gtk.Stack state_stack = new Gtk.Stack ();
     private Adw.StatusPage empty_page = new Adw.StatusPage ();
-    private Gtk.CheckButton show_completed = new Gtk.CheckButton.with_label ("Show completed");
     private Gtk.Box view_header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
     private Gtk.Box header_labels = new Gtk.Box (Gtk.Orientation.VERTICAL, 2);
     private Adw.ButtonContent add_content = new Adw.ButtonContent ();
+    private Gee.ArrayList<CalendarEventOccurrence> loaded_events =
+        new Gee.ArrayList<CalendarEventOccurrence> ();
     private string query = "";
-    private int64 focus_task_id;
-    private uint reload_source;
-    private uint focus_source;
-    private bool mode_initialized;
+    private Cancellable? reload_cancellable;
+    private uint reload_generation;
 
-    public TaskView (TaskService service) {
+    public TaskView (CalendarIntegrationService service) {
         Object (orientation: Gtk.Orientation.VERTICAL, spacing: 0);
         this.service = service;
         add_css_class ("task-view");
@@ -35,39 +36,35 @@ public class TaskView : Gtk.Box {
         summary.xalign = 0; summary.ellipsize = Pango.EllipsizeMode.END;
         summary.add_css_class ("dim-label"); header_labels.append (summary);
         view_header.append (header_labels);
-        show_completed.valign = Gtk.Align.CENTER;
-        show_completed.toggled.connect (queue_reload);
-        view_header.append (show_completed);
-        add_content.icon_name = "list-add-symbolic"; add_content.label = "New Task";
-        var add = new Gtk.Button (); add.child = add_content; add.add_css_class ("suggested-action");
-        add.tooltip_text = "Create a task"; Accessibility.label (add, "Create a new task");
-        add.clicked.connect (() => edit_task.begin (null, null));
+        add_content.icon_name = "appointment-new-symbolic";
+        add_content.label = "New Event";
+        var add = new Gtk.Button ();
+        add.child = add_content; add.add_css_class ("suggested-action");
+        add.tooltip_text = "Create an event in GNOME Calendar";
+        Accessibility.label (add, "Create a new calendar event");
+        add.sensitive = service.can_manage_events;
+        add.clicked.connect (() => edit_event.begin (null, null));
         view_header.append (add);
         append (view_header);
 
-        task_list.selection_mode = Gtk.SelectionMode.NONE;
-        task_list.show_separators = false;
-        task_list.valign = Gtk.Align.START;
-        var list_clamp = new Adw.Clamp (); list_clamp.maximum_size = 760;
-        list_clamp.valign = Gtk.Align.START;
+        event_list.selection_mode = Gtk.SelectionMode.NONE;
+        event_list.show_separators = false;
+        event_list.valign = Gtk.Align.START;
+        var list_clamp = new Adw.Clamp ();
+        list_clamp.maximum_size = 760; list_clamp.valign = Gtk.Align.START;
         list_clamp.margin_start = 24; list_clamp.margin_end = 24;
         list_clamp.margin_top = 4; list_clamp.margin_bottom = 24;
-        list_clamp.child = task_list;
+        list_clamp.child = event_list;
         var scroller = new Gtk.ScrolledWindow ();
-        scroller.hscrollbar_policy = Gtk.PolicyType.NEVER; scroller.child = list_clamp;
+        scroller.hscrollbar_policy = Gtk.PolicyType.NEVER;
+        scroller.child = list_clamp;
 
-        empty_page.icon_name = "task-due-symbolic";
-        empty_page.title = "Nothing due";
-        empty_page.description = "Create a task or turn an email into a follow-up.";
-
+        empty_page.icon_name = "calendar-agenda-symbolic";
         state_stack.hexpand = true; state_stack.vexpand = true;
         state_stack.transition_type = Gtk.StackTransitionType.CROSSFADE;
-        state_stack.add_named (scroller, "tasks"); state_stack.add_named (empty_page, "empty");
+        state_stack.add_named (scroller, "events");
+        state_stack.add_named (empty_page, "empty");
         append (state_stack);
-
-        service.changed.connect (queue_reload);
-        service.sync_failed.connect ((provider, detail) =>
-            toast_requested ("%s sync is unavailable — changes remain saved locally".printf (provider)));
         set_mode (TaskViewMode.TODAY);
     }
 
@@ -77,334 +74,406 @@ public class TaskView : Gtk.Box {
         view_header.margin_end = compact ? 12 : 24;
         view_header.margin_top = compact ? 12 : 20;
         view_header.margin_bottom = compact ? 10 : 14;
-        show_completed.label = compact ? "Completed" : "Show completed";
-        add_content.label = compact ? "New" : "New Task";
+        add_content.label = compact ? "New" : "New Event";
     }
 
     public void set_mode (TaskViewMode mode) {
-        bool unchanged = mode_initialized && this.mode == mode;
         this.mode = mode;
-        mode_initialized = true;
-        heading.label = mode == TaskViewMode.TODAY ? "Today" : "Planned";
-        empty_page.title = mode == TaskViewMode.TODAY ? "Nothing due today" : "No planned tasks";
-        empty_page.description = mode == TaskViewMode.TODAY ?
-            "You’re caught up. Add a task or turn an email into a follow-up." :
-            "Create a task with a due date to start planning.";
-        if (!unchanged) queue_reload ();
+        heading.label = mode == TaskViewMode.TODAY ? "Today" : "Events";
+        empty_page.title = mode == TaskViewMode.TODAY ?
+            "No events today" : "No upcoming events";
+        empty_page.description = "Events are read directly from GNOME Calendar.";
+        // Always reload on navigation so changes made in GNOME Calendar are
+        // visible immediately when the user returns.
+        reload ();
     }
 
     public void set_query (string query) {
         if (this.query == query) return;
         this.query = query;
-        queue_reload ();
+        render ();
     }
 
-    public void new_task () { edit_task.begin (null, null); }
+    public void new_task () { edit_event.begin (null, null); }
 
     public void create_from_message (Message message) {
-        try {
-            var existing = service.open_task_for_message (message.id);
-            if (existing != null) {
-                toast_requested ("This email already has an open task");
-                edit_task.begin (existing, message);
-            } else edit_task.begin (null, message);
-        } catch (Error error) { operation_failed (error); }
-    }
-
-    public void focus_task (int64 task_id) {
-        focus_task_id = task_id;
-        queue_reload ();
+        edit_event.begin (null, message);
     }
 
     public void reload () {
-        if (reload_source != 0) {
-            Source.remove (reload_source);
-            reload_source = 0;
+        reload_async.begin ();
+    }
+
+    private async void reload_async () {
+        reload_generation++;
+        uint generation = reload_generation;
+        if (reload_cancellable != null) reload_cancellable.cancel ();
+        var cancellable = new Cancellable ();
+        reload_cancellable = cancellable;
+        summary.label = "Loading GNOME Calendar…";
+
+        if (!service.can_manage_events) {
+            loaded_events.clear ();
+            empty_page.title = "GNOME Calendar events unavailable";
+            empty_page.description =
+                "This build does not include Evolution Data Server calendar support.";
+            summary.label = "Evolution Data Server is required";
+            render ();
+            return;
         }
-        cancel_focus ();
-        Gtk.ListBoxRow? row;
-        while ((row = task_list.get_row_at_index (0)) != null) task_list.remove (row);
+
+        DateTime now = new DateTime.now_local ();
+        var day_start = new DateTime.local (now.get_year (), now.get_month (),
+            now.get_day_of_month (), 0, 0, 0);
+        DateTime range_start = day_start;
+        DateTime range_end = mode == TaskViewMode.TODAY ?
+            day_start.add_days (1) :
+            day_start.add_years (CalendarIntegrationService.EVENT_LOOKAHEAD_YEARS);
         try {
-            var tasks = service.list (mode, show_completed.active, query);
-            string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
-            string tomorrow = MailTask.date_for_unix (
-                new DateTime.now_local ().add_days (1).to_unix ());
-            string previous_section = "";
-            foreach (var task in tasks) {
-                var task_row = build_row (task);
-                if (mode == TaskViewMode.PLANNED) {
-                    string section = "%s:%s".printf (
-                        task.completed ? "completed" : "open", task.due_at);
-                    if (section != previous_section)
-                        task_row.set_header (date_header (task, today, tomorrow));
-                    previous_section = section;
-                }
-                task_list.append (task_row);
-            }
-            show_state (tasks.size == 0 ? "empty" : "tasks");
-            string count = tasks.size == 1 ? "1 task" : "%d tasks".printf (tasks.size);
-            summary.label = "%s · %s".printf (count, service.sync_status ());
+            var events = yield service.list_events (range_start, range_end,
+                cancellable);
+            if (cancellable.is_cancelled () || generation != reload_generation)
+                return;
+            loaded_events = events;
+            render ();
         } catch (Error error) {
-            summary.label = "Tasks could not be loaded";
+            if (error is IOError.CANCELLED || generation != reload_generation)
+                return;
+            loaded_events.clear ();
+            summary.label = "Calendar events could not be loaded";
+            empty_page.title = "Could not read GNOME Calendar";
+            empty_page.description = error.message;
             show_state ("empty");
             operation_failed (error);
+        } finally {
+            if (reload_cancellable == cancellable)
+                reload_cancellable = null;
         }
     }
 
-    private void queue_reload () {
-        if (reload_source != 0) return;
-        reload_source = Idle.add (() => {
-            reload_source = 0; reload (); return Source.REMOVE;
-        });
+    private void render () {
+        Gtk.ListBoxRow? existing;
+        while ((existing = event_list.get_row_at_index (0)) != null)
+            event_list.remove (existing);
+
+        string needle = query.strip ().down ();
+        int visible_count = 0;
+        string previous_date = "";
+        foreach (var event in loaded_events) {
+            if (needle != "" && !(event.summary.down ().contains (needle) ||
+                event.description.down ().contains (needle) ||
+                event.location.down ().contains (needle) ||
+                event.calendar_name.down ().contains (needle))) continue;
+            var row = build_row (event);
+            string date = event.start.format ("%F");
+            if (mode == TaskViewMode.PLANNED && date != previous_date)
+                row.set_header (date_header (event.start));
+            previous_date = date;
+            event_list.append (row);
+            visible_count++;
+        }
+        show_state (visible_count == 0 ? "empty" : "events");
+        if (service.can_manage_events) {
+            string count = visible_count == 1 ? "1 event" :
+                "%d events".printf (visible_count);
+            summary.label = count + " · GNOME Calendar";
+            empty_page.title = mode == TaskViewMode.TODAY ?
+                "No events today" : "No upcoming events";
+            empty_page.description = query.strip () == "" ?
+                "Events are read directly from GNOME Calendar." :
+                "No calendar events match this search.";
+        }
     }
 
-    private Gtk.ListBoxRow build_row (MailTask task) {
-        var row = new Gtk.ListBoxRow (); row.selectable = false; row.activatable = false;
-        row.add_css_class ("card");
-        row.add_css_class ("task-row");
+    private Gtk.ListBoxRow build_row (CalendarEventOccurrence event) {
+        var row = new Gtk.ListBoxRow ();
+        row.selectable = false; row.activatable = false;
+        row.add_css_class ("card"); row.add_css_class ("task-row");
         row.margin_start = 2; row.margin_end = 2;
         row.margin_top = 4; row.margin_bottom = 4;
-        if (task.completed) row.add_css_class ("completed");
-        string today = MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
-        bool overdue = !task.completed && task.due_on_or_before (today) && task.due_at != today;
-        if (overdue) row.add_css_class ("overdue");
 
         var content = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
         content.margin_start = 14; content.margin_end = 10;
         content.margin_top = 9; content.margin_bottom = 9;
-        var completed = new Gtk.CheckButton (); completed.active = task.completed;
-        completed.valign = Gtk.Align.START;
-        string completion_label = task.completed ? "Reopen %s".printf (task.title) :
-            "Complete %s".printf (task.title);
-        Accessibility.label (completed, completion_label);
-        completed.toggled.connect (() => {
-            if (completed.active == task.completed) return;
-            try {
-                var next = service.set_completed (task, completed.active);
-                if (next != null)
-                    toast_requested ("Completed — next occurrence is due %s".printf (friendly_date (next.due_at)));
-                else toast_requested (completed.active ? "Task completed" : "Task reopened");
-            } catch (Error error) {
-                completed.active = task.completed; operation_failed (error);
-            }
-        });
-        content.append (completed);
+        var event_icon = new Gtk.Image.from_icon_name (
+            event.all_day ? "calendar-agenda-symbolic" :
+                "appointment-soon-symbolic");
+        event_icon.valign = Gtk.Align.START;
+        event_icon.add_css_class ("dim-label");
+        content.append (event_icon);
 
-        var body = new Gtk.Box (Gtk.Orientation.VERTICAL, 4); body.hexpand = true;
-        var title = new Gtk.Label (task.title); title.xalign = 0;
-        title.wrap = true; title.wrap_mode = Pango.WrapMode.WORD_CHAR;
+        var body = new Gtk.Box (Gtk.Orientation.VERTICAL, 4);
+        body.hexpand = true;
+        var title = new Gtk.Label (event.summary);
+        title.xalign = 0; title.wrap = true;
+        title.wrap_mode = Pango.WrapMode.WORD_CHAR;
         title.add_css_class ("task-title"); body.append (title);
         var metadata = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
         metadata.add_css_class ("task-metadata");
-        // Keep the formatted value in one owned string. Nested conditional
-        // concatenation can release a temporary before Gtk.Label copies it.
-        string due_text;
-        if (task.completed) due_text = "Completed";
-        else if (overdue) due_text = "Overdue · %s".printf (friendly_date (task.due_at));
-        else if (task.due_at == today) due_text = "Due today";
-        else due_text = "Due %s".printf (friendly_date (task.due_at));
-        metadata.append (metadata_label (due_text, overdue ? "task-past-due-symbolic" : "task-due-symbolic"));
-        if (task.reminder_at > 0)
-            metadata.append (metadata_label (friendly_reminder (task.reminder_at), "alarm-symbolic"));
-        if (task.recurrence != TaskRecurrence.NONE)
-            metadata.append (metadata_label (task.recurrence_label (), "media-playlist-repeat-symbolic"));
-        if (task.is_linked_to_message ())
-            metadata.append (metadata_label ("Linked email", "mail-unread-symbolic"));
+        metadata.append (metadata_label (event_time_label (event),
+            event.all_day ? "calendar-agenda-symbolic" : "alarm-symbolic"));
+        if (event.calendar_name.strip () != "")
+            metadata.append (metadata_label (event.calendar_name,
+                "x-office-calendar-symbolic"));
+        if (event.location.strip () != "")
+            metadata.append (metadata_label (event.location,
+                "mark-location-symbolic"));
+        if (event.recurring)
+            metadata.append (metadata_label ("Repeats",
+                "media-playlist-repeat-symbolic"));
         body.append (metadata);
-        if (task.notes.strip () != "") {
-            var notes = new Gtk.Label (task.notes); notes.xalign = 0;
-            notes.ellipsize = Pango.EllipsizeMode.END; notes.lines = 1;
-            notes.add_css_class ("dim-label"); body.append (notes);
+        if (event.description.strip () != "") {
+            var description = new Gtk.Label (event.description.strip ());
+            description.xalign = 0;
+            description.ellipsize = Pango.EllipsizeMode.END;
+            description.lines = 1; description.add_css_class ("dim-label");
+            body.append (description);
         }
         content.append (body);
 
-        if (task.is_linked_to_message ()) {
-            var open = new Gtk.Button.from_icon_name ("mail-unread-symbolic");
-            open.add_css_class ("flat"); open.valign = Gtk.Align.CENTER;
-            open.tooltip_text = "Open linked email"; Accessibility.label (open, "Open linked email for " + task.title);
-            open.clicked.connect (() => open_message_requested (task.message_id)); content.append (open);
-        }
-        var edit = new Gtk.Button.from_icon_name ("document-edit-symbolic");
-        edit.add_css_class ("flat"); edit.valign = Gtk.Align.CENTER;
-        edit.tooltip_text = "Edit task"; Accessibility.label (edit, "Edit " + task.title);
-        edit.clicked.connect (() => edit_task.begin (task, null)); content.append (edit);
-        var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
-        remove.add_css_class ("flat"); remove.valign = Gtk.Align.CENTER;
-        remove.tooltip_text = "Delete task"; Accessibility.label (remove, "Delete " + task.title);
-        remove.clicked.connect (() => confirm_delete.begin (task)); content.append (remove);
-        row.child = content;
+        var open = new Gtk.Button.from_icon_name ("x-office-calendar-symbolic");
+        open.add_css_class ("flat"); open.valign = Gtk.Align.CENTER;
+        open.tooltip_text = "Open GNOME Calendar";
+        Accessibility.label (open,
+            "Open " + event.summary + " in GNOME Calendar");
+        open.clicked.connect (() => open_calendar ()); content.append (open);
 
-        if (focus_task_id == task.id) {
-            focus_task_id = 0;
-            Gtk.CheckButton focus_target = completed;
-            focus_source = Idle.add (() => {
-                focus_source = 0;
-                // Focusing GtkListBoxRow itself is unsafe if a second task
-                // reload detaches it while this deferred callback is pending.
-                // The checkbox is the task's stable, useful focus target and
-                // is focused only after GTK has mapped the replacement row.
-                if (focus_target.get_root () != null && focus_target.get_mapped ())
-                    focus_target.grab_focus ();
-                return Source.REMOVE;
+        if (event.writable) {
+            var edit = new Gtk.Button.from_icon_name ("document-edit-symbolic");
+            edit.add_css_class ("flat"); edit.valign = Gtk.Align.CENTER;
+            edit.tooltip_text = event.recurring ?
+                "Edit this series in GNOME Calendar" : "Edit event";
+            Accessibility.label (edit, "Edit " + event.summary);
+            edit.clicked.connect (() => {
+                if (event.recurring || spans_multiple_dates (event))
+                    open_calendar ();
+                else edit_event.begin (event, null);
             });
+            content.append (edit);
+
+            var remove = new Gtk.Button.from_icon_name ("user-trash-symbolic");
+            remove.add_css_class ("flat"); remove.valign = Gtk.Align.CENTER;
+            remove.tooltip_text = event.recurring ?
+                "Delete event series" : "Delete event";
+            Accessibility.label (remove, "Delete " + event.summary);
+            remove.clicked.connect (() => confirm_delete.begin (event));
+            content.append (remove);
         }
+        row.child = content;
         return row;
     }
 
-    private Gtk.Widget date_header (MailTask task, string today, string tomorrow) {
-        string label;
-        if (task.completed)
-            label = "Completed · %s".printf (friendly_date (task.due_at));
-        else if (task.due_at == today)
-            label = "Today";
-        else if (task.due_at == tomorrow)
-            label = "Tomorrow";
-        else if (task.due_on_or_before (today))
-            label = "Overdue · %s".printf (friendly_date (task.due_at));
-        else
-            label = friendly_date (task.due_at);
+    private Gtk.Widget date_header (DateTime date) {
+        DateTime now = new DateTime.now_local ();
+        string today = now.format ("%F");
+        string tomorrow = now.add_days (1).format ("%F");
+        string key = date.format ("%F");
+        string label = key == today ? "Today" :
+            (key == tomorrow ? "Tomorrow" :
+                date.format ("%A, %b %e, %Y").strip ());
         var header = new Gtk.Label (label);
-        header.xalign = 0;
-        header.add_css_class ("heading");
+        header.xalign = 0; header.add_css_class ("heading");
         header.margin_start = 8; header.margin_end = 8;
         header.margin_top = 12; header.margin_bottom = 2;
-        Accessibility.label (header, label + " tasks");
+        Accessibility.label (header, label + " events");
         return header;
     }
 
-    private void cancel_focus () {
-        if (focus_source == 0) return;
-        Source.remove (focus_source);
-        focus_source = 0;
+    private Gtk.Widget metadata_label (string text, string icon_name) {
+        var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 3);
+        var icon = new Gtk.Image.from_icon_name (icon_name);
+        icon.pixel_size = 13;
+        icon.accessible_role = Gtk.AccessibleRole.PRESENTATION;
+        box.append (icon);
+        var label = new Gtk.Label (text);
+        label.add_css_class ("caption");
+        label.ellipsize = Pango.EllipsizeMode.END;
+        box.append (label);
+        return box;
+    }
+
+    private async void edit_event (CalendarEventOccurrence? event,
+                                   Message? source) {
+        DateTime now = new DateTime.now_local ();
+        int next_hour = (now.get_hour () + 1) % 24;
+        DateTime initial_start = event != null ? event.start :
+            new DateTime.local (now.get_year (), now.get_month (),
+                now.get_day_of_month (), next_hour, 0, 0);
+        DateTime initial_end = event != null ? event.end :
+            initial_start.add_hours (1);
+
+        var title = new Adw.EntryRow (); title.title = "Event";
+        if (event != null) title.text = event.summary;
+        else if (source != null) title.text = source.subject.strip () == "" ?
+            "Event from email" : source.subject.strip ();
+        var location = new Adw.EntryRow (); location.title = "Location";
+        location.text = event != null ? event.location : "";
+        var notes = new Adw.EntryRow (); notes.title = "Notes";
+        if (event != null) notes.text = event.description;
+        else if (source != null) notes.text =
+            "Created from an email from %s <%s>.".printf (
+                source.sender_name, source.sender_address);
+        var details = new Adw.PreferencesGroup ();
+        details.add (title); details.add (location); details.add (notes);
+
+        var date_label = new Gtk.Label ("Date");
+        date_label.xalign = 0; date_label.add_css_class ("heading");
+        var calendar = new Gtk.Calendar ();
+        calendar.show_day_names = true; calendar.show_heading = true;
+        calendar.select_day (initial_start);
+        Accessibility.label (calendar, "Event date");
+
+        var all_day = new Adw.SwitchRow ();
+        all_day.title = "All-day event";
+        all_day.active = event != null && event.all_day;
+        var start_hour = new Adw.SpinRow.with_range (0, 23, 1);
+        start_hour.title = "Starts at hour";
+        start_hour.value = initial_start.get_hour ();
+        var start_minute = new Adw.SpinRow.with_range (0, 59, 5);
+        start_minute.title = "Start minute";
+        start_minute.value = initial_start.get_minute ();
+        var end_hour = new Adw.SpinRow.with_range (0, 23, 1);
+        end_hour.title = "Ends at hour";
+        end_hour.value = initial_end.get_hour ();
+        var end_minute = new Adw.SpinRow.with_range (0, 59, 5);
+        end_minute.title = "End minute";
+        end_minute.value = initial_end.get_minute ();
+        all_day.notify["active"].connect (() => {
+            bool sensitive = !all_day.active;
+            start_hour.sensitive = sensitive;
+            start_minute.sensitive = sensitive;
+            end_hour.sensitive = sensitive;
+            end_minute.sensitive = sensitive;
+        });
+        bool time_sensitive = !all_day.active;
+        start_hour.sensitive = time_sensitive;
+        start_minute.sensitive = time_sensitive;
+        end_hour.sensitive = time_sensitive;
+        end_minute.sensitive = time_sensitive;
+
+        var recurrence_model = new Gtk.StringList (null);
+        foreach (var label in new string[] {
+            "Does not repeat", "Daily", "Weekly", "Monthly", "Yearly"
+        }) recurrence_model.append (label);
+        var recurrence = new Adw.ComboRow ();
+        recurrence.title = "Repeat"; recurrence.model = recurrence_model;
+        recurrence.selected = 0;
+        var interval = new Adw.SpinRow.with_range (1, 99, 1);
+        interval.title = "Repeat every";
+        interval.subtitle = "Number of days, weeks, months, or years";
+        interval.value = 1; interval.sensitive = false;
+        recurrence.notify["selected"].connect (() =>
+            interval.sensitive = recurrence.selected != 0);
+
+        var schedule = new Adw.PreferencesGroup ();
+        schedule.add (all_day); schedule.add (start_hour);
+        schedule.add (start_minute); schedule.add (end_hour);
+        schedule.add (end_minute); schedule.add (recurrence);
+        schedule.add (interval);
+        var editor = new Gtk.Box (Gtk.Orientation.VERTICAL, 10);
+        editor.set_size_request (440, -1);
+        editor.append (details); editor.append (date_label);
+        editor.append (calendar); editor.append (schedule);
+        var source_note = new Gtk.Label (
+            "This event is saved directly to your default GNOME Calendar.");
+        source_note.wrap = true; source_note.xalign = 0;
+        source_note.add_css_class ("dim-label"); editor.append (source_note);
+        var scroller = new Gtk.ScrolledWindow ();
+        scroller.set_size_request (460, 560);
+        scroller.hscrollbar_policy = Gtk.PolicyType.NEVER;
+        scroller.child = editor;
+        var dialog = new Adw.AlertDialog (
+            event == null ? "New Event" : "Edit Event",
+            "Evolution Data Server is the authoritative event store.");
+        dialog.add_css_class ("task-editor-dialog");
+        dialog.extra_child = scroller;
+        dialog.add_response ("cancel", "Cancel");
+        dialog.add_response ("save", "Save");
+        dialog.default_response = "save"; dialog.close_response = "cancel";
+        var parent = get_root () as Gtk.Widget;
+        if (parent == null || (yield dialog.choose (parent, null)) != "save")
+            return;
+
+        DateTime date = calendar.get_date ();
+        DateTime start;
+        DateTime end;
+        if (all_day.active) {
+            start = new DateTime.local (date.get_year (), date.get_month (),
+                date.get_day_of_month (), 0, 0, 0);
+            end = start.add_days (1);
+        } else {
+            start = new DateTime.local (date.get_year (), date.get_month (),
+                date.get_day_of_month (), (int) start_hour.value,
+                (int) start_minute.value, 0);
+            end = new DateTime.local (date.get_year (), date.get_month (),
+                date.get_day_of_month (), (int) end_hour.value,
+                (int) end_minute.value, 0);
+            if (end.compare (start) <= 0) end = end.add_days (1);
+        }
+        var draft = new CalendarEventDraft (title.text, notes.text,
+            location.text, start, end, all_day.active,
+            (CalendarEventRecurrence) recurrence.selected,
+            (int) interval.value);
+        try {
+            if (event == null) yield service.create_event (draft);
+            else yield service.update_event (event, draft);
+            toast_requested (event == null ?
+                "Event saved to GNOME Calendar" :
+                "Event updated in GNOME Calendar");
+            reload ();
+        } catch (Error error) { operation_failed (error); }
+    }
+
+    private async void confirm_delete (CalendarEventOccurrence event) {
+        string heading = event.recurring ?
+            "Delete event series?" : "Delete event?";
+        var dialog = new Adw.AlertDialog (heading, event.summary);
+        dialog.add_response ("cancel", "Cancel");
+        dialog.add_response ("delete", "Delete");
+        dialog.set_response_appearance ("delete",
+            Adw.ResponseAppearance.DESTRUCTIVE);
+        dialog.default_response = "cancel"; dialog.close_response = "cancel";
+        var parent = get_root () as Gtk.Widget;
+        if (parent == null || (yield dialog.choose (parent, null)) != "delete")
+            return;
+        try {
+            yield service.delete_event (event);
+            toast_requested (event.recurring ?
+                "Event series deleted from GNOME Calendar" :
+                "Event deleted from GNOME Calendar");
+            reload ();
+        } catch (Error error) { operation_failed (error); }
+    }
+
+    private void open_calendar () {
+        try { service.open_calendar (); }
+        catch (Error error) { operation_failed (error); }
+    }
+
+    private static string event_time_label (CalendarEventOccurrence event) {
+        if (event.all_day) return "All day";
+        string start = event.start.format ("%l:%M %p").strip ();
+        string end = event.end.format ("%l:%M %p").strip ();
+        if (event.start.format ("%F") != event.end.format ("%F"))
+            end = event.end.format ("%b %e · %l:%M %p").strip ();
+        return start + "–" + end;
+    }
+
+    private static bool spans_multiple_dates (
+        CalendarEventOccurrence event) {
+        if (event.all_day)
+            return event.end.compare (event.start.add_days (1)) != 0;
+        return event.start.format ("%F") != event.end.format ("%F");
     }
 
     private void show_state (string name) {
-        // Do not animate a ScrolledWindow/scrollbar subtree while this task
-        // view is itself hidden in MailWindow's stack. GTK can otherwise try
-        // to snapshot its internal gizmo before it has an allocation.
         state_stack.transition_type = get_mapped () ?
             Gtk.StackTransitionType.CROSSFADE : Gtk.StackTransitionType.NONE;
         state_stack.visible_child_name = name;
     }
 
-    private Gtk.Widget metadata_label (string text, string icon_name) {
-        var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 3);
-        var icon = new Gtk.Image.from_icon_name (icon_name); icon.pixel_size = 13;
-        icon.accessible_role = Gtk.AccessibleRole.PRESENTATION; box.append (icon);
-        var label = new Gtk.Label (text); label.add_css_class ("caption"); box.append (label);
-        return box;
-    }
-
-    private async void edit_task (MailTask? task, Message? source) {
-        var title = new Adw.EntryRow (); title.title = "Task";
-        string initial_title = "";
-        if (task != null) initial_title = task.title;
-        else if (source != null) initial_title = source.subject.strip () == "" ?
-            "Follow up on email" : "Follow up: %s".printf (source.subject);
-        title.text = initial_title;
-        var notes = new Adw.EntryRow (); notes.title = "Notes";
-        notes.text = task != null ? task.notes : "";
-
-        var details = new Adw.PreferencesGroup (); details.add (title); details.add (notes);
-        var due_label = new Gtk.Label ("Due date"); due_label.xalign = 0; due_label.add_css_class ("heading");
-        var calendar = new Gtk.Calendar (); calendar.show_day_names = true; calendar.show_heading = true;
-        Accessibility.label (calendar, "Task due date");
-        string initial_due = task != null ? task.due_at :
-            MailTask.date_for_unix (new DateTime.now_local ().to_unix ());
-        var parsed_due = MailTask.parse_due_date (initial_due);
-        if (parsed_due != null) calendar.select_day (parsed_due);
-
-        var reminder = new Adw.SwitchRow (); reminder.title = "Reminder";
-        reminder.subtitle = "Notify me on the due date";
-        reminder.active = task != null && task.reminder_at > 0;
-        var reminder_hour = new Adw.SpinRow.with_range (0, 23, 1); reminder_hour.title = "Hour";
-        var reminder_minute = new Adw.SpinRow.with_range (0, 59, 5); reminder_minute.title = "Minute";
-        if (task != null && task.reminder_at > 0) {
-            var reminder_date = new DateTime.from_unix_local (task.reminder_at);
-            reminder_hour.value = reminder_date.get_hour ();
-            reminder_minute.value = reminder_date.get_minute ();
-        } else { reminder_hour.value = 9; reminder_minute.value = 0; }
-        reminder_hour.sensitive = reminder.active; reminder_minute.sensitive = reminder.active;
-        reminder.notify["active"].connect (() => {
-            reminder_hour.sensitive = reminder.active; reminder_minute.sensitive = reminder.active;
-        });
-
-        var recurrence_model = new Gtk.StringList (null);
-        foreach (var label in new string[] { "Does not repeat", "Daily", "Weekly", "Monthly", "Yearly" })
-            recurrence_model.append (label);
-        var recurrence = new Adw.ComboRow (); recurrence.title = "Repeat";
-        recurrence.model = recurrence_model;
-        recurrence.selected = task == null ? 0 : (uint) task.recurrence;
-        var interval = new Adw.SpinRow.with_range (1, 99, 1); interval.title = "Repeat every";
-        interval.subtitle = "Number of days, weeks, months, or years";
-        interval.value = task == null ? 1 : task.recurrence_interval;
-        interval.sensitive = recurrence.selected != 0;
-        recurrence.notify["selected"].connect (() => interval.sensitive = recurrence.selected != 0);
-        var schedule = new Adw.PreferencesGroup (); schedule.add (reminder);
-        schedule.add (reminder_hour); schedule.add (reminder_minute); schedule.add (recurrence); schedule.add (interval);
-
-        var editor = new Gtk.Box (Gtk.Orientation.VERTICAL, 10);
-        editor.set_size_request (440, -1); editor.append (details); editor.append (due_label); editor.append (calendar); editor.append (schedule);
-        if (source != null) {
-            var linked = new Gtk.Label ("This task will stay linked to the selected email and keep it flagged until completion.");
-            linked.wrap = true; linked.xalign = 0; linked.add_css_class ("dim-label"); editor.append (linked);
-        }
-        var scroller = new Gtk.ScrolledWindow (); scroller.set_size_request (460, 540);
-        scroller.hscrollbar_policy = Gtk.PolicyType.NEVER; scroller.child = editor;
-        var dialog = new Adw.AlertDialog (task == null ? "New Task" : "Edit Task",
-            task == null ? "Plan a follow-up with an optional reminder and recurrence." : "Update this task’s schedule and details.");
-        dialog.add_css_class ("task-editor-dialog");
-        dialog.extra_child = scroller; dialog.add_response ("cancel", "Cancel"); dialog.add_response ("save", "Save");
-        dialog.default_response = "save"; dialog.close_response = "cancel";
-        var parent = get_root () as Gtk.Widget;
-        if (parent == null || (yield dialog.choose (parent, null)) != "save") return;
-
-        var date = calendar.get_date ();
-        string due_at = date.format ("%F"); int64 reminder_at = 0;
-        if (reminder.active) {
-            var when = new DateTime.local (date.get_year (), date.get_month (), date.get_day_of_month (),
-                (int) reminder_hour.value, (int) reminder_minute.value, 0);
-            reminder_at = when.to_unix ();
-        }
-        try {
-            MailTask saved;
-            if (task != null)
-                saved = service.update (task, title.text, due_at, notes.text, reminder_at,
-                    (TaskRecurrence) recurrence.selected, (int) interval.value);
-            else if (source != null)
-                saved = service.create_from_message (source, title.text, due_at, notes.text,
-                    reminder_at, (TaskRecurrence) recurrence.selected, (int) interval.value);
-            else
-                saved = service.create (title.text, due_at, notes.text, "", reminder_at,
-                    (TaskRecurrence) recurrence.selected, (int) interval.value);
-            focus_task_id = saved.id;
-            toast_requested (task == null ? "Task created" : "Task updated");
-        } catch (Error error) { operation_failed (error); }
-    }
-
-    private async void confirm_delete (MailTask task) {
-        var dialog = new Adw.AlertDialog ("Delete task?", task.title);
-        dialog.add_response ("cancel", "Cancel"); dialog.add_response ("delete", "Delete");
-        dialog.set_response_appearance ("delete", Adw.ResponseAppearance.DESTRUCTIVE);
-        dialog.default_response = "cancel"; dialog.close_response = "cancel";
-        var parent = get_root () as Gtk.Widget;
-        if (parent == null || (yield dialog.choose (parent, null)) != "delete") return;
-        try { service.delete (task); toast_requested ("Task deleted"); }
-        catch (Error error) { operation_failed (error); }
-    }
-
-    private static string friendly_date (string due_at) {
-        var date = MailTask.parse_due_date (due_at);
-        return date == null ? due_at : date.format ("%b %e, %Y").strip ();
-    }
-
-    private static string friendly_reminder (int64 reminder_at) {
-        return new DateTime.from_unix_local (reminder_at).format ("%b %e · %l:%M %p").strip ();
-    }
-
     ~TaskView () {
-        if (reload_source != 0) Source.remove (reload_source);
-        if (focus_source != 0) Source.remove (focus_source);
+        if (reload_cancellable != null) reload_cancellable.cancel ();
     }
 }
 }

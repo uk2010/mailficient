@@ -68,7 +68,10 @@ public class AttachmentPreviewWindow : Adw.Window {
             if (kind == AttachmentPreviewKind.NONE || detected_kind != kind)
                 throw new MailError.ATTACHMENT ("The file contents do not match a safely previewable type");
             var stream = yield file.read_async (Priority.DEFAULT, null);
-            uint8[] prefix = new uint8[16];
+            // Image dimensions live in format headers. Read a bounded prefix
+            // large enough to find ordinary JPEG SOF markers before asking a
+            // decoder to allocate a pixel surface.
+            uint8[] prefix = new uint8[64 * 1024];
             ssize_t prefix_length = yield stream.read_async (prefix, Priority.DEFAULT, null);
             yield stream.close_async (Priority.DEFAULT, null);
             if (prefix_length < 0 || !AttachmentSafety.preview_signature_matches (kind,
@@ -76,6 +79,13 @@ public class AttachmentPreviewWindow : Adw.Window {
                 throw new MailError.ATTACHMENT ("The file signature does not match its declared type");
             switch (kind) {
                 case AttachmentPreviewKind.IMAGE:
+                    int width;
+                    int height;
+                    if (!AttachmentSafety.preview_image_dimensions_are_safe (
+                            info.get_content_type () ?? "", prefix,
+                            (size_t) prefix_length, out width, out height))
+                        throw new MailError.ATTACHMENT (
+                            "The image dimensions are missing or exceed the safe preview limit");
                     show_image (file);
                     break;
                 case AttachmentPreviewKind.TEXT:
@@ -148,7 +158,11 @@ public class AttachmentPreviewWindow : Adw.Window {
         settings.enable_html5_database = false;
         settings.enable_html5_local_storage = false;
         settings.enable_webgl = false;
-        var view = new WebKit.WebView ();
+        var network_session = new WebKit.NetworkSession.ephemeral ();
+        network_session.set_persistent_credential_storage_enabled (false);
+        network_session.get_cookie_manager ().set_accept_policy (
+            WebKit.CookieAcceptPolicy.NEVER);
+        var view = new PrivateWebView (network_session);
         view.settings = settings;
         view.hexpand = true; view.vexpand = true;
         view.halign = Gtk.Align.FILL; view.valign = Gtk.Align.FILL;

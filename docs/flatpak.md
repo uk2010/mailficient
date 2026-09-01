@@ -7,7 +7,8 @@ are under `data/`, and the build entry point is
 
 The manifest builds:
 
-- libical 3.0.20 from its pinned upstream Git commit
+- libical 3.0.20 from its pinned upstream Git commit, with the upstream
+  `icalcomponent_merge_component()` heap-overflow fix backported for the 3.x ABI
 - Evolution Data Server 3.60.2 from its checksum-pinned GNOME archive
 - Mailficient from the complete repository source tree
 
@@ -20,27 +21,29 @@ After creating a bundle with the steps below, verify and install it from its
 output directory:
 
 ```sh
-sha256sum -c Mailficient-0.5.0-beta.1-x86_64.flatpak.sha256
-flatpak install --user ./Mailficient-0.5.0-beta.1-x86_64.flatpak
+sha256sum -c Mailficient-0.6.0-beta.1-x86_64.flatpak.sha256
+flatpak install --user ./Mailficient-0.6.0-beta.1-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
 Bundles can be built natively for x86-64 or ARM64. The matching runtime is
 downloaded from Flathub when it is not already installed. Mailficient's pinned
 libical and Evolution Data Server/Camel dependencies are built into the
-application; GTK, Libadwaita, WebKitGTK, and their platform dependencies come
-from the declared GNOME 49 runtime and are resolved automatically by Flatpak.
+application. WebKitGTK 2.52.6 is also pinned in the manifest so the HTML and
+PDF renderers do not fall back to a runtime revision affected by
+WSA-2026-0005. GTK, Libadwaita, and the remaining platform dependencies come
+from the declared GNOME 50 runtime and are resolved automatically by Flatpak.
 
 ## Build from source
 
 Install Flatpak and Flatpak Builder using the Linux distribution's package
-manager. Add Flathub and install the GNOME 49 build/runtime pair:
+manager. Add Flathub and install the GNOME 50 build/runtime pair:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub \
   https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install --user flathub \
-  org.gnome.Platform//49 org.gnome.Sdk//49
+  org.gnome.Platform//50 org.gnome.Sdk//50
 ```
 
 From the root of a Mailficient checkout, build, test, install, and run:
@@ -54,8 +57,8 @@ flatpak run --user com.local.Mailficient
 `run-tests` is enabled in the manifest, so the core, calendar, EDS-calendar,
 and Camel boundary suites must pass before Flatpak Builder completes. The
 manifest enables `-Dcalendar=enabled` and grants the application access to the
-EDS `org.gnome.evolution.dataserver.Calendar8` service for invitation responses
-and meeting-draft creation. It does not grant Mailficient a separate calendar
+EDS `org.gnome.evolution.dataserver.Calendar8` service for Today/Events reads,
+event changes, invitation responses, and meeting-draft creation. It does not grant Mailficient a separate calendar
 database or permission to send an invitation without the user's calendar
 action.
 
@@ -71,12 +74,12 @@ flatpak-builder --force-clean \
 flatpak build-bundle \
   --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
   flatpak-repo \
-  Mailficient-0.5.0-beta.1-x86_64.flatpak \
+  Mailficient-0.6.0-beta.1-x86_64.flatpak \
   com.local.Mailficient \
   master
 
-sha256sum Mailficient-0.5.0-beta.1-x86_64.flatpak \
-  > Mailficient-0.5.0-beta.1-x86_64.flatpak.sha256
+sha256sum Mailficient-0.6.0-beta.1-x86_64.flatpak \
+  > Mailficient-0.6.0-beta.1-x86_64.flatpak.sha256
 ```
 
 Build output, repositories, bundles, and local mail data are excluded from

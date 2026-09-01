@@ -1860,20 +1860,6 @@ window.mail-window.mail-dark > contents,
   opacity: 1;
 }
 
-.mail-sidebar row.follow-up-section-row {
-  background: transparent;
-  box-shadow: none;
-}
-
-.mail-sidebar .follow-up-section > title {
-  min-height: 30px;
-  color: alpha(currentColor, .78);
-}
-
-.mail-sidebar .follow-up-list {
-  margin-top: 2px;
-}
-
 .sidebar-add-popover > contents {
   padding: 5px;
   border-radius: 11px;
@@ -3148,21 +3134,6 @@ window.mail-window.background,
   border-color: rgba(53, 132, 228, .18);
 }
 
-.mail-window .mail-sidebar .follow-up-section > title {
-  min-height: 34px;
-  border-radius: 9px;
-  color: alpha(currentColor, .74);
-}
-
-.mail-window .mail-sidebar .follow-up-section > title:hover {
-  background: alpha(currentColor, .055);
-}
-
-.mail-window .mail-sidebar .follow-up-title {
-  font-size: .88em;
-  font-weight: 700;
-}
-
 .mail-window .sidebar-add-popover > contents {
   padding: 6px;
   border: 1px solid alpha(currentColor, .11);
@@ -3943,8 +3914,7 @@ window.mail-window.background,
   min-height: 27px;
 }
 
-.mail-window .mail-sidebar .favorites-header,
-.mail-window .mail-sidebar .follow-up-section > title {
+.mail-window .mail-sidebar .favorites-header {
   min-height: 30px;
 }
 

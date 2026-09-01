@@ -51,7 +51,7 @@ private class MailboxRowContent : Gtk.Box {
         }
         string unit = mailbox.role == MailboxRole.DRAFTS ? "draft" :
             (mailbox.id == CachedMailRepository.TASK_TODAY_ID ||
-             mailbox.id == CachedMailRepository.TASK_PLANNED_ID) ? "open task" :
+             mailbox.id == CachedMailRepository.TASK_PLANNED_ID) ? "open event" :
             mailbox.id == CachedMailRepository.LOCAL_OUTBOX_ID ? "queued message" :
             "unread message";
         count_label.tooltip_text = "%u %s%s".printf (mailbox.unread_count, unit,
@@ -106,7 +106,6 @@ public class MailboxSidebar : Gtk.Box {
     private Gtk.Popover add_popover = new Gtk.Popover ();
     private Gtk.Button add_mailbox_button = new Gtk.Button ();
     private Gtk.Button add_subfolder_button = new Gtk.Button ();
-    private bool follow_up_expanded;
     private int account_group_count;
 
     public MailboxSidebar (MailRepository repository, CacheDatabase cache) {
@@ -354,9 +353,9 @@ public class MailboxSidebar : Gtk.Box {
 
     private void add_mailbox_drag_and_drop (Gtk.ListBoxRow row, Mailbox mailbox,
                                             bool favorite_row) {
-        // Local productivity rows are navigation destinations, not folders.
-        // They must not present a drag affordance that suggests reordering or
-        // accepting mail is possible.
+        // Every direct favorite can be reordered. Virtual/productivity rows
+        // still reject mail and folder drops below because they have no
+        // account destination.
         if (!favorite_row && mailbox.account_id == "") return;
         var source = new Gtk.DragSource ();
         source.actions = Gdk.DragAction.MOVE;
@@ -751,7 +750,10 @@ public class MailboxSidebar : Gtk.Box {
     private void append_favorites (Gee.List<Mailbox> mailboxes, Gee.HashSet<string> favorites, bool demo) {
         var eligible = new Gee.HashMap<string, Mailbox> ();
         foreach (var mailbox in mailboxes) {
-            if (is_productivity_mailbox (mailbox)) continue;
+            if (is_productivity_mailbox (mailbox)) {
+                eligible[mailbox.id] = mailbox;
+                continue;
+            }
             // Provider Drafts are synchronized into the editable local Drafts
             // model. Never expose the raw cached MIME mailbox as a second,
             // read-only favorite beside that authoritative view.
@@ -773,71 +775,6 @@ public class MailboxSidebar : Gtk.Box {
             if (eligible.has_key (mailbox.id) && !appended.contains (mailbox.id))
                 append_mailbox (list, mailbox);
         }
-    }
-
-    private void append_follow_up (Gee.List<Mailbox> mailboxes) {
-        var follow_up = new Gee.ArrayList<Mailbox> ();
-        string[] follow_up_ids = { CachedMailRepository.TASK_TODAY_ID,
-                                   CachedMailRepository.TASK_PLANNED_ID,
-                                   CachedMailRepository.GNOME_CALENDAR_ID };
-        foreach (var id in follow_up_ids) {
-            foreach (var mailbox in mailboxes) {
-                if (mailbox.id == id) {
-                    follow_up.add (mailbox);
-                    break;
-                }
-            }
-        }
-        if (follow_up.size == 0) return;
-
-        var section_row = new Gtk.ListBoxRow ();
-        section_row.selectable = false; section_row.activatable = false;
-        section_row.add_css_class ("follow-up-section-row");
-        var expander = new Gtk.Expander (null);
-        expander.add_css_class ("follow-up-section");
-        expander.expanded = follow_up_expanded;
-        expander.set_margin_start (12); expander.set_margin_end (10);
-        expander.set_margin_top (9); expander.set_margin_bottom (5);
-        expander.notify["expanded"].connect (() => {
-            follow_up_expanded = expander.expanded;
-            try {
-                cache.set_preference ("follow-up-sidebar-expanded",
-                    follow_up_expanded ? "1" : "0");
-            } catch (Error error) {
-                warning ("Could not save Follow Up sidebar state: %s", error.message);
-            }
-        });
-        var heading = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
-        var icon = new Gtk.Image.from_icon_name ("task-due-symbolic");
-        icon.add_css_class ("dim-label");
-        heading.append (icon);
-        var label = new Gtk.Label ("Follow Up");
-        label.xalign = 0; label.hexpand = true; label.add_css_class ("heading");
-        label.add_css_class ("follow-up-title");
-        heading.append (label);
-        expander.label_widget = heading;
-
-        var follow_up_list = new Gtk.ListBox ();
-        follow_up_list.selection_mode = Gtk.SelectionMode.SINGLE;
-        follow_up_list.add_css_class ("navigation-sidebar");
-        follow_up_list.add_css_class ("follow-up-list");
-        account_lists.add (follow_up_list);
-        follow_up_list.row_selected.connect ((row) => {
-            if (row == null) return;
-            var mailbox = row.get_data<Mailbox> ("mailbox");
-            if (mailbox == null) return;
-            list.unselect_all ();
-            foreach (var other_list in account_lists)
-                if (other_list != follow_up_list) other_list.unselect_all ();
-            mark_active_row (row);
-            announce_selection (mailbox);
-            update_add_menu_context ();
-        });
-        foreach (var mailbox in follow_up)
-            append_mailbox (follow_up_list, mailbox);
-        expander.child = follow_up_list;
-        section_row.child = expander;
-        list.append (section_row);
     }
 
     private static int last_folder_separator (string remote_name) {
@@ -1000,8 +937,6 @@ public class MailboxSidebar : Gtk.Box {
                 if (id.strip () != "") expanded_accounts.add (id.strip ());
             foreach (var id in cache.preference ("collapsed-sidebar-mailboxes", "").split ("\n"))
                 if (id.strip () != "") collapsed_mailboxes.add (id.strip ());
-            follow_up_expanded = cache.preference (
-                "follow-up-sidebar-expanded", "0") == "1";
         } catch (Error error) {
             warning ("Could not load sidebar state: %s", error.message);
         }
@@ -1090,7 +1025,6 @@ public class MailboxSidebar : Gtk.Box {
             bool demo = accounts.size == 0 && Environment.get_variable ("MAILFICIENT_QA") == "1" &&
                 Environment.get_variable ("MAILFICIENT_QA_NO_DEMO") != "1";
             append_favorites (mailboxes, favorites, demo);
-            append_follow_up (mailboxes);
             if (demo) add_account_group (DemoMailRepository.ACCOUNT_ID, "Demo Account", "alex@example.com", mailboxes, false);
             else foreach (var account in accounts)
                 add_account_group (account.id, account.display_name, account.email, mailboxes, true, account);

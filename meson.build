@@ -1,4 +1,4 @@
-project('mailficient', 'vala', 'c', version: '0.5.0-beta.1', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
+project('mailficient', 'vala', 'c', version: '0.6.0-beta.1', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 cc = meson.get_compiler('c')
 
@@ -12,7 +12,7 @@ gio = dependency('gio-2.0')
 json = dependency('json-glib-1.0')
 sqlite = dependency('sqlite3')
 secret = dependency('libsecret-1')
-webkit = dependency('webkitgtk-6.0')
+webkit = dependency('webkitgtk-6.0', version: '>= 2.52.6')
 xml = dependency('libxml-2.0')
 crypto = cc.find_library('crypto', required: true)
 cairo = dependency('cairo')
@@ -195,6 +195,7 @@ if camel_test_dep.found()
     'src/services/online-account-service.vala',
     'src/services/draft-fingerprint.vala',
     'src/security/html-sanitizer.vala',
+    'src/security/html-content-policy.vala',
     'src/security/message-security-service.vala',
   )
   camel_tests = executable('camel-tests', camel_test_sources,

@@ -41,7 +41,7 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Release downloads
 
-The [v0.5.0-beta.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.5.0-beta.1)
+The [v0.6.0-beta.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.6.0-beta.1)
 provides the complete source archive, Debian and RPM packages for AMD64 and
 ARM64, and SHA-256 checksums for every downloadable package. Reproducible
 workflows for Flatpak and Snap builds are included in the source repository.
@@ -52,7 +52,7 @@ Build the current Flatpak from the pinned source manifest, then install and run
 the resulting bundle with:
 
 ```sh
-flatpak install --user ./Mailficient-0.5.0-beta.1-x86_64.flatpak
+flatpak install --user ./Mailficient-0.6.0-beta.1-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -68,7 +68,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.5.0-beta.1_arm64.snap
+sudo snap install --dangerous ./mailficient_0.6.0-beta.1_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -95,18 +95,18 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.5.0~beta1-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.6.0~beta1-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 
 The resulting package is intended for Ubuntu 26.04 on AMD64 or ARM64. Building it
-requires the GNOME 49 SDK and the checked Camel-enabled build artifacts; these
+requires the GNOME 50 SDK and the checked Camel-enabled build artifacts; these
 are already present in the documented Flatpak development environment.
 The builder also writes a matching `.deb.sha256` checksum for release uploads.
 
 ## Status
 
-The complete feature roadmap is implemented: bounded local and explicit server-side search; multi-selection and bulk actions; recoverable Trash moves plus confirmed permanent deletion and Empty Trash/Junk; rich composition with spellcheck, attachment reminders, durable Undo Send, formatting, inline images, and attachments; multi-condition rules, Quick Steps, and labels; scheduled sending, snooze, templates, vacation replies, and Today/Planned tasks with reminders, recurrence, and linked-email follow-up; calendar RSVP and meeting workflows; identity warnings, raw headers, Safe Senders, and reviewable unsubscribe/reporting actions; EML/PDF export and printing; and OpenPGP/S/MIME support. See [the feature guide](docs/features.md) for the controls and operational details.
+The complete feature roadmap is implemented: bounded local and explicit server-side search; multi-selection and bulk actions; recoverable Trash moves plus confirmed permanent deletion and Empty Trash/Junk; rich composition with spellcheck, attachment reminders, durable Undo Send, formatting, inline images, and attachments; multi-condition rules, Quick Steps, and labels; scheduled sending, snooze, templates, and vacation replies; GNOME Calendar-backed Today and Events views with event creation, editing, deletion, all-day scheduling, and recurrence; calendar RSVP and meeting workflows; identity warnings, raw headers, Safe Senders, and reviewable unsubscribe/reporting actions; EML/PDF export and printing; and OpenPGP/S/MIME support. See [the feature guide](docs/features.md) for the controls and operational details.
 
 Attachment rows provide signature-verified image, bounded text, and PDF previews. Remote images can be loaded once or allowed for a sender; Preferences → Safety opens the separate searchable Sender Lists window for reviewing and revoking trusted senders. IMAP IDLE delivers push updates while Mailficient is open. Background polling defaults to five minutes and can be changed to 1, 15, 30, or 60 minutes—or manual-only—under Preferences → General; startup checking is independently configurable. Preferences also reopens to the last section used.
 
@@ -123,8 +123,12 @@ RSVP was recorded.
 calendar with automatic invitation delivery disabled, then opens GNOME Calendar
 for review. The fallback opens a private, size-bounded `.ics` draft in the
 desktop calendar and likewise never sends an invitation automatically. The
-**Calendar** favorite remains a launcher: Mailficient does not maintain a second
-calendar database or embedded calendar view. GNOME Calendar must be installed
+**Today**, **Events**, and **Calendar** are reorderable direct Favorites rather
+than a nested sidebar group. Today and Events query enabled Evolution Data
+Server calendars, expand recurring occurrences, and write changes directly to
+the selected event's calendar; new events go to the writable default calendar.
+**Calendar** opens GNOME Calendar directly. No event copy is stored in the mail
+database. GNOME Calendar must be installed
 separately for Flatpak and Snap because their sandboxes cannot install another
 desktop application as a runtime dependency. The Flatpak manifest enables the
 EDS integration and grants access only to its calendar service.

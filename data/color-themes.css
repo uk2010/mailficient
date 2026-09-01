@@ -646,7 +646,7 @@ window.rules-window > contents,
   box-shadow: inset 0 -1px alpha(currentColor, .12);
 }
 
-/* Today and Planned share TaskView. Spell out the complete surface ladder
+/* Today and Events share TaskView. Spell out the complete surface ladder
  * here instead of depending only on inherited toolkit variables: this keeps
  * the page, header, list viewport, and task cards in the same Gray family. */
 window.color-theme-gray .task-view,

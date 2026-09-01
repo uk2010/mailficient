@@ -18,7 +18,6 @@ public class MailApplication : Adw.Application {
     private ColorThemeController color_theme_controller;
     private CacheMaintenanceService? cache_maintenance;
     private NotificationService notifications;
-    private TaskReminderService? task_reminders;
     private OnlineAccountService online_accounts;
     private CredentialCleanupService? credential_cleanup;
     private RemoteContentPolicy? remote_content_policy;
@@ -68,13 +67,6 @@ public class MailApplication : Adw.Application {
             if (window != null) window.open_message (parameter.get_string ());
         });
         add_action (open_message);
-        var open_task = new SimpleAction ("open-task", VariantType.INT64);
-        open_task.activate.connect ((parameter) => {
-            if (parameter == null) return;
-            activate ();
-            if (window != null) window.open_task (parameter.get_int64 ());
-        });
-        add_action (open_task);
         var preferences_action = new SimpleAction ("preferences", null);
         preferences_action.activate.connect (() => { activate (); if (window != null) window.show_preferences (); });
         add_action (preferences_action);
@@ -258,9 +250,6 @@ public class MailApplication : Adw.Application {
                 outbound_service, settings, remote_content_policy, account_provisioner,
                 credentials, credential_cleanup, mail_engine, sync_service, folder_service,
                 online_accounts);
-            task_reminders = new TaskReminderService (cache);
-            task_reminders.reminder_due.connect ((task) => notifications.notify_task_reminder (task));
-            task_reminders.start ();
             created_window = true;
             credential_cleanup.retry_pending.begin ();
             Idle.add (() => {
@@ -356,8 +345,6 @@ public class MailApplication : Adw.Application {
         received_attachment_service = null; draft_lifecycle = null; outbound_service = null;
         sync_service = null; folder_service = null; cache_maintenance = null;
         credential_cleanup = null; remote_content_policy = null; account_provisioner = null;
-        if (task_reminders != null) task_reminders.stop ();
-        task_reminders = null;
         onboarding_presented = false;
     }
 
@@ -424,7 +411,6 @@ public class MailApplication : Adw.Application {
             NetworkMonitor.get_default ().disconnect (network_changed_handler);
         startup_sync_gate = null;
         if (outbound_service != null) outbound_service.stop_scheduler ();
-        if (task_reminders != null) task_reminders.stop ();
         if (sync_service != null) sync_service.cancel ();
         base.shutdown ();
     }

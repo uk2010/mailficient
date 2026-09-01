@@ -1,0 +1,65 @@
+From: Mailficient security backport
+Subject: Backport the icalcomponent_merge_component string-array fix
+
+libical 3.x does not provide the icalstrarray helper used by the upstream
+4.0.2 fix. Store string pointers in icalarray using the documented pointer-to-
+element API, retain their ownership until the merge is complete, and
+dereference entries when reading or freeing them.
+
+This is the 3.x-compatible equivalent of upstream commit
+c1b48b2263d7c1ff796c7fd9f9aee68aae23c58d.
+
+diff --git a/src/libical/icalcomponent.c b/src/libical/icalcomponent.c
+index 1ef1c01..047af03 100644
+--- a/src/libical/icalcomponent.c
++++ b/src/libical/icalcomponent.c
+@@ -1966,7 +1966,7 @@ void icalcomponent_merge_component(icalcomponent *comp, icalcomponent *comp_to_m
+ 
+         /* Now free the tzids_to_rename array. */
+         for (i = 0; i < tzids_to_rename->num_elements; i++) {
+-            free(icalarray_element_at(tzids_to_rename, i));
++            free(*(char **)icalarray_element_at(tzids_to_rename, i));
+         }
+     }
+     icalarray_free(tzids_to_rename);
+@@ -2092,10 +2092,8 @@ static void icalcomponent_handle_conflicting_vtimezones(icalcomponent *comp,
+                     icalerror_set_errno(ICAL_NEWFAILED_ERROR);
+                     free(tzid_copy);
+                 } else {
+-                    icalarray_append(tzids_to_rename, tzid_copy);
+-                    free(tzid_copy);
+-                    icalarray_append(tzids_to_rename, existing_tzid_copy);
+-                    free(existing_tzid_copy);
++                    icalarray_append(tzids_to_rename, &tzid_copy);
++                    icalarray_append(tzids_to_rename, &existing_tzid_copy);
+                 }
+                 return;
+             } else {
+@@ -2128,10 +2126,8 @@ static void icalcomponent_handle_conflicting_vtimezones(icalcomponent *comp,
+ 
+     strncpy(new_tzid, tzid, tzid_len);
+     strcpy(new_tzid + tzid_len, suffix_buf);
+-    icalarray_append(tzids_to_rename, tzid_copy);
+-    icalarray_append(tzids_to_rename, new_tzid);
+-    free(tzid_copy);
+-    free(new_tzid);
++    icalarray_append(tzids_to_rename, &tzid_copy);
++    icalarray_append(tzids_to_rename, &new_tzid);
+ }
+ 
+ /* Returns the length of the TZID, without any trailing digits. */
+@@ -2172,9 +2168,11 @@ static void icalcomponent_rename_tzids_callback(icalparameter *param, void *data
+ 
+     /* Step through the rename table to see if the current TZID matches
+        any of the ones we want to rename. */
+-    for (i = 0; i < rename_table->num_elements - 1; i += 2) {
+-        if (!strcmp(tzid, icalarray_element_at(rename_table, i))) {
+-            icalparameter_set_tzid(param, icalarray_element_at(rename_table, i + 1));
++    for (i = 0; i + 1 < rename_table->num_elements; i += 2) {
++        const char *old_tzid = *(char **)icalarray_element_at(rename_table, i);
++        const char *new_tzid = *(char **)icalarray_element_at(rename_table, i + 1);
++        if (!strcmp(tzid, old_tzid)) {
++            icalparameter_set_tzid(param, new_tzid);
+             break;
+         }
+     }

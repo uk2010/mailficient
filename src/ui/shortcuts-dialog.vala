@@ -18,8 +18,8 @@ public class ShortcutsDialog : Adw.PreferencesDialog {
         add_shortcut_row (navigation, "Next Message", "Alt+Down / Ctrl+J"); add_shortcut_row (navigation, "Previous Message", "Alt+Up / Ctrl+K");
         add_shortcut_row (navigation, "Snooze", "Ctrl+S");
         add_shortcut_row (navigation, "Preferences", "Ctrl+,");
-        var tasks = new Adw.PreferencesGroup (); tasks.title = "Tasks";
-        add_shortcut_row (tasks, "New Task", "Ctrl+Shift+T");
+        var tasks = new Adw.PreferencesGroup (); tasks.title = "Events";
+        add_shortcut_row (tasks, "New Event", "Ctrl+Shift+T");
         var compose = new Adw.PreferencesGroup (); compose.title = "Composing";
         add_shortcut_row (compose, "Send", "Ctrl+Enter"); add_shortcut_row (compose, "Save Draft", "Ctrl+S");
         add_shortcut_row (compose, "Attach Files", "Ctrl+Shift+A");

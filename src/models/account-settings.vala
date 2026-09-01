@@ -33,10 +33,37 @@ public class AccountSettings : Object {
     }
 
     private static void validate_endpoint (string host, uint port, string label) throws MailError {
-        if (host.strip () == "" || host.contains (" ") || !host.contains ("."))
+        if (!valid_server_host (host))
             throw new MailError.INVALID_ACCOUNT ("The %s server address is invalid".printf (label));
         if (port == 0 || port > 65535)
             throw new MailError.INVALID_ACCOUNT ("The %s server port is invalid".printf (label));
+    }
+
+    internal static bool valid_server_host (string value) {
+        if (value == "" || value != value.strip () || value.length > 253)
+            return false;
+        for (int index = 0; index < value.length;) {
+            unichar character = value.get_char (index);
+            if (character.isspace () || character.iscntrl ()) return false;
+            index += character.to_utf8 (null);
+        }
+        InetAddress? address = new InetAddress.from_string (value);
+        if (address != null) return true;
+
+        string host = value.down ();
+        if (host.has_suffix (".")) host = host.substring (0, host.length - 1);
+        if (!host.contains (".") || host.contains ("..")) return false;
+        bool has_letter = false;
+        foreach (string label in host.split (".")) {
+            if (label == "" || label.length > 63 || label.has_prefix ("-") ||
+                label.has_suffix ("-")) return false;
+            for (int index = 0; index < label.length; index++) {
+                char character = label[index];
+                if (!(character.isalnum () || character == '-')) return false;
+                if (character.isalpha ()) has_letter = true;
+            }
+        }
+        return has_letter;
     }
 
     public static AccountSettings for_email (string display_name, string email) {

@@ -21,8 +21,12 @@ private const string OUTLOOK_REQUEST =
 
 private class RecordingCalendarBackend : Object, CalendarBackend {
     public bool direct = true;
+    public bool manageable = true;
     public int response_calls;
     public int create_calls;
+    public int event_create_calls;
+    public int event_update_calls;
+    public int event_delete_calls;
     public int launch_calls;
     public string response_identity = "";
     public CalendarParticipation response_participation;
@@ -31,6 +35,7 @@ private class RecordingCalendarBackend : Object, CalendarBackend {
     public CalendarCreateDisposition create_disposition = CalendarCreateDisposition.CREATED;
 
     public bool can_respond_directly { get { return direct; } }
+    public bool can_manage_events { get { return manageable; } }
 
     public async void respond (CalendarInvitation invitation, string identity_email,
                                CalendarParticipation participation, bool send_response,
@@ -50,7 +55,47 @@ private class RecordingCalendarBackend : Object, CalendarBackend {
         return create_disposition;
     }
 
+    public async Gee.ArrayList<CalendarEventOccurrence> list_events (
+        DateTime range_start, DateTime range_end,
+        Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        return new Gee.ArrayList<CalendarEventOccurrence> ();
+    }
+
+    public async void create_event (CalendarEventDraft draft,
+                                    Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        event_create_calls++;
+    }
+
+    public async void update_event (CalendarEventOccurrence event,
+                                    CalendarEventDraft draft,
+                                    Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        event_update_calls++;
+    }
+
+    public async void delete_event (CalendarEventOccurrence event,
+                                    Cancellable? cancellable = null) throws Error {
+        if (cancellable != null) cancellable.set_error_if_cancelled ();
+        event_delete_calls++;
+    }
+
     public void launch_calendar () throws Error { launch_calls++; }
+}
+
+private void run_event_create (CalendarIntegrationService service,
+                               CalendarEventDraft draft,
+                               out Error? failure) {
+    var loop = new MainLoop ();
+    Error? captured = null;
+    service.create_event.begin (draft, null, (object, result) => {
+        try { service.create_event.end (result); }
+        catch (Error error) { captured = error; }
+        loop.quit ();
+    });
+    loop.run ();
+    failure = captured;
 }
 
 private CacheDatabase test_cache (string root, string account_id = "calendar-account") {
@@ -251,17 +296,22 @@ private void test_meeting_from_email_is_draft_and_never_auto_sends () {
         var parsed = ICalendarParser.parse (payload);
         assert (parsed.summary == meeting.summary);
 
+        // The Calendar favorite must launch through this same backend rather
+        // than bypassing the authoritative calendar integration.
+        service.open_calendar ();
+        assert (backend.launch_calls == 1);
+
         CalendarCreateDisposition disposition; Error? failure;
         run_create (service, meeting, out disposition, out failure);
         assert (failure == null);
         assert (disposition == CalendarCreateDisposition.CREATED);
         assert (backend.create_calls == 1);
-        assert (backend.launch_calls == 1);
+        assert (backend.launch_calls == 2);
 
         backend.create_disposition = CalendarCreateDisposition.OPENED_FOR_REVIEW;
         run_create (service, meeting, out disposition, out failure);
         assert (failure == null);
-        assert (backend.launch_calls == 1);
+        assert (backend.launch_calls == 2);
     } catch (Error error) {
         GLib.error ("Meeting-from-email test failed: %s", error.message);
     }
@@ -300,6 +350,33 @@ private void test_local_invitation_is_staged_and_parsed () {
     }
 }
 
+private void test_event_creation_uses_calendar_backend_and_validates () {
+    string root = DirUtils.make_tmp ("mailficient-calendar-event-XXXXXX");
+    try {
+        var cache = test_cache (root);
+        var backend = new RecordingCalendarBackend ();
+        var service = new CalendarIntegrationService (cache,
+            new ReceivedAttachmentService (cache,
+                new AttachmentService (Path.build_filename (root, "attachments")), null),
+            backend);
+        assert (service.can_manage_events);
+        var start = new DateTime.local (2026, 9, 10, 13, 0, 0);
+        var draft = new CalendarEventDraft ("Calendar-backed event", "Notes",
+            "Room 4", start, start.add_hours (1), false);
+        Error? failure;
+        run_event_create (service, draft, out failure);
+        assert (failure == null);
+        assert (backend.event_create_calls == 1);
+
+        run_event_create (service, new CalendarEventDraft ("", "", "",
+            start, start.add_hours (1), false), out failure);
+        assert (failure is CalendarError.CREATE_FAILED);
+        assert (backend.event_create_calls == 1);
+    } catch (Error error) {
+        GLib.error ("Calendar event creation test failed: %s", error.message);
+    }
+}
+
 int main (string[] args) {
     Test.init (ref args);
     Test.add_func ("/calendar/parser/outlook-request", test_outlook_request_parser);
@@ -313,5 +390,7 @@ int main (string[] args) {
     Test.add_func ("/calendar/service/meeting-from-email-no-auto-send",
         test_meeting_from_email_is_draft_and_never_auto_sends);
     Test.add_func ("/calendar/service/local-staging", test_local_invitation_is_staged_and_parsed);
+    Test.add_func ("/calendar/service/event-create-routes-to-calendar-store",
+        test_event_creation_uses_calendar_backend_and_validates);
     return Test.run ();
 }

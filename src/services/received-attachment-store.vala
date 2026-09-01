@@ -27,11 +27,15 @@ internal class ReceivedAttachmentStore : Object {
     private const int64 MAX_RECEIVED_ATTACHMENT_BYTES = 50 * 1024 * 1024;
     private string directory;
     private int64 maximum_bytes;
+    private bool storage_available;
 
     public ReceivedAttachmentStore (string directory, int64 maximum_bytes = 50 * 1024 * 1024) {
         this.directory = directory;
         this.maximum_bytes = maximum_bytes;
-        DirUtils.create_with_parents (directory, 0700);
+        storage_available = DirUtils.create_with_parents (directory, 0700) == 0 &&
+            FileUtils.chmod (directory, 0700) == 0;
+        if (!storage_available)
+            warning ("Could not secure received attachment storage");
     }
 
     public Attachment? save (Camel.DataWrapper content, string? original_name, string content_type,
@@ -43,6 +47,7 @@ internal class ReceivedAttachmentStore : Object {
             "%s:%d:%s".printf (message_key, index, name)).substring (0, 32);
         int64 size = (int64) content.calculate_decoded_size_sync (cancellable);
         var remote = new Attachment (id, "", name, size, content_type, content_id, index);
+        if (!storage_available) return remote;
         int64 effective_limit = remaining_message_bytes < 0 ? maximum_bytes :
             int64.min (maximum_bytes, remaining_message_bytes);
         if (effective_limit <= 0 || size > effective_limit) return remote;

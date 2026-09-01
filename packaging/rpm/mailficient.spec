@@ -12,7 +12,7 @@ Requires:       libgee
 Requires:       json-glib
 Requires:       libsecret
 Requires:       sqlite-libs
-Requires:       webkitgtk6.0
+Requires:       webkitgtk6.0 >= 2.52.6
 Requires:       libxml2
 Requires:       gnupg2
 Recommends:     gnome-keyring
@@ -57,8 +57,12 @@ if test -x %{mailficient_app_tree}/bin/mailficient-addressbook-probe; then
         %{buildroot}%{_libdir}/mailficient/mailficient-addressbook-probe.real
 fi
 
-cp -a %{mailficient_app_tree}/lib/*.so* \
-    %{buildroot}%{_libdir}/mailficient/
+for app_library in %{mailficient_app_tree}/lib/*.so*; do
+    case "$(basename "$app_library")" in
+        libwebkitgtk-6.0.so*|libjavascriptcoregtk-6.0.so*) continue ;;
+    esac
+    cp -a "$app_library" %{buildroot}%{_libdir}/mailficient/
+done
 cp -a %{mailficient_app_tree}/lib/evolution-data-server \
     %{buildroot}%{_libdir}/mailficient/
 
@@ -144,6 +148,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Tue Sep 01 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.6.0-0.1.beta
+- Promote Today, Events, and Calendar to direct GNOME Calendar-backed Favorites.
+- Harden HTML rendering and application security for the beta release.
+
 * Mon Aug 31 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.5.0-0.1.beta
 - Open the Mailficient 0.5 public beta and preserve the Junk toolbar label in
   Icon and Text mode when the action icon changes.

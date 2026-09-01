@@ -1,3 +1,20 @@
+# Mailficient 0.6.0 Beta 1
+
+Mailficient 0.6.0 Beta 1 makes the calendar integration authoritative and
+hardens message rendering for everyday use.
+
+Highlights:
+
+- Promotes Today, Events, and Calendar to direct, reorderable Favorites
+- Reads and writes event data through the GNOME Calendar/Evolution Data Server
+  store instead of a local mail database copy
+- Keeps HTML email readable while enforcing safe inline styles and bounded
+  embedded stylesheets
+- Includes the completed security hardening and refreshed native package builds
+
+Package artifacts include AMD64 and ARM64 Debian packages, x86_64 and aarch64
+RPM packages, and SHA-256 checksums for every downloadable file.
+
 # Mailficient 0.5.0 Beta 1
 
 Mailficient 0.5.0 Beta 1 opens the public beta for the complete native mail

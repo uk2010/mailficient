@@ -104,7 +104,10 @@ public class MailRuleCondition : Object {
             haystack = labels.str;
             break;
         case MailRuleField.SECURITY_STATUS:
-            haystack = message.security_status + " " + message.authentication_results;
+            // Authentication-Results is an untrusted message header until it
+            // is tied to the configured receiving server. Rules must never
+            // treat an attacker-supplied header as a verified security state.
+            haystack = message.security_status;
             break;
         case MailRuleField.MAILING_LIST:
             haystack = message.list_unsubscribe + " " + message.list_unsubscribe_post +

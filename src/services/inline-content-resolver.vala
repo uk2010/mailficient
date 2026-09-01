@@ -31,9 +31,14 @@ public class InlineContentResolver : Object {
                 if (file == null) continue;
                 uint8[] contents; string? etag;
                 file.load_contents (null, out contents, out etag);
+                int image_width;
+                int image_height;
                 if (contents.length == 0 || contents.length > MAX_INLINE_IMAGE_BYTES ||
                     contents.length > remaining ||
-                    !matches_image_signature (mime_type, contents)) continue;
+                    !matches_image_signature (mime_type, contents) ||
+                    !AttachmentSafety.preview_image_dimensions_are_safe (
+                        mime_type, contents, contents.length,
+                        out image_width, out image_height)) continue;
                 int64 encoded_bytes = ((int64) contents.length + 2) / 3 * 4;
                 int64 first_growth = "src=\"data:;base64,\"".length +
                     mime_type.length + encoded_bytes - needle.length;

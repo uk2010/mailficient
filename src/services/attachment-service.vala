@@ -9,6 +9,8 @@ public class AttachmentService : Object {
         this.storage_directory = storage_directory;
         if (DirUtils.create_with_parents (storage_directory, 0700) != 0)
             throw new MailError.STORAGE ("Could not create private attachment storage");
+        if (FileUtils.chmod (storage_directory, 0700) != 0)
+            throw new MailError.STORAGE ("Could not secure private attachment storage");
     }
 
     public async Attachment import_file (File source, Cancellable? cancellable = null) throws Error {
@@ -28,6 +30,18 @@ public class AttachmentService : Object {
             yield source.copy_async (destination, FileCopyFlags.NOFOLLOW_SYMLINKS,
                 Priority.DEFAULT, cancellable, null);
             if (cancellable != null) cancellable.set_error_if_cancelled ();
+            var copied = yield destination.query_info_async (
+                FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_SIZE,
+                FileQueryInfoFlags.NOFOLLOW_SYMLINKS, Priority.DEFAULT,
+                cancellable);
+            int64 copied_size = (int64) copied.get_size ();
+            if (copied.get_file_type () != FileType.REGULAR ||
+                copied_size != size || copied_size > MAX_ATTACHMENT_SIZE)
+                throw new MailError.ATTACHMENT (
+                    "The attachment changed while it was being copied");
+            string? destination_path = destination.get_path ();
+            if (destination_path == null || FileUtils.chmod (destination_path, 0600) != 0)
+                throw new MailError.STORAGE ("Could not secure the private attachment copy");
         } catch (Error error) {
             try { if (destination.query_exists ()) destination.delete (); } catch (Error ignored) { }
             throw error;

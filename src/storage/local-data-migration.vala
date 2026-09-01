@@ -2,7 +2,10 @@ namespace Mailficient {
 public class LocalDataMigration : Object {
     public static string prepare (string data_home) throws MailError {
         string destination_path = Path.build_filename (data_home, "mailficient");
-        if (FileUtils.test (destination_path, FileTest.IS_DIR)) return destination_path;
+        if (FileUtils.test (destination_path, FileTest.IS_DIR)) {
+            enforce_private_root (destination_path);
+            return destination_path;
+        }
 
         string legacy_path = Path.build_filename (data_home, "personal-mail");
         if (!FileUtils.test (legacy_path, FileTest.IS_DIR)) {
@@ -19,6 +22,7 @@ public class LocalDataMigration : Object {
                 rewrite_attachment_paths (staged_database, legacy_path, destination_path);
             File.new_for_path (staging_path).move (File.new_for_path (destination_path),
                 FileCopyFlags.NOFOLLOW_SYMLINKS, null, null);
+            enforce_private_root (destination_path);
         } catch (Error error) {
             try { remove_staging_directory (File.new_for_path (staging_path)); }
             catch (Error cleanup_error) {
@@ -116,7 +120,22 @@ public class LocalDataMigration : Object {
     private static void create_private_directory (string path) throws MailError {
         if (DirUtils.create_with_parents (path, 0700) != 0)
             throw new MailError.STORAGE ("Could not create the local Mailficient data directory");
-        FileUtils.chmod (path, 0700);
+        if (FileUtils.chmod (path, 0700) != 0)
+            throw new MailError.STORAGE (
+                "Could not secure the local Mailficient data directory");
+    }
+
+    private static void enforce_private_root (string path) throws MailError {
+        if (FileUtils.chmod (path, 0700) != 0)
+            throw new MailError.STORAGE (
+                "Could not secure the local Mailficient data directory");
+        foreach (string suffix in new string[] { "", "-wal", "-shm" }) {
+            string database_path = Path.build_filename (path, "mail.db" + suffix);
+            if (FileUtils.test (database_path, FileTest.IS_REGULAR) &&
+                FileUtils.chmod (database_path, 0600) != 0)
+                throw new MailError.STORAGE (
+                    "Could not secure the local Mailficient database");
+        }
     }
 }
 }

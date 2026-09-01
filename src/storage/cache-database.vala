@@ -35,7 +35,18 @@ public class CacheDatabase : Object, AccountStore {
         // WAL database. Give short overlapping writes time to serialize rather
         // than surfacing a transient SQLITE_BUSY as lost mail state.
         execute ("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+        enforce_database_permissions ();
         migrate ();
+        enforce_database_permissions ();
+    }
+
+    private void enforce_database_permissions () throws MailError {
+        foreach (string suffix in new string[] { "", "-wal", "-shm" }) {
+            string candidate = database_path + suffix;
+            if (FileUtils.test (candidate, FileTest.IS_REGULAR) &&
+                FileUtils.chmod (candidate, 0600) != 0)
+                throw new MailError.STORAGE ("Could not secure the mail cache files");
+        }
     }
 
     private void migrate () throws MailError {

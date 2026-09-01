@@ -191,6 +191,9 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
     private const int64 MAX_RECEIVED_MESSAGE_ATTACHMENT_BYTES = 100 * 1024 * 1024;
     private const int64 MAX_EXPLICIT_ATTACHMENT_DOWNLOAD_BYTES = (int64) 2 * 1024 * 1024 * 1024;
     internal const int64 MAX_RECEIVED_TEXT_PART_BYTES = 10 * 1024 * 1024;
+    internal const int64 MAX_RECEIVED_MESSAGE_BYTES = 128 * 1024 * 1024;
+    internal const int MAX_MIME_TREE_DEPTH = 64;
+    internal const int MAX_MIME_PARTS = 2048;
     internal const int MAX_MESSAGES_PER_SYNC_SESSION = 250;
     // Message bodies are streamed in small batches and the main context is
     // yielded between downloads, so a large mailbox does not monopolize GTK
@@ -930,6 +933,7 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
                             }
                             state.detail = "Getting new Inbox messages…";
                             try {
+                                ensure_received_message_size (info);
                                 Camel.MimeMessage? mime = yield get_message_repairing_empty_cache (
                                     plan.folder, uid, cancellable);
                                 if (mime == null) {
@@ -1020,6 +1024,7 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
                         downloaded, total_unseen, plan.mailbox.name);
                     state.progress = 0.20 + (0.75 * processed / (double) int.max (1, download_target));
                     try {
+                        ensure_received_message_size (info);
                         Camel.MimeMessage? mime = yield get_message_repairing_empty_cache (
                             plan.folder, uid, cancellable);
                         if (mime == null) {
@@ -1204,6 +1209,13 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
         if (retry == null)
             throw new MailError.CONNECTION ("The server returned an empty message");
         return retry;
+    }
+
+    internal static void ensure_received_message_size (Camel.MessageInfo info) throws Error {
+        int64 declared_size = (int64) info.get_size ();
+        if (declared_size > MAX_RECEIVED_MESSAGE_BYTES)
+            throw new IOError.MESSAGE_TOO_LARGE (
+                "The server message is larger than Mailficient's 128 MiB safety limit");
     }
 
     private static bool remove_zero_byte_message_cache (Camel.Folder folder,
@@ -1614,25 +1626,45 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
                                    Gee.ArrayList<Attachment> attachments, string message_key, ref int attachment_index,
                                    ref int64 remaining_attachment_bytes,
                                    Cancellable? cancellable) throws Error {
+        int visited_parts = 0;
+        extract_content_bounded (wrapper, ref plain, ref html, ref attachment,
+            attachments, message_key, ref attachment_index,
+            ref remaining_attachment_bytes, cancellable, 0, ref visited_parts);
+    }
+
+    private void extract_content_bounded (Camel.DataWrapper wrapper, ref string plain,
+                                          ref string html, ref bool attachment,
+                                          Gee.ArrayList<Attachment> attachments,
+                                          string message_key, ref int attachment_index,
+                                          ref int64 remaining_attachment_bytes,
+                                          Cancellable? cancellable, int depth,
+                                          ref int visited_parts) throws Error {
+        ensure_mime_node_allowed (depth, ref visited_parts);
         var multipart = wrapper as Camel.Multipart;
         if (multipart != null) {
             for (uint index = 0; index < multipart.get_number (); index++) {
                 var part = multipart.get_part (index);
                 if (part != null) extract_part (part, ref plain, ref html, ref attachment,
-                    attachments, message_key, ref attachment_index, ref remaining_attachment_bytes, cancellable);
+                    attachments, message_key, ref attachment_index,
+                    ref remaining_attachment_bytes, cancellable, depth + 1,
+                    ref visited_parts);
             }
             return;
         }
         var part = wrapper as Camel.MimePart;
         if (part != null) extract_part (part, ref plain, ref html, ref attachment,
-            attachments, message_key, ref attachment_index, ref remaining_attachment_bytes, cancellable);
+            attachments, message_key, ref attachment_index,
+            ref remaining_attachment_bytes, cancellable, depth + 1,
+            ref visited_parts);
         else extract_leaf_text (wrapper, ref plain, ref html);
     }
 
     private void extract_part (Camel.MimePart part, ref string plain, ref string html, ref bool attachment,
                                Gee.ArrayList<Attachment> attachments, string message_key, ref int attachment_index,
                                ref int64 remaining_attachment_bytes,
-                               Cancellable? cancellable) throws Error {
+                               Cancellable? cancellable, int depth,
+                               ref int visited_parts) throws Error {
+        ensure_mime_node_allowed (depth, ref visited_parts);
         string? filename = part.get_filename (); string? disposition = part.get_disposition ();
         string content_id = part.get_content_id () ?? "";
         var content = part.get_content (); if (content == null) return;
@@ -1661,11 +1693,24 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
         }
         var multipart = content as Camel.Multipart;
         if (multipart != null) {
-            extract_content (multipart, ref plain, ref html, ref attachment, attachments,
-                message_key, ref attachment_index, ref remaining_attachment_bytes, cancellable);
+            extract_content_bounded (multipart, ref plain, ref html, ref attachment,
+                attachments, message_key, ref attachment_index,
+                ref remaining_attachment_bytes, cancellable, depth + 1,
+                ref visited_parts);
             return;
         }
         extract_leaf_text (content, ref plain, ref html);
+    }
+
+    private static void ensure_mime_node_allowed (int depth,
+                                                  ref int visited_parts) throws Error {
+        if (depth > MAX_MIME_TREE_DEPTH)
+            throw new IOError.MESSAGE_TOO_LARGE (
+                "The message MIME structure is nested too deeply to process safely");
+        visited_parts++;
+        if (visited_parts > MAX_MIME_PARTS)
+            throw new IOError.MESSAGE_TOO_LARGE (
+                "The message contains too many MIME parts to process safely");
     }
 
     internal static void extract_leaf_text (Camel.DataWrapper content,
@@ -2129,12 +2174,23 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
     internal static Camel.DataWrapper? attachment_content_at (Camel.DataWrapper wrapper,
                                                                int target_index,
                                                                ref int current_index) {
+        int visited_parts = 0;
+        return attachment_content_at_bounded (wrapper, target_index,
+            ref current_index, 0, ref visited_parts);
+    }
+
+    private static Camel.DataWrapper? attachment_content_at_bounded (
+        Camel.DataWrapper wrapper, int target_index, ref int current_index,
+        int depth, ref int visited_parts) {
+        if (depth > MAX_MIME_TREE_DEPTH || ++visited_parts > MAX_MIME_PARTS)
+            return null;
         var multipart = wrapper as Camel.Multipart;
         if (multipart != null) {
             for (uint index = 0; index < multipart.get_number (); index++) {
                 var part = multipart.get_part (index);
                 if (part == null) continue;
-                var found = attachment_content_at (part, target_index, ref current_index);
+                var found = attachment_content_at_bounded (part, target_index,
+                    ref current_index, depth + 1, ref visited_parts);
                 if (found != null) return found;
             }
             return null;
@@ -2154,7 +2210,8 @@ public class CamelMailEngine : Object, MailEngine, OutgoingMailEngine,
             current_index++;
             return current_index == target_index ? content : null;
         }
-        return attachment_content_at (content, target_index, ref current_index);
+        return attachment_content_at_bounded (content, target_index,
+            ref current_index, depth + 1, ref visited_parts);
     }
 
     internal async Camel.MimeMessage build_mime_message (Draft draft, AccountSettings settings,

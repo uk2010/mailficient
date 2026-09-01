@@ -26,6 +26,8 @@ If an invitation shows **Open in Calendar to Respond** instead of **Accept**, **
 
 If a direct response or **Create Meeting from Email** fails, make sure Evolution Data Server is running and GNOME Calendar has an enabled, writable default calendar. A read-only default must be changed in the calendar application. Flatpak builds also require the packaged `org.gnome.evolution.dataserver.Calendar8` session-bus permission; reinstall the checked manifest if a locally altered package omitted it. Snap's `calendar-service` interface does not auto-connect; connect it with `sudo snap connect mailficient:calendar-service` to enable direct EDS access, or continue with the safe **Open in Calendar** fallback.
 
+If Today or Events says that GNOME Calendar events are unavailable, use a build with EDS calendar support and confirm at least one calendar is enabled. New Event also requires a writable default calendar. These views do not fall back to local mail-database tasks, so fixing EDS access is required for them to show or save events.
+
 The response confirmation's **Send a response to the organizer** checkbox is independent of the calendar update. Leave it off to change only the calendar, or enable it to let EDS send the iTIP reply. Creating a meeting from an email always suppresses automatic invitation delivery: review the saved event in GNOME Calendar and send from there only if intended.
 
 - If Meson cannot find GTK or Camel, install the development packages listed in the README, not only runtime libraries.

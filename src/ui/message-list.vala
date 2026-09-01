@@ -219,7 +219,7 @@ public class MessageList : Gtk.Box {
     public void invalidate_current_view () { }
 
     public void defer_refresh_until_shown () {
-        // Background mail can arrive while Today or Planned owns the
+        // Background mail can arrive while Today or Events owns the
         // workspace. Avoid rebuilding the hidden Gtk.ListView; show_mailbox()
         // consumes this marker and reloads once when mail becomes visible.
         refresh_deferred_until_shown = true;

@@ -52,7 +52,7 @@ public class MailSettingsStore : Object {
     }
 
     public bool full_html_formatting {
-        get { return get_bool ("full-html-formatting", true); }
+        get { return get_bool ("full-html-formatting", false); }
         set { set_bool ("full-html-formatting", value); }
     }
 

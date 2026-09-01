@@ -1,7 +1,7 @@
 {
   "app-id": "com.local.Mailficient",
   "runtime": "org.gnome.Platform",
-  "runtime-version": "49",
+  "runtime-version": "50",
   "sdk": "org.gnome.Sdk",
   "command": "mailficient",
   "build-options": {
@@ -9,7 +9,7 @@
   },
   "finish-args": [
     "--share=ipc",
-    "--socket=x11",
+    "--socket=fallback-x11",
     "--socket=wayland",
     "--share=network",
     "--talk-name=org.freedesktop.secrets",
@@ -34,6 +34,9 @@
         "url": "https://github.com/libical/libical.git",
         "tag": "v3.0.20",
         "commit": "57ce34025066935f356fd539e6deb7a7a9952618"
+      }, {
+        "type": "patch",
+        "path": "patches/libical-3.0.20-merge-overflow.patch"
       }]
     },
     {
@@ -48,6 +51,54 @@
         "type": "archive",
         "url": "https://download.gnome.org/sources/evolution-data-server/3.60/evolution-data-server-3.60.2.tar.xz",
         "sha256": "2084dbdac396371b365d504c1ff45866ba8dca2f1252e5da1d3d9c33abdc1286"
+      }]
+    },
+    {
+      "name": "unifdef",
+      "buildsystem": "simple",
+      "build-commands": [
+        "make CFLAGS=-std=gnu17 -j$FLATPAK_BUILDER_N_JOBS",
+        "make prefix=/app install"
+      ],
+      "sources": [{
+        "type": "archive",
+        "url": "https://dotat.at/prog/unifdef/unifdef-2.12.tar.xz",
+        "sha256": "43ce0f02ecdcdc723b2475575563ddb192e988c886d368260bc0a63aee3ac400"
+      }]
+    },
+    {
+      "name": "webkitgtk",
+      "buildsystem": "cmake-ninja",
+      "config-opts": [
+        "-DPORT=GTK",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DUSE_GTK4=ON",
+        "-DENABLE_DOCUMENTATION=OFF",
+        "-DENABLE_INTROSPECTION=OFF",
+        "-DENABLE_MINIBROWSER=OFF",
+        "-DENABLE_WEBDRIVER=OFF",
+        "-DENABLE_GAMEPAD=OFF",
+        "-DENABLE_SPEECH_SYNTHESIS=OFF",
+        "-DENABLE_SPELLCHECK=OFF",
+        "-DENABLE_JOURNALD_LOG=OFF",
+        "-DENABLE_QUARTZ_TARGET=OFF",
+        "-DENABLE_ENCRYPTED_MEDIA=OFF",
+        "-DENABLE_MEDIA_RECORDER=OFF",
+        "-DENABLE_MEDIA_STREAM=OFF",
+        "-DENABLE_WEB_RTC=OFF",
+        "-DENABLE_GPU_PROCESS=OFF",
+        "-DUSE_FLITE=OFF",
+        "-DUSE_GBM=OFF",
+        "-DUSE_LIBDRM=OFF",
+        "-DUSE_LIBBACKTRACE=OFF",
+        "-DUSE_LIBSECRET=OFF",
+        "-DUSE_AVIF=OFF",
+        "-DUSE_JPEGXL=OFF"
+      ],
+      "sources": [{
+        "type": "archive",
+        "url": "https://webkitgtk.org/releases/webkitgtk-2.52.6.tar.xz",
+        "sha256": "179a2ea3f8f6edd4be7f31fdc55afc57bd0729f1fba648c61d4181539ac116fc"
       }]
     },
     {

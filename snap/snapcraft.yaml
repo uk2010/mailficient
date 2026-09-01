@@ -1,6 +1,6 @@
 name: mailficient
 base: core24
-version: '0.5.0-beta.1'
+version: '0.6.0-beta.1'
 title: Mailficient
 summary: A native desktop email client
 description: |
@@ -52,8 +52,6 @@ apps:
       - password-manager-service
       - calendar-service
       - contacts-service
-      - home
-      - removable-media
 
 parts:
   mailficient:

@@ -1092,7 +1092,7 @@ private void test_sanitizer_preserves_safe_mail () {
     assert (safe.contains ("href=\"https://example.net/details\""));
     assert (safe.contains ("rel=\"noreferrer noopener\""));
     assert (safe.contains ("src=\"cid:chart@example.net\""));
-    assert (!safe.contains ("onclick")); assert (!safe.contains ("style="));
+    assert (!safe.contains ("onclick")); assert (safe.contains ("style=\"color: red\""));
 
     string blocked = HtmlSanitizer.sanitize ("<img src='https://images.example.net/chart.png'>");
     string loaded = HtmlSanitizer.sanitize ("<img src='https://images.example.net/chart.png'>", true);
@@ -1103,9 +1103,10 @@ private void test_sanitizer_preserves_safe_mail () {
         "<title>Hidden preview title</title><style>.hero > span{color:#245}</style>" +
         "<div class='hero' style='text-align:center'>Readable</div>" +
         "<script>bad()</script><iframe src='https://evil.test'></iframe>", false, true);
-    assert (formatted.contains ("<style>.hero > span{color:#245}</style>"));
+    assert (formatted.contains ("<style>"));
     assert (formatted.contains ("class=\"hero\""));
-    assert (formatted.contains ("style=\"text-align:center\""));
+    assert (formatted.contains ("style=\"text-align: center\""));
+    assert (formatted.contains ("Readable"));
     assert (!formatted.contains ("Hidden preview title"));
     assert (!formatted.contains ("bad()"));
     assert (!formatted.contains ("evil.test"));
@@ -1165,7 +1166,8 @@ private void test_html_content_policy () {
     assert (printable.contains ("mailficient-print-header"));
     assert (printable.contains ("Header"));
     string enabled = HtmlContentPolicy.document ("<p>Safe</p>", true);
-    assert (enabled.contains ("img-src data: cid: https: http:"));
+    assert (enabled.contains ("img-src data: cid: https:"));
+    assert (!enabled.contains ("img-src data: cid: https: http:"));
 
     assert (HtmlContentPolicy.allows_resource ("about:blank", false));
     assert (HtmlContentPolicy.allows_resource ("cid:logo@example.net", false));
@@ -1175,6 +1177,44 @@ private void test_html_content_policy () {
     assert (!HtmlContentPolicy.allows_resource ("javascript:alert(1)", true));
     assert (!HtmlContentPolicy.allows_resource ("https://tracker.test/pixel", false));
     assert (HtmlContentPolicy.allows_resource ("https://images.example.net/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("http://images.example.net/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://localhost/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://127.0.0.1/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://10.0.0.1/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://127.1/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://0x7f.0.0.1/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://[::1]/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://user@example.net/photo", true));
+    assert (!HtmlContentPolicy.allows_resource ("https://images.example.net:8443/photo", true));
+}
+
+private void test_security_parser_corpus () {
+    string[] fragments = {
+        "<script>", "</script>", "<iframe src='file:///etc/passwd'>",
+        "<img src='https://127.0.0.1/a'>", "<style>@import url(https://x.test)</style>",
+        "<!--", "-->", "&lt;", "&#x0;", "<svg><foreignObject>",
+        "<a href='javascript:alert(1)'>", "<p style='position:fixed'>", "Readable"
+    };
+    var random = new Rand.with_seed (0x4d41494c);
+    for (int sample = 0; sample < 200; sample++) {
+        var input = new StringBuilder ();
+        int fragment_count = 8 + random.int_range (0, 48);
+        for (int index = 0; index < fragment_count; index++)
+            input.append (fragments[random.int_range (0, fragments.length)]);
+        string safe = HtmlSanitizer.sanitize (input.str, true, true);
+        assert (safe.validate ());
+        assert (safe.length <= input.len * 8 + 1024);
+        string lower = safe.down ();
+        assert (!lower.contains ("<script"));
+        assert (!lower.contains ("<iframe"));
+        assert (!lower.contains ("<style"));
+        assert (!lower.contains ("javascript:"));
+        assert (!lower.contains ("file:"));
+        assert (!HtmlContentPolicy.allows_resource (
+            "https://127.0.0.%d/pixel".printf (sample % 255), true));
+        HtmlSanitizer.to_plain_text (input.str);
+        HtmlSanitizer.has_remote_content (input.str);
+    }
 }
 
 private void test_inline_content_resolver () {
@@ -1268,6 +1308,7 @@ private void test_filename () {
     assert (AttachmentSafety.preview_kind ("text/plain; charset=utf-8", "notes.txt") == AttachmentPreviewKind.TEXT);
     assert (AttachmentSafety.preview_kind ("text/html", "message.html") == AttachmentPreviewKind.NONE);
     assert (AttachmentSafety.preview_kind ("image/svg+xml", "drawing.svg") == AttachmentPreviewKind.NONE);
+    assert (AttachmentSafety.preview_kind ("image/tiff", "scan.tiff") == AttachmentPreviewKind.NONE);
     assert (AttachmentSafety.preview_kind ("application/pdf", "report.exe") == AttachmentPreviewKind.NONE);
     uint8[] pdf = { '%', 'P', 'D', 'F', '-', '1', '.', '7' };
     uint8[] fake_pdf = { 'M', 'Z', 0x90, 0x00 };
@@ -1287,6 +1328,22 @@ private void test_filename () {
         "text/plain", text, text.length));
     assert (!AttachmentSafety.preview_signature_matches (AttachmentPreviewKind.TEXT,
         "text/plain", binary_text, binary_text.length));
+    uint8[] png_dimensions = {
+        0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
+        0x00, 0x00, 0x02, 0x80, 0x00, 0x00, 0x01, 0xe0
+    };
+    int image_width;
+    int image_height;
+    assert (AttachmentSafety.preview_image_dimensions_are_safe (
+        "image/png", png_dimensions, png_dimensions.length,
+        out image_width, out image_height));
+    assert (image_width == 640 && image_height == 480);
+    png_dimensions[16] = 0x00; png_dimensions[17] = 0x01;
+    png_dimensions[18] = 0x00; png_dimensions[19] = 0x00;
+    assert (!AttachmentSafety.preview_image_dimensions_are_safe (
+        "image/png", png_dimensions, png_dimensions.length,
+        out image_width, out image_height));
     assert (new Attachment ("calendar", "/unused", "meeting.ics", 100,
         "application/octet-stream").is_calendar_invitation ());
     assert (new Attachment ("calendar-mime", "/unused", "invite", 100,
@@ -1686,6 +1743,14 @@ private void test_account_validation () {
     try { settings.validate (); } catch (Error error) { assert_not_reached (); }
     settings.incoming_port = 0;
     try { settings.validate (); assert_not_reached (); } catch (MailError error) { assert (error is MailError.INVALID_ACCOUNT); }
+    assert (AccountSettings.valid_server_host ("imap.example.net"));
+    assert (AccountSettings.valid_server_host ("192.0.2.10"));
+    assert (AccountSettings.valid_server_host ("2001:db8::10"));
+    assert (!AccountSettings.valid_server_host ("imap.example.net\r\nInjected"));
+    assert (!AccountSettings.valid_server_host ("user@imap.example.net"));
+    assert (!AccountSettings.valid_server_host ("-imap.example.net"));
+    assert (!AccountSettings.valid_server_host ("imap..example.net"));
+    assert (!AccountSettings.valid_server_host ("999.999.999.999"));
 
     var icloud = AccountSettings.for_email ("Alex", "alex@icloud.com");
     assert (icloud.incoming_host == "imap.mail.me.com");
@@ -1960,7 +2025,16 @@ private void test_local_data_migration () {
         assert (FileUtils.test (migrated_message.attachments[0].path, FileTest.IS_REGULAR));
         assert (FileUtils.test (draft_path, FileTest.IS_REGULAR));
 
+        assert (FileUtils.chmod (migrated, 0755) == 0);
+        assert (FileUtils.chmod (Path.build_filename (migrated, "mail.db"), 0644) == 0);
         assert (LocalDataMigration.prepare (root) == migrated);
+        var root_info = File.new_for_path (migrated).query_info (
+            FileAttribute.UNIX_MODE, FileQueryInfoFlags.NOFOLLOW_SYMLINKS);
+        var database_info = File.new_for_path (
+            Path.build_filename (migrated, "mail.db")).query_info (
+                FileAttribute.UNIX_MODE, FileQueryInfoFlags.NOFOLLOW_SYMLINKS);
+        assert ((root_info.get_attribute_uint32 (FileAttribute.UNIX_MODE) & 0777) == 0700);
+        assert ((database_info.get_attribute_uint32 (FileAttribute.UNIX_MODE) & 0777) == 0600);
         assert (migrated_cache.load_draft (draft.id).attachments[0].path ==
             Path.build_filename (migrated, "attachments", "note.txt"));
     } catch (Error error) { GLib.error ("local data migration test failed: %s", error.message); }
@@ -2027,8 +2101,8 @@ private void test_settings_store () {
         settings.group_messages = false;
         assert (!settings.always_show_images);
         settings.always_show_images = true;
-        assert (settings.full_html_formatting);
-        settings.full_html_formatting = false;
+        assert (!settings.full_html_formatting);
+        settings.full_html_formatting = true;
         assert (settings.spellcheck_enabled);
         settings.spellcheck_enabled = false;
         assert (settings.undo_send_enabled);
@@ -2058,7 +2132,7 @@ private void test_settings_store () {
         assert (reopened.sync_interval_minutes == 30);
         assert (!reopened.group_messages);
         assert (reopened.always_show_images);
-        assert (!reopened.full_html_formatting);
+        assert (reopened.full_html_formatting);
         assert (!reopened.spellcheck_enabled);
         assert (!reopened.undo_send_enabled);
         assert (reopened.undo_send_seconds == 24);
@@ -5109,6 +5183,7 @@ private void test_demo_is_testing_only () {
         assert (normal_mailboxes.size == 3);
         assert (normal_mailboxes[0].id == CachedMailRepository.TASK_TODAY_ID);
         assert (normal_mailboxes[1].id == CachedMailRepository.TASK_PLANNED_ID);
+        assert (normal_mailboxes[1].name == "Events");
         assert (normal_mailboxes[2].id == CachedMailRepository.GNOME_CALENDAR_ID);
         assert (normal.list_messages ("inbox").size == 0);
         assert (normal.find_message ("1") == null);
@@ -5777,7 +5852,7 @@ private void test_message_security_assessment_and_unsubscribe () {
     message.reply_to = "collect@different.example";
     message.authentication_results = "mx.example; dmarc=fail; spf=softfail; dkim=fail";
     message.body_html = "<p><a href='https://collect.example/sign-in'>example.com</a></p>";
-    var assessment = service.assess (message, true);
+    var assessment = service.assess (message, true, true);
     // A Safe Sender entry is an address-book preference, never an override
     // for authentication failure or a misleading destination.
     assert (assessment.sender_is_safe);
@@ -5787,7 +5862,8 @@ private void test_message_security_assessment_and_unsubscribe () {
 
     message.list_unsubscribe = "<https://lists.example/unsubscribe?id=42>, " +
         "<mailto:leave@lists.example?subject=unsubscribe>, <http://unsafe.example>, " +
-        "<javascript:alert(1)>";
+        "<javascript:alert(1)>, <https://127.0.0.1/unsubscribe>, " +
+        "<https://user@lists.example/unsubscribe>, <https://lists.example:8443/unsubscribe>";
     message.list_unsubscribe_post = "List-Unsubscribe=One-Click";
     var targets = service.unsubscribe_targets (message);
     assert (targets.size == 2);
@@ -5811,8 +5887,39 @@ private void test_message_security_assessment_and_unsubscribe () {
         "billing@xn--exampl-3ve.net", "alex@example.net", "Receipt", "", "", "Today");
     authenticated.authentication_results = "mx.example; dmarc=pass; spf=pass; dkim=pass";
     authenticated.reply_to = authenticated.sender_address;
-    var passing = service.assess (authenticated);
+    var passing = service.assess (authenticated, false, true);
     assert (passing.level == MessageThreatLevel.CAUTION); // punycode remains visible
+    assert (passing.authentication_reported);
+
+    var untrusted = service.assess (authenticated);
+    assert (!untrusted.authentication_reported);
+    bool ignored_unverified_header = false;
+    foreach (var finding in untrusted.findings)
+        if (finding.contains ("unverified Authentication-Results"))
+            ignored_unverified_header = true;
+    assert (ignored_unverified_header);
+    assert (MessageSecurityService.authentication_results_are_trusted (
+        "mx.google.com; dmarc=pass header.from=example.net",
+        "imap.gmail.com"));
+    assert (!MessageSecurityService.authentication_results_are_trusted (
+        "attacker.example; dmarc=pass header.from=example.net",
+        "imap.gmail.com"));
+    assert (!MessageSecurityService.authentication_results_are_trusted (
+        "mx.google.com\r\nInjected; dmarc=pass", "imap.gmail.com"));
+    assert (!MessageSecurityService.authentication_results_are_trusted (
+        "imap.custom.example; dmarc=pass header.from=example.net",
+        "imap.custom.example"));
+    assert (MessageSecurityService.authenticated_from_domain (
+        "mx.google.com; dmarc=pass header.from=example.net",
+        "Billing <billing@example.net>"));
+    assert (!MessageSecurityService.authenticated_from_domain (
+        "mx.google.com; dmarc=fail header.from=example.net",
+        "billing@example.net"));
+    assert (!MessageSecurityService.authenticated_from_domain (
+        "mx.google.com; dmarc=pass header.from=attacker.example",
+        "billing@example.net"));
+    assert (!MessageSecurityService.authenticated_from_domain (
+        "mx.google.com; dmarc=pass", "billing@example.net"));
 
     var safe_with_misleading_link = new Message ("security-3", "inbox", "Maya",
         "maya@example.net", "alex@example.net", "Shared document", "", "", "Today");
@@ -5837,7 +5944,7 @@ private void test_safe_sender_inline_warning_policy () {
     // Safe Sender status changes presentation, not the assessment evidence.
     // Security Details and the reader must retain a high-confidence failure
     // even when the sender was previously approved.
-    var safe = service.assess (message, true);
+    var safe = service.assess (message, true, true);
     assert (safe.sender_is_safe);
     assert (safe.level == MessageThreatLevel.DANGER);
     assert (safe.authentication_reported);
@@ -5846,7 +5953,7 @@ private void test_safe_sender_inline_warning_policy () {
 
     // The identical message from a sender not on the Safe Senders list still
     // qualifies for the automatic inline warning.
-    var unsafe = service.assess (message, false);
+    var unsafe = service.assess (message, false, true);
     assert (!unsafe.sender_is_safe);
     assert (unsafe.level == MessageThreatLevel.DANGER);
     assert (unsafe.authentication_reported);
@@ -6115,7 +6222,9 @@ private void test_advanced_rules_and_quick_steps () {
             MailRuleOperator.AFTER).matches (enriched));
         assert (new MailRuleCondition (MailRuleField.LABEL, "Release",
             MailRuleOperator.EQUALS).matches (enriched));
-        assert (new MailRuleCondition (MailRuleField.SECURITY_STATUS, "dkim=pass").matches (enriched));
+        assert (new MailRuleCondition (MailRuleField.SECURITY_STATUS, "signed").matches (enriched));
+        assert (!new MailRuleCondition (MailRuleField.SECURITY_STATUS,
+            "dkim=pass").matches (enriched));
         assert (new MailRuleCondition (MailRuleField.MAILING_LIST, "release.lists").matches (enriched));
         assert (new MailRuleCondition (MailRuleField.RAW_HEADERS, "X-Build: nightly").matches (enriched));
         var richer_operations = new Gee.ArrayList<MailRuleOperation> ();
@@ -6357,6 +6466,7 @@ int main (string[] args) {
     Test.add_func ("/security/html-preserves-safe-mail", test_sanitizer_preserves_safe_mail);
     Test.add_func ("/security/html-remote-content-detection", test_remote_content_detection);
     Test.add_func ("/security/html-content-policy", test_html_content_policy);
+    Test.add_func ("/security/parser-corpus", test_security_parser_corpus);
     Test.add_func ("/security/inline-content-resolver", test_inline_content_resolver);
     Test.add_func ("/security/filename", test_filename);
     Test.add_func ("/security/message-assessment-and-unsubscribe",

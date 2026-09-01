@@ -174,19 +174,12 @@ public class CachedMailRepository : Object, MailRepository {
     }
 
     private void prepend_productivity_views (Gee.ArrayList<Mailbox> result) {
-        uint today_count = 0; uint planned_count = 0;
-        try {
-            today_count = (uint) cache.mail_task_count (true);
-            planned_count = (uint) cache.mail_task_count ();
-        } catch (Error error) {
-            warning ("Could not count tasks: %s", error.message);
-        }
         result.insert (0, new Mailbox (GNOME_CALENDAR_ID, "Calendar",
             "x-office-calendar-symbolic", MailboxRole.CUSTOM));
-        result.insert (0, new Mailbox (TASK_PLANNED_ID, "Planned",
-            "checkbox-symbolic", MailboxRole.CUSTOM, planned_count));
+        result.insert (0, new Mailbox (TASK_PLANNED_ID, "Events",
+            "calendar-agenda-symbolic", MailboxRole.CUSTOM));
         result.insert (0, new Mailbox (TASK_TODAY_ID, "Today",
-            "task-due-symbolic", MailboxRole.CUSTOM, today_count));
+            "task-due-symbolic", MailboxRole.CUSTOM));
     }
 
     public Gee.List<Message> conversation_for (Message message) {
