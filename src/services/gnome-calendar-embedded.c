@@ -1,4 +1,6 @@
 #include <gtk/gtk.h>
+#include <locale.h>
+#include <string.h>
 
 #ifndef MAILFICIENT_EMBEDDED_GCAL
 GtkWidget *
@@ -32,6 +34,21 @@ GtkWidget *
 mailficient_gnome_calendar_new (void)
 {
   g_autoptr (GDateTime) date = g_date_time_new_now_local ();
+
+  /* Some desktop sessions export LC_ALL=C.UTF-8 while LANG still identifies
+   * the user's country.  libgweather uses LC_MEASUREMENT for its Automatic
+   * unit and therefore incorrectly chooses Celsius in that environment.
+   * Restore the US measurement locale when the user's language is US English. */
+  if (g_getenv ("LANG") != NULL &&
+      (g_strstr_len (g_getenv ("LANG"), -1, "en_US") != NULL ||
+       g_strstr_len (g_getenv ("LANG"), -1, "EN_us") != NULL) &&
+      (g_getenv ("LC_MEASUREMENT") == NULL ||
+       g_strcmp0 (g_getenv ("LC_MEASUREMENT"), "C") == 0 ||
+       g_strcmp0 (g_getenv ("LC_MEASUREMENT"), "C.UTF-8") == 0))
+    {
+      g_setenv ("LC_MEASUREMENT", "en_US.UTF-8", TRUE);
+      setlocale (LC_MEASUREMENT, "");
+    }
 
   if (calendar_application == NULL)
     {

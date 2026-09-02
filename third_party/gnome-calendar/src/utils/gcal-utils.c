@@ -1068,7 +1068,15 @@ gcal_utils_launch_gnome_settings (GDBusConnection *connection,
 
   if (!proxy)
     {
-      g_warning ("Couldn't open panel '%s'", panel_id);
+      /* The embedded Calendar can be running without GNOME Settings' action
+       * exporter (for example in a sandbox).  Fall back to the conventional
+       * control-center command so these menu items remain useful. */
+      const gchar *argv[] = { "gnome-control-center", panel_id, NULL };
+      g_autoptr (GError) error = NULL;
+
+      if (!g_spawn_async (NULL, (gchar **) argv, NULL,
+                          G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error))
+        g_warning ("Couldn't open panel '%s': %s", panel_id, error->message);
       return;
     }
 

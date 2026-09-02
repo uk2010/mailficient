@@ -116,7 +116,6 @@ struct _GcalWindow
   /* header_bar widgets */
   GtkWidget          *calendars_list;
   GtkWidget          *menu_button;
-  GtkPopoverMenu     *win_menu;
 
   GcalEventEditorDialog *event_editor;
   GcalCalendarManagementDialog *calendar_management;
@@ -126,6 +125,9 @@ struct _GcalWindow
 
   /* new event popover widgets */
   GtkWidget          *quick_add_popover;
+
+  /* weather management */
+  GcalWeatherSettings *weather_settings;
 
   /* day, week, month, year, list */
   GtkWidget          *views[N_WEEKDAYS - 1];
@@ -145,9 +147,6 @@ struct _GcalWindow
   AdwToast           *delete_event_toast;
 
   gint                open_edit_dialog_timeout_id;
-
-  /* weather management */
-  GcalWeatherSettings *weather_settings;
 
   /* temp to keep event_creation */
   gboolean            open_edit_dialog;
@@ -1449,7 +1448,6 @@ gcal_window_class_init (GcalWindowClass *klass)
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, search_button);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, views_stack);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, weather_settings);
-  gtk_widget_class_bind_template_child (widget_class, GcalWindow, win_menu);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, week_view);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, drop_overlay);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, drop_target);
@@ -1572,16 +1570,6 @@ gcal_window_take_content (GcalWindow *self)
     {
       gtk_widget_unparent (self->quick_add_popover);
       gtk_widget_set_parent (self->quick_add_popover, content);
-    }
-
-  /* GtkPopoverMenu is another non-visual template child.  When Calendar is
-   * detached from its hidden window, move it alongside the menu button so
-   * the Weather submenu remains targetable and its switches/entry receive
-   * pointer and keyboard events in Mailficient's native window. */
-  if (self->win_menu != NULL && gtk_widget_get_parent (GTK_WIDGET (self->win_menu)) == GTK_WIDGET (self))
-    {
-      gtk_widget_unparent (GTK_WIDGET (self->win_menu));
-      gtk_widget_set_parent (GTK_WIDGET (self->win_menu), content);
     }
 
   g_object_ref (content);
