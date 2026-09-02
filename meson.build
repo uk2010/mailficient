@@ -7,10 +7,10 @@ gcal_dependencies = []
 if gcal_archive != ''
   gcal_libdir = get_option('gcal-libdir')
   gcal_dependencies = [
-    dependency('libedataserverui4-1.0'),
-    dependency('gweather4'),
-    dependency('libgeoclue-2.0'),
-    dependency('fribidi'),
+    cc.find_library('edataserverui4-1.0', dirs: gcal_libdir),
+    cc.find_library('gweather-4', dirs: gcal_libdir),
+    cc.find_library('geoclue-2', dirs: gcal_libdir),
+    cc.find_library('fribidi', dirs: gcal_libdir),
     cc.find_library('edbus-private', dirs: gcal_libdir / 'evolution-data-server'),
   ]
   gcal_link_args = ['-Wl,--whole-archive', gcal_archive, '-Wl,--no-whole-archive']

@@ -48,7 +48,7 @@ jobs:
           manifest = json.loads(source.read_text())
           manifest["modules"] = [
               module for module in manifest["modules"]
-              if module["name"] != "webkitgtk"
+              if module["name"] not in {"unifdef", "webkitgtk"}
           ]
           app = next(module for module in manifest["modules"]
                      if module["name"] == "mailficient")
