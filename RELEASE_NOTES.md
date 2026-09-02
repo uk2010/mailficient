@@ -1,3 +1,24 @@
+# Mailficient 0.7.0 Beta 1
+
+Mailficient 0.7.0 Beta 1 embeds the GNOME Calendar experience directly in the
+mail window while keeping Evolution Data Server as the single calendar store.
+
+Highlights:
+
+- Embeds GNOME Calendar's calendar, event editor, sidebar, and calendar menu in
+  Mailficient; installing the separate GNOME Calendar application is optional
+- Keeps Calendar, Today, and Events synchronized with the same selected EDS
+  calendars, including live calendar visibility changes and direct event edits
+- Adds a precise weather location control, persistent Fahrenheit/Celsius choice,
+  ten-day forecasts, and colorful weather icons
+- Fixes calendar day selection layout, embedded window controls and styling,
+  keyboard-shortcut crashes, startup dialog behavior, and saved weather state
+- Ships reproducible AMD64/ARM64 Debian and x86_64/aarch64 RPM packages with the
+  embedded calendar interface and its private runtime data
+
+Package artifacts include the complete source archive, AMD64 and ARM64 Debian
+packages, x86_64 and aarch64 RPM packages, and SHA-256 checksums for every file.
+
 # Mailficient 0.6.0 Beta 1
 
 Mailficient 0.6.0 Beta 1 makes the calendar integration authoritative and

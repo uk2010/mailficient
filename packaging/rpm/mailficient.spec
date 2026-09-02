@@ -6,7 +6,8 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/uk2010/mailficient
 
 Requires:       gtk4 >= 4.12
-Requires:       gnome-calendar
+Requires:       evolution-data-server
+Requires:       geoclue2-libs
 Requires:       libadwaita >= 1.5
 Requires:       libgee
 Requires:       json-glib
@@ -17,6 +18,7 @@ Requires:       libxml2
 Requires:       gnupg2
 Recommends:     gnome-keyring
 Recommends:     gsettings-desktop-schemas
+Recommends:     geoclue2
 Recommends:     enchant2
 Recommends:     hunspell-en-US
 
@@ -65,6 +67,16 @@ for app_library in %{mailficient_app_tree}/lib/*.so*; do
 done
 cp -a %{mailficient_app_tree}/lib/evolution-data-server \
     %{buildroot}%{_libdir}/mailficient/
+cp -a %{mailficient_app_tree}/lib/libgweather-4 \
+    %{buildroot}%{_libdir}/mailficient/
+
+install -d %{buildroot}%{_libdir}/mailficient/schemas
+install -m 0644 \
+    %{mailficient_app_tree}/share/glib-2.0/schemas/org.gnome.calendar.gschema.xml \
+    %{mailficient_app_tree}/share/glib-2.0/schemas/org.gnome.calendar.enums.xml \
+    %{mailficient_app_tree}/share/glib-2.0/schemas/org.gnome.GWeather4.gschema.xml \
+    %{buildroot}%{_libdir}/mailficient/schemas/
+glib-compile-schemas %{buildroot}%{_libdir}/mailficient/schemas
 
 for sdk_library in %{mailficient_sdk_lib}/libxml2.so.* \
     %{mailficient_sdk_lib}/libicuuc.so.* \
@@ -148,6 +160,10 @@ fi
 %{_datadir}/evolution-data-server/
 
 %changelog
+* Tue Sep 01 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.7.0-0.1.beta
+- Embed the GNOME Calendar interface and its weather data while continuing to
+  use the shared Evolution Data Server calendar store.
+
 * Tue Sep 01 2026 Mailficient Maintainers <uk2010@users.noreply.github.com> - 0.6.0-0.1.beta
 - Promote Today, Events, and Calendar to direct GNOME Calendar-backed Favorites.
 - Harden HTML rendering and application security for the beta release.

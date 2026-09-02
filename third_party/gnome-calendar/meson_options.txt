@@ -1,2 +1,4 @@
 option('tracing', type: 'boolean', value: false, description: 'add extra debugging information')
 option('profile', type: 'combo', choices: ['default', 'development'], value: 'default')
+option('embedded-library', type: 'boolean', value: false, description: 'Install only the private library and schemas for an embedding application')
+option('build-tests', type: 'boolean', value: true, description: 'Build GNOME Calendar tests')

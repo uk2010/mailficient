@@ -10,6 +10,8 @@ The manifest builds:
 - libical 3.0.20 from its pinned upstream Git commit, with the upstream
   `icalcomponent_merge_component()` heap-overflow fix backported for the 3.x ABI
 - Evolution Data Server 3.60.2 from its checksum-pinned GNOME archive
+- GNOME Calendar's embedded private interface library, plus checksum-pinned
+  geocode and weather libraries
 - Mailficient from the complete repository source tree
 
 No generated Flatpak build directory or private account data is required from
@@ -21,8 +23,8 @@ After creating a bundle with the steps below, verify and install it from its
 output directory:
 
 ```sh
-sha256sum -c Mailficient-0.6.0-beta.1-x86_64.flatpak.sha256
-flatpak install --user ./Mailficient-0.6.0-beta.1-x86_64.flatpak
+sha256sum -c Mailficient-0.7.0-beta.1-x86_64.flatpak.sha256
+flatpak install --user ./Mailficient-0.7.0-beta.1-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -74,12 +76,12 @@ flatpak-builder --force-clean \
 flatpak build-bundle \
   --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
   flatpak-repo \
-  Mailficient-0.6.0-beta.1-x86_64.flatpak \
+  Mailficient-0.7.0-beta.1-x86_64.flatpak \
   com.local.Mailficient \
   master
 
-sha256sum Mailficient-0.6.0-beta.1-x86_64.flatpak \
-  > Mailficient-0.6.0-beta.1-x86_64.flatpak.sha256
+sha256sum Mailficient-0.7.0-beta.1-x86_64.flatpak \
+  > Mailficient-0.7.0-beta.1-x86_64.flatpak.sha256
 ```
 
 Build output, repositories, bundles, and local mail data are excluded from

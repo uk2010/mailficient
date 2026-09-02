@@ -41,6 +41,10 @@ require_file() {
 require_file "$mailficient_binary"
 require_file "$probe_binary"
 require_file "$provider_dir/libcamelimapx.so"
+require_file "$runtime_lib/libgweather-4/Locations.bin"
+require_file "$app_tree/share/glib-2.0/schemas/org.gnome.calendar.gschema.xml"
+require_file "$app_tree/share/glib-2.0/schemas/org.gnome.calendar.enums.xml"
+require_file "$app_tree/share/glib-2.0/schemas/org.gnome.GWeather4.gschema.xml"
 
 # ICU and Camel SONAMEs vary between distributions and architectures. Resolve
 # them from the selected runtime instead of coupling packages to one SDK build.
@@ -85,6 +89,7 @@ for app_library in "$runtime_lib"/*.so*; do
 done
 cp -a "$provider_dir" \
     "$private_lib/evolution-data-server/"
+cp -a "$runtime_lib/libgweather-4" "$private_lib/"
 if [ -e "$eds_private_lib" ]; then
     cp -a "$eds_private_lib" \
         "$private_lib/evolution-data-server/"
@@ -92,6 +97,14 @@ fi
 cp -a "$sdk_lib"/libicuuc.so.* "$private_lib/"
 cp -a "$sdk_lib"/libicui18n.so.* "$private_lib/"
 cp -a "$sdk_lib"/libicudata.so.* "$private_lib/"
+
+install -d "$private_lib/schemas"
+install -m 0644 \
+    "$app_tree/share/glib-2.0/schemas/org.gnome.calendar.gschema.xml" \
+    "$app_tree/share/glib-2.0/schemas/org.gnome.calendar.enums.xml" \
+    "$app_tree/share/glib-2.0/schemas/org.gnome.GWeather4.gschema.xml" \
+    "$private_lib/schemas/"
+glib-compile-schemas "$private_lib/schemas"
 
 sed 's|^Exec=.*$|Exec=/usr/bin/mailficient|' \
     "$root_dir/data/com.local.Mailficient.desktop" \

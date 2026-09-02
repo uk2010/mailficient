@@ -41,7 +41,7 @@ Without host development packages, use GNOME Builder or a GNOME SDK shell. The F
 
 ## Release downloads
 
-The [v0.6.0-beta.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.6.0-beta.1)
+The [v0.7.0-beta.1 GitHub release](https://github.com/uk2010/mailficient/releases/tag/v0.7.0-beta.1)
 provides the complete source archive, Debian and RPM packages for AMD64 and
 ARM64, and SHA-256 checksums for every downloadable package. Reproducible
 workflows for Flatpak and Snap builds are included in the source repository.
@@ -52,7 +52,7 @@ Build the current Flatpak from the pinned source manifest, then install and run
 the resulting bundle with:
 
 ```sh
-flatpak install --user ./Mailficient-0.6.0-beta.1-x86_64.flatpak
+flatpak install --user ./Mailficient-0.7.0-beta.1-x86_64.flatpak
 flatpak run --user com.local.Mailficient
 ```
 
@@ -68,7 +68,7 @@ The Snapcraft manifest builds native `amd64` and `arm64` packages. On a
 ```sh
 sudo snap install snapcraft --classic
 snapcraft --platform arm64
-sudo snap install --dangerous ./mailficient_0.6.0-beta.1_arm64.snap
+sudo snap install --dangerous ./mailficient_0.7.0-beta.1_arm64.snap
 sudo snap connect mailficient:password-manager-service
 snap run mailficient
 ```
@@ -95,7 +95,7 @@ engine used by the qualified application build:
 
 ```sh
 tools/build-deb.sh
-sudo apt install ./dist/mailficient_0.6.0~beta1-1_$(dpkg --print-architecture).deb
+sudo apt install ./dist/mailficient_0.7.0~beta1-1_$(dpkg --print-architecture).deb
 mailficient
 ```
 
@@ -130,10 +130,10 @@ the selected event's calendar; new events go to the writable default calendar.
 **Calendar** opens an embedded agenda and month calendar. It reads and writes
 the same Evolution Data Server store used by GNOME Calendar, so either app
 sees the same events immediately. No event copy is stored in the mail
-database. GNOME Calendar's data service must be installed
-separately for Flatpak and Snap because their sandboxes cannot install another
-desktop application as a runtime dependency. The Flatpak manifest enables the
-EDS integration and grants access only to its calendar service.
+database. The GNOME Calendar application itself is not required: the embedded
+interface uses Evolution Data Server, the same calendar store and backend used
+by GNOME Calendar. The Flatpak manifest enables that integration and grants
+access only to the EDS calendar service.
 
 If the local mail database cannot be opened, Mailficient now shows a non-destructive recovery window with understandable guidance, expandable diagnostics, and a safe retry action rather than silently exiting or replacing the cache.
 

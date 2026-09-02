@@ -78,7 +78,8 @@ libgcal = static_library(
               sources: sources,
   include_directories: calendar_incs,
          dependencies: gcal_deps,
-              install: false,
+              install: embedded_library,
+          install_dir: calendar_libdir / 'mailficient',
 )
 
 libgcal_dep = declare_dependency(
@@ -93,10 +94,12 @@ libgcal_dep = declare_dependency(
 # gnome-calendar #
 ##################
 
-executable(
-  meson.project_name(),
-       files('main.c'),
-          dependencies: libgcal_dep,
-               install: true,
-           install_dir: calendar_bindir,
-)
+if not embedded_library
+  executable(
+    meson.project_name(),
+         files('main.c'),
+            dependencies: libgcal_dep,
+                 install: true,
+             install_dir: calendar_bindir,
+  )
+endif

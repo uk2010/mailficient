@@ -25,6 +25,7 @@ calendar_prefix = get_option('prefix')
 calendar_bindir = calendar_prefix / get_option('bindir')
 calendar_localedir = calendar_prefix / get_option('localedir')
 calendar_datadir = calendar_prefix / get_option('datadir')
+calendar_libdir = calendar_prefix / get_option('libdir')
 calendar_pkgdatadir = calendar_datadir / meson.project_name()
 calendar_schemadir = calendar_datadir / 'glib-2.0' / 'schemas'
 
@@ -56,6 +57,7 @@ development_release = calendar_minor_version.startswith('alpha') or \
                       calendar_minor_version.startswith('rc')
 calendar_debug = development_release or calendar_buildtype.contains('debug')
 enable_tracing = get_option('tracing')
+embedded_library = get_option('embedded-library')
 
 cc = meson.get_compiler('c')
 
@@ -195,7 +197,9 @@ src_dir = meson.global_source_root() / 'src'
 subdir('data')
 subdir('src')
 subdir('po')
-subdir('tests')
+if get_option('build-tests')
+  subdir('tests')
+endif
 
 configure_file(
          output: 'config.h',
@@ -218,5 +222,5 @@ summary({
 
 gnome.post_install(
   glib_compile_schemas: true,
-  gtk_update_icon_cache: true,
+  gtk_update_icon_cache: not embedded_library,
 )

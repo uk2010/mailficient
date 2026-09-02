@@ -40,10 +40,40 @@
       }]
     },
     {
+      "name": "geocode-glib",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Denable-gtk-doc=false",
+        "-Denable-introspection=false",
+        "-Denable-installed-tests=false",
+        "-Dsoup2=false"
+      ],
+      "sources": [{
+        "type": "archive",
+        "url": "https://download.gnome.org/sources/geocode-glib/3.26/geocode-glib-3.26.4.tar.xz",
+        "sha256": "2d9a6826d158470449a173871221596da0f83ebdcff98b90c7049089056a37aa"
+      }]
+    },
+    {
+      "name": "libgweather",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Denable_vala=false",
+        "-Dgtk_doc=false",
+        "-Dintrospection=false",
+        "-Dtests=false"
+      ],
+      "sources": [{
+        "type": "archive",
+        "url": "https://download.gnome.org/sources/libgweather/4.4/libgweather-4.4.4.tar.xz",
+        "sha256": "7017677753cdf7d1fdc355e4bfcdb1eba8369793a8df24d241427a939cbf4283"
+      }]
+    },
+    {
       "name": "evolution-data-server",
       "buildsystem": "simple",
       "build-commands": [
-        "cmake -S . -B _flatpak_build -G Ninja -DCMAKE_INSTALL_PREFIX=/app -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_GTK=OFF -DENABLE_GTK4=OFF -DENABLE_OAUTH2_WEBKITGTK=OFF -DENABLE_OAUTH2_WEBKITGTK4=OFF -DENABLE_GOA=OFF -DENABLE_WEATHER=OFF -DENABLE_CANBERRA=OFF -DWITH_OPENLDAP=OFF -DWITH_LIBDB=OFF -DENABLE_INTROSPECTION=ON -DENABLE_VALA_BINDINGS=ON -DWITH_SYSTEMDUSERUNITDIR=no",
+        "cmake -S . -B _flatpak_build -G Ninja -DCMAKE_INSTALL_PREFIX=/app -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_GTK=OFF -DENABLE_GTK4=ON -DENABLE_OAUTH2_WEBKITGTK=OFF -DENABLE_OAUTH2_WEBKITGTK4=OFF -DENABLE_GOA=OFF -DENABLE_WEATHER=OFF -DENABLE_CANBERRA=OFF -DWITH_OPENLDAP=OFF -DWITH_LIBDB=OFF -DENABLE_INTROSPECTION=ON -DENABLE_VALA_BINDINGS=ON -DWITH_SYSTEMDUSERUNITDIR=no",
         "cmake --build _flatpak_build --parallel $FLATPAK_BUILDER_N_JOBS",
         "cmake --install _flatpak_build"
       ],
@@ -52,6 +82,15 @@
         "url": "https://download.gnome.org/sources/evolution-data-server/3.60/evolution-data-server-3.60.2.tar.xz",
         "sha256": "2084dbdac396371b365d504c1ff45866ba8dca2f1252e5da1d3d9c33abdc1286"
       }]
+    },
+    {
+      "name": "gnome-calendar-library",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Dembedded-library=true",
+        "-Dbuild-tests=false"
+      ],
+      "sources": [{ "type": "dir", "path": "../third_party/gnome-calendar" }]
     },
     {
       "name": "unifdef",
@@ -105,7 +144,13 @@
       "name": "mailficient",
       "buildsystem": "meson",
       "run-tests": true,
-      "config-opts": ["-Dcamel=enabled", "-Daddressbook=enabled", "-Dcalendar=enabled"],
+      "config-opts": [
+        "-Dcamel=enabled",
+        "-Daddressbook=enabled",
+        "-Dcalendar=enabled",
+        "-Dgcal-archive=/app/lib/mailficient/libgcal-private.a",
+        "-Dgcal-libdir=/app/lib"
+      ],
       "sources": [{ "type": "dir", "path": ".." }]
     }
   ]

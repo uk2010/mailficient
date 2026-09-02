@@ -8,5 +8,7 @@ else
     export LD_LIBRARY_PATH="$private_lib:$private_lib/evolution-data-server"
 fi
 export EDS_CAMEL_PROVIDER_DIR="$private_lib/evolution-data-server/camel-providers"
+export GSETTINGS_SCHEMA_DIR="$private_lib/schemas"
+export LIBGWEATHER_LOCATIONS_PATH="$private_lib/libgweather-4/Locations.bin"
 
 exec "$private_lib/mailficient.real" "$@"

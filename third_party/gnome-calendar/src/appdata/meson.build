@@ -8,7 +8,7 @@ appdata = i18n.merge_file(
   ),
   output: '@0@.metainfo.xml'.format(application_id),
   po_dir: po_dir,
-  install: true,
+  install: not embedded_library,
   install_dir: calendar_datadir / 'metainfo'
 )
 

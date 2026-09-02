@@ -1,4 +1,6 @@
-subdir('icons')
+if not embedded_library
+  subdir('icons')
+endif
 
 enum_headers = files(src_dir / 'gcal-enums.h')
 
@@ -28,7 +30,7 @@ desktop = i18n.merge_file(
   ),
   output: '@0@.desktop'.format(application_id),
   po_dir: po_dir,
-  install: true,
+  install: not embedded_library,
   install_dir: calendar_datadir / 'applications'
 )
 
@@ -39,6 +41,7 @@ search_provider_conf.set('profile',  profile)
 configure_file(
   configuration: search_provider_conf,
   input: files('org.gnome.Calendar.search-provider.ini.in'),
+  install: not embedded_library,
   install_dir: calendar_datadir / 'gnome-shell' / 'search-providers',
   output: '@0@.search-provider.ini'.format(application_id)
 )
@@ -77,7 +80,7 @@ service = 'org.gnome.Calendar.service'
 configure_file(
           input: service + '.in',
          output: '@0@.service'.format(application_id),
-        install: true,
+        install: not embedded_library,
     install_dir: calendar_datadir / 'dbus-1' / 'services',
   configuration: service_conf
 )

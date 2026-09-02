@@ -1,17 +1,20 @@
-project('mailficient', 'vala', 'c', version: '0.6.0-beta.1', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
-
-gcal_archive = get_option('gcal-archive')
-gcal_link_args = []
-if gcal_archive != ''
-  gcal_link_args = ['-Wl,--whole-archive', gcal_archive, '-Wl,--no-whole-archive',
-                    '-L' + get_option('gcal-libdir'), '-ledataserverui4-1.0',
-                    '-lgweather-4', '-lgeoclue-2', '-lgeocode-glib-2', '-lfribidi', '-lm']
-  gcal_link_args += ['-L' + meson.project_source_root() / 'flatpak-build-x86/files/lib',
-                     '-L' + meson.project_source_root() / 'flatpak-build-x86/files/lib/evolution-data-server',
-                     '-ledbus-private']
-endif
+project('mailficient', 'vala', 'c', version: '0.7.0-beta.1', meson_version: '>= 1.3.0', default_options: ['warning_level=2'])
 
 cc = meson.get_compiler('c')
+gcal_archive = get_option('gcal-archive')
+gcal_link_args = []
+gcal_dependencies = []
+if gcal_archive != ''
+  gcal_libdir = get_option('gcal-libdir')
+  gcal_dependencies = [
+    dependency('libedataserverui4-1.0'),
+    dependency('gweather4'),
+    dependency('libgeoclue-2.0'),
+    dependency('fribidi'),
+    cc.find_library('edbus-private', dirs: gcal_libdir / 'evolution-data-server'),
+  ]
+  gcal_link_args = ['-Wl,--whole-archive', gcal_archive, '-Wl,--no-whole-archive']
+endif
 
 gnome = import('gnome')
 i18n = import('i18n')
