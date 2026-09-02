@@ -18,4 +18,17 @@
     <file compressed="true">share-symbolic.svg</file>
     <file compressed="true">map-symbolic.svg</file>
   </gresource>
+  <gresource prefix="/org/gnome/calendar/icons/scalable/status/">
+    <file alias="mailficient-weather-clear.svg" compressed="true">weather/mailficient-weather-clear.svg</file>
+    <file alias="mailficient-weather-clear-night.svg" compressed="true">weather/mailficient-weather-clear-night.svg</file>
+    <file alias="mailficient-weather-few-clouds.svg" compressed="true">weather/mailficient-weather-few-clouds.svg</file>
+    <file alias="mailficient-weather-few-clouds-night.svg" compressed="true">weather/mailficient-weather-few-clouds-night.svg</file>
+    <file alias="mailficient-weather-overcast.svg" compressed="true">weather/mailficient-weather-overcast.svg</file>
+    <file alias="mailficient-weather-fog.svg" compressed="true">weather/mailficient-weather-fog.svg</file>
+    <file alias="mailficient-weather-showers-scattered.svg" compressed="true">weather/mailficient-weather-showers-scattered.svg</file>
+    <file alias="mailficient-weather-showers.svg" compressed="true">weather/mailficient-weather-showers.svg</file>
+    <file alias="mailficient-weather-snow.svg" compressed="true">weather/mailficient-weather-snow.svg</file>
+    <file alias="mailficient-weather-storm.svg" compressed="true">weather/mailficient-weather-storm.svg</file>
+    <file alias="mailficient-weather-severe-alert.svg" compressed="true">weather/mailficient-weather-severe-alert.svg</file>
+  </gresource>
 </gresources>

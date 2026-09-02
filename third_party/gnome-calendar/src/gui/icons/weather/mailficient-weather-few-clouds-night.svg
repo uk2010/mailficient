@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs><linearGradient id="cloud" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#e8eef7"/><stop offset="1" stop-color="#9caec5"/></linearGradient></defs>
+  <path d="M17.5 12.7A7.4 7.4 0 0 1 9.3 4.5a7.5 7.5 0 1 0 8.2 8.2Z" fill="#ffe47a" stroke="#d6a82b"/><circle cx="21.5" cy="5" r="1" fill="#7dd3fc"/>
+  <path d="M7.5 26h17a4.7 4.7 0 0 0 .2-9.4 7.2 7.2 0 0 0-13.7 1.8A4 4 0 0 0 7.5 26Z" fill="url(#cloud)" stroke="#71869f" stroke-width="1.1"/>
+</svg>

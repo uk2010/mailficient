@@ -168,17 +168,8 @@ static gchar*
 get_normalized_icon_name (GWeatherInfo* wi,
                           gboolean      is_night_icon)
 {
-  const gchar night_pfx[] = "-night";
-  const gsize night_pfx_size = G_N_ELEMENTS (night_pfx) - 1;
-
-  const gchar sym_pfx[] = "-symbolic";
-  const gsize sym_pfx_size = G_N_ELEMENTS (sym_pfx) - 1;
-
   const gchar *str; /* unowned */
   gssize normalized_size;
-  gchar *buffer = NULL; /* owned */
-  gchar *bufpos = NULL; /* unowned */
-  gsize buffer_size;
 
   g_return_val_if_fail (wi != NULL, NULL);
 
@@ -189,27 +180,10 @@ get_normalized_icon_name (GWeatherInfo* wi,
   normalized_size = get_normalized_icon_name_len (str);
   g_return_val_if_fail (normalized_size >= 0, NULL);
 
-  if (is_night_icon)
-    buffer_size = normalized_size + night_pfx_size + sym_pfx_size + 1;
-  else
-    buffer_size = normalized_size + sym_pfx_size + 1;
-
-  buffer = g_malloc (buffer_size);
-  bufpos = buffer;
-
-  memcpy (bufpos, str, normalized_size);
-  bufpos = bufpos + normalized_size;
-
-  if (is_night_icon)
-    {
-      memcpy (bufpos, night_pfx, night_pfx_size);
-      bufpos = bufpos + night_pfx_size;
-    }
-
-  memcpy (bufpos, sym_pfx, sym_pfx_size);
-  buffer[buffer_size - 1] = '\0';
-
-  return buffer;
+  return g_strdup_printf ("mailficient-%.*s%s",
+                          (gint) normalized_size,
+                          str,
+                          is_night_icon ? "-night" : "");
 }
 
 static gboolean
