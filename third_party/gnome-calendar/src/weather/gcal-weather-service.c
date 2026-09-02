@@ -693,6 +693,18 @@ update_gclue_location (GcalWeatherService  *self,
   update_location (self, wlocation);
 }
 
+/* Fall back to a stable city when the desktop location portal is unavailable
+ * to the embedded process. This still uses GNOME Weather's location database
+ * and can be replaced by an explicit location in Calendar's Weather menu. */
+static GWeatherLocation*
+get_embedded_fallback_location (void)
+{
+  GWeatherLocation *world;
+
+  world = gweather_location_get_world ();
+  return gweather_location_find_nearest_city (world, 41.8781, -87.6298);
+}
+
 static void
 start_or_stop_weather_service (GcalWeatherService *self)
 {
@@ -759,11 +771,27 @@ on_gclue_simple_creation_cb (GClueSimple        *_source,
 
   if (error)
     {
+      g_autoptr (GWeatherLocation) fallback = NULL;
+
       g_assert_null (self->location_service);
 
       if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED) &&
           !(g_dbus_error_is_remote_error (error) && strcmp (g_dbus_error_get_remote_error (error), "org.freedesktop.DBus.Error.AccessDenied") == 0))
         g_warning ("Could not create GCLueSimple: %s", error->message);
+
+      if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+        GCAL_RETURN ();
+
+      fallback = get_embedded_fallback_location ();
+      if (fallback != NULL)
+        {
+          g_warning ("Location services unavailable; using weather fallback '%s'",
+                     gweather_location_get_name (fallback));
+          g_clear_object (&self->location);
+          self->location = g_object_ref (fallback);
+          self->location_service_running = FALSE;
+          update_location (self, self->location);
+        }
 
       GCAL_RETURN ();
     }

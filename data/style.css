@@ -12,7 +12,19 @@
   color: var(--sidebar-fg-color);
   background: var(--sidebar-bg-color);
 }
+.gnome-calendar-surface .mailficient-calendar-sidebar > content,
+.gnome-calendar-surface .mailficient-calendar-sidebar > top,
+.gnome-calendar-surface .mailficient-calendar-sidebar > bottom {
+  color: var(--sidebar-fg-color);
+  background: var(--sidebar-bg-color);
+}
 .gnome-calendar-surface .mailficient-calendar-main {
+  color: var(--view-fg-color);
+  background: var(--view-bg-color);
+}
+.gnome-calendar-surface .mailficient-calendar-main > content,
+.gnome-calendar-surface .mailficient-calendar-main > top,
+.gnome-calendar-surface .mailficient-calendar-main > bottom {
   color: var(--view-fg-color);
   background: var(--view-bg-color);
 }
