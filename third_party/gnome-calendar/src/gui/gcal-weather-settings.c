@@ -185,6 +185,49 @@ get_checked_fixed_location (GcalWeatherSettings *self)
   return NULL;
 }
 
+/* Find a city/station in libgweather's real location database.  The old
+ * entry only accepted locations selected by a completion widget, but the
+ * embedded settings popover has a plain Entry, so typed locations were
+ * always rejected. */
+static GWeatherLocation *
+find_location_by_text (GWeatherLocation *parent,
+                       const gchar      *query)
+{
+  GWeatherLocation *child;
+  g_autofree gchar *needle = g_ascii_strdown (query, -1);
+
+  if (needle == NULL || *needle == '\0')
+    return NULL;
+
+  for (child = gweather_location_next_child (parent, NULL);
+       child != NULL;
+       child = gweather_location_next_child (parent, child))
+    {
+      const gchar *name = gweather_location_get_name (child);
+      const gchar *english_name = gweather_location_get_english_name (child);
+      g_autofree gchar *city_name = gweather_location_get_city_name (child);
+      g_autofree gchar *name_lc = name ? g_ascii_strdown (name, -1) : NULL;
+      g_autofree gchar *english_lc = english_name ? g_ascii_strdown (english_name, -1) : NULL;
+      g_autofree gchar *city_lc = city_name ? g_ascii_strdown (city_name, -1) : NULL;
+      gboolean match = (name_lc && (g_strrstr (name_lc, needle) || g_strrstr (needle, name_lc))) ||
+                       (english_lc && (g_strrstr (english_lc, needle) || g_strrstr (needle, english_lc))) ||
+                       (city_lc && (g_strrstr (city_lc, needle) || g_strrstr (needle, city_lc)));
+
+      if (match && (gweather_location_get_level (child) == GWEATHER_LOCATION_CITY ||
+                    gweather_location_get_level (child) == GWEATHER_LOCATION_WEATHER_STATION))
+        return g_object_ref (child);
+
+      if (gweather_location_get_level (child) < GWEATHER_LOCATION_CITY)
+        {
+          GWeatherLocation *found = find_location_by_text (child, query);
+          if (found != NULL)
+            return found;
+        }
+    }
+
+  return NULL;
+}
+
 static void
 manage_weather_service (GcalWeatherSettings *self)
 {
@@ -250,13 +293,25 @@ static void
 on_weather_location_searchbox_changed_cb (GtkEntry            *entry,
                                           GcalWeatherSettings *self)
 {
-  GWeatherLocation *location;
+  GWeatherLocation *location = NULL;
+  GWeatherLocation *world;
+  const gchar *text;
   gboolean auto_location;
 
-  save_weather_settings (self);
-
   auto_location = gtk_switch_get_active (self->weather_auto_location_switch);
-  location = get_checked_fixed_location (self);
+  text = gtk_editable_get_text (GTK_EDITABLE (entry));
+
+  if (!auto_location && text != NULL && *text != '\0')
+    {
+      world = gweather_location_get_world ();
+      location = find_location_by_text (world, text);
+      g_clear_object (&self->location);
+      self->location = location ? g_object_ref (location) : NULL;
+    }
+  else
+    {
+      g_clear_object (&self->location);
+    }
 
   if (!location && !auto_location && gtk_entry_get_text_length (entry) > 0)
     {
@@ -266,8 +321,10 @@ on_weather_location_searchbox_changed_cb (GtkEntry            *entry,
     {
       gtk_widget_remove_css_class (GTK_WIDGET (self->weather_location_entry), "error");
       manage_weather_service (self);
-      g_object_unref (location);
     }
+
+  g_clear_object (&location);
+  save_weather_settings (self);
 }
 
 static void

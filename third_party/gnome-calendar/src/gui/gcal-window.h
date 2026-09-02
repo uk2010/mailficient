@@ -34,6 +34,11 @@ GtkWidget*           gcal_window_new_with_date                  (GcalApplication
 
 GtkWidget*           gcal_window_take_content                    (GcalWindow          *self);
 
+/* Set the native host window used to present dialogs while Calendar is
+ * embedded in another application. */
+void                 gcal_window_set_embedded_host              (GcalWindow          *self,
+                                                                 GtkWidget           *host);
+
 void                 gcal_window_set_search_query               (GcalWindow          *self,
                                                                 const gchar          *query);
 

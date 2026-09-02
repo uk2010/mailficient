@@ -6,6 +6,14 @@ mailficient_gnome_calendar_new (void)
 {
   return NULL;
 }
+
+void
+mailficient_gnome_calendar_set_host (GtkWidget *content,
+                                     GtkWidget *host)
+{
+  (void) content;
+  (void) host;
+}
 #else
 
 typedef struct _GcalApplication GcalApplication;
@@ -15,6 +23,7 @@ GcalApplication *gcal_application_new (void);
 gboolean g_application_register (GApplication *, GCancellable *, GError **);
 GtkWidget *gcal_window_new_with_date (GcalApplication *, GDateTime *);
 GtkWidget *gcal_window_take_content (GcalWindow *);
+void gcal_window_set_embedded_host (GcalWindow *, GtkWidget *);
 
 static GcalApplication *calendar_application;
 static GtkWidget *calendar_window;
@@ -38,5 +47,19 @@ mailficient_gnome_calendar_new (void)
     }
 
   return gcal_window_take_content ((GcalWindow *) calendar_window);
+}
+
+void
+mailficient_gnome_calendar_set_host (GtkWidget *content,
+                                     GtkWidget *host)
+{
+  GcalWindow *window;
+
+  g_return_if_fail (GTK_IS_WIDGET (content));
+  g_return_if_fail (GTK_IS_WIDGET (host));
+
+  window = g_object_get_data (G_OBJECT (content), "mailficient-gcal-window");
+  if (window != NULL)
+    gcal_window_set_embedded_host (window, host);
 }
 #endif

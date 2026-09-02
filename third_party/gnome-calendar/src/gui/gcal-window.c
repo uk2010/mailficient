@@ -116,6 +116,7 @@ struct _GcalWindow
   /* header_bar widgets */
   GtkWidget          *calendars_list;
   GtkWidget          *menu_button;
+  GtkPopoverMenu     *win_menu;
 
   GcalEventEditorDialog *event_editor;
   GcalCalendarManagementDialog *calendar_management;
@@ -164,6 +165,11 @@ struct _GcalWindow
   GcalDropOverlay    *drop_overlay;
   AdwStatusPage      *drop_status_page;
   GtkDropTarget      *drop_target;
+
+  /* Native window that owns the embedded Calendar content.  Dialogs and
+   * popovers must be presented from this window, not the hidden Calendar
+   * application window. */
+  GtkWidget           *embedded_host;
 };
 
 enum
@@ -178,6 +184,12 @@ enum
 G_DEFINE_TYPE (GcalWindow, gcal_window, ADW_TYPE_APPLICATION_WINDOW)
 
 static GParamSpec* properties[N_PROPS] = { NULL, };
+
+static GtkWidget *
+get_present_parent (GcalWindow *self)
+{
+  return self->embedded_host ? self->embedded_host : GTK_WIDGET (self);
+}
 
 
 /*
@@ -561,7 +573,7 @@ on_show_calendars_action_activated (GSimpleAction *action,
 {
   GcalWindow *self = GCAL_WINDOW (user_data);
 
-  adw_dialog_present (ADW_DIALOG (self->calendar_management), GTK_WIDGET (self));
+  adw_dialog_present (ADW_DIALOG (self->calendar_management), get_present_parent (self));
 }
 
 static void
@@ -650,7 +662,7 @@ on_window_new_event_cb (GSimpleAction *action,
   default_calendar = gcal_manager_get_default_calendar (manager);
   event = gcal_event_new (default_calendar, comp, NULL);
 
-  gcal_event_editor_dialog_present_event (self->event_editor, GTK_WIDGET (self), event, TRUE);
+  gcal_event_editor_dialog_present_event (self->event_editor, get_present_parent (self), event, TRUE);
 }
 
 static void
@@ -911,7 +923,7 @@ edit_event (GcalQuickAddPopover *popover,
             GcalEvent           *event,
             GcalWindow          *self)
 {
-  gcal_event_editor_dialog_present_event (self->event_editor, GTK_WIDGET (self), event, TRUE);
+  gcal_event_editor_dialog_present_event (self->event_editor, get_present_parent (self), event, TRUE);
 }
 
 static void
@@ -934,7 +946,7 @@ create_event_detailed_cb (GcalView   *view,
   default_calendar = gcal_manager_get_default_calendar (manager);
   event = gcal_event_new (default_calendar, comp, NULL);
 
-  gcal_event_editor_dialog_present_event (self->event_editor, GTK_WIDGET (self), event, TRUE);
+  gcal_event_editor_dialog_present_event (self->event_editor, get_present_parent (self), event, TRUE);
 
   g_clear_object (&comp);
 }
@@ -951,7 +963,7 @@ event_preview_cb (GcalEventWidget        *event_widget,
     {
     case GCAL_EVENT_PREVIEW_ACTION_EDIT:
       event = gcal_event_widget_get_event (event_widget);
-      gcal_event_editor_dialog_present_event (self->event_editor, GTK_WIDGET (self), event, FALSE);
+      gcal_event_editor_dialog_present_event (self->event_editor, get_present_parent (self), event, FALSE);
       break;
 
     case GCAL_EVENT_PREVIEW_ACTION_NONE:
@@ -1118,7 +1130,7 @@ on_ics_files_filtered_cb (GObject      *source_object,
       g_clear_pointer (&self->import_dialog, gtk_widget_unparent);
 
       self->import_dialog = gcal_import_dialog_new_for_file_list (filter_result->ics_files);
-      adw_dialog_present (ADW_DIALOG (self->import_dialog), GTK_WIDGET (self));
+      adw_dialog_present (ADW_DIALOG (self->import_dialog), get_present_parent (self));
 
       g_object_add_weak_pointer (G_OBJECT (self->import_dialog), (gpointer *)&self->import_dialog);
 
@@ -1437,6 +1449,7 @@ gcal_window_class_init (GcalWindowClass *klass)
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, search_button);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, views_stack);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, weather_settings);
+  gtk_widget_class_bind_template_child (widget_class, GcalWindow, win_menu);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, week_view);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, drop_overlay);
   gtk_widget_class_bind_template_child (widget_class, GcalWindow, drop_target);
@@ -1561,9 +1574,33 @@ gcal_window_take_content (GcalWindow *self)
       gtk_widget_set_parent (self->quick_add_popover, content);
     }
 
+  /* GtkPopoverMenu is another non-visual template child.  When Calendar is
+   * detached from its hidden window, move it alongside the menu button so
+   * the Weather submenu remains targetable and its switches/entry receive
+   * pointer and keyboard events in Mailficient's native window. */
+  if (self->win_menu != NULL && gtk_widget_get_parent (GTK_WIDGET (self->win_menu)) == GTK_WIDGET (self))
+    {
+      gtk_widget_unparent (GTK_WIDGET (self->win_menu));
+      gtk_widget_set_parent (GTK_WIDGET (self->win_menu), content);
+    }
+
   g_object_ref (content);
+  /* Keep the Calendar window associated with its detached content so the
+   * embedding host can redirect transient dialogs after reparenting. */
+  g_object_set_data_full (G_OBJECT (content), "mailficient-gcal-window",
+                          g_object_ref (self), g_object_unref);
   gtk_window_set_child (GTK_WINDOW (self), NULL);
   return content;
+}
+
+void
+gcal_window_set_embedded_host (GcalWindow *self,
+                               GtkWidget  *host)
+{
+  g_return_if_fail (GCAL_IS_WINDOW (self));
+  g_return_if_fail (host == NULL || GTK_IS_WIDGET (host));
+
+  self->embedded_host = host;
 }
 
 /**
@@ -1631,7 +1668,7 @@ gcal_window_import_files (GcalWindow  *self,
   g_clear_pointer (&self->import_dialog, gtk_widget_unparent);
 
   self->import_dialog = gcal_import_dialog_new_for_files (files, n_files);
-  adw_dialog_present (ADW_DIALOG (self->import_dialog), GTK_WIDGET (self));
+  adw_dialog_present (ADW_DIALOG (self->import_dialog), get_present_parent (self));
 
   g_object_add_weak_pointer (G_OBJECT (self->import_dialog), (gpointer *)&self->import_dialog);
 }
