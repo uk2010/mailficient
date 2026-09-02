@@ -288,7 +288,7 @@ gcal_application_show_shortcuts (GSimpleAction *simple,
 
   if (self->shortcuts_dialog == NULL)
     {
-      self->shortcuts_builder = gtk_builder_new_from_resource ("/org/gnome/calendar/ui/gui/shortcuts-dialog.ui");
+      self->shortcuts_builder = gtk_builder_new_from_resource ("/org/gnome/calendar/shortcuts-dialog.ui");
       self->shortcuts_dialog = ADW_DIALOG (gtk_builder_get_object (self->shortcuts_builder,
                                                                    "shortcuts_dialog"));
       g_return_if_fail (self->shortcuts_dialog != NULL);
