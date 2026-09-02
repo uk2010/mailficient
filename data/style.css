@@ -23,6 +23,11 @@
   color: var(--sidebar-fg-color);
   background: var(--sidebar-bg-color);
 }
+.gnome-calendar-surface .mailficient-calendar-sidebar,
+.gnome-calendar-surface .mailficient-calendar-sidebar * {
+  background-color: var(--mailficient-theme-sidebar) !important;
+  background-image: none;
+}
 .gnome-calendar-surface .mailficient-calendar-main {
   color: var(--view-fg-color);
   background: var(--view-bg-color);

@@ -32,6 +32,7 @@ struct _GcalWeatherSettings
   GtkSwitch          *show_weather_switch;
   GtkSwitch          *weather_auto_location_switch;
   GtkEditable        *weather_location_entry;
+  GtkDropDown        *temperature_unit_dropdown;
 
   GWeatherLocation   *location;
 };
@@ -45,6 +46,10 @@ static void          on_show_weather_changed_cb                  (GtkSwitch     
                                                                   GcalWeatherSettings *self);
 
 static void          on_weather_auto_location_changed_cb         (GtkSwitch           *lswitch,
+                                                                  GParamSpec          *pspec,
+                                                                  GcalWeatherSettings *self);
+
+static void          on_temperature_unit_changed_cb              (GtkDropDown         *dropdown,
                                                                   GParamSpec          *pspec,
                                                                   GcalWeatherSettings *self);
 
@@ -62,14 +67,18 @@ load_weather_settings (GcalWeatherSettings *self)
   g_autoptr (GVariant) value = NULL;
   g_autofree gchar *location_name = NULL;
   GSettings *settings;
+  GSettings *weather_settings;
   gboolean show_weather;
   gboolean auto_location;
+  g_autofree gchar *temperature_unit = NULL;
   GcalContext *context;
 
   GCAL_ENTRY;
 
   context = gcal_application_get_context (GCAL_DEFAULT_APPLICATION);
   settings = gcal_context_get_settings (context);
+  weather_settings = g_settings_new ("org.gnome.GWeather4");
+  temperature_unit = g_settings_get_string (weather_settings, "temperature-unit");
 
   value = g_settings_get_value (settings, "weather-settings");
 
@@ -82,9 +91,13 @@ load_weather_settings (GcalWeatherSettings *self)
   g_signal_handlers_block_by_func (self->show_weather_switch, on_show_weather_changed_cb, self);
   g_signal_handlers_block_by_func (self->weather_auto_location_switch, on_weather_auto_location_changed_cb, self);
   g_signal_handlers_block_by_func (self->weather_location_entry, on_weather_location_searchbox_changed_cb, self);
+  g_signal_handlers_block_by_func (self->temperature_unit_dropdown, on_temperature_unit_changed_cb, self);
 
   gtk_switch_set_active (self->show_weather_switch, show_weather);
   gtk_switch_set_active (self->weather_auto_location_switch, auto_location);
+  gtk_drop_down_set_selected (self->temperature_unit_dropdown,
+                              g_strcmp0 (temperature_unit, "fahrenheit") == 0 ? 1 :
+                              g_strcmp0 (temperature_unit, "centigrade") == 0 ? 2 : 0);
 
   if (!location && !auto_location)
     {
@@ -107,6 +120,9 @@ load_weather_settings (GcalWeatherSettings *self)
   g_signal_handlers_unblock_by_func (self->show_weather_switch, on_show_weather_changed_cb, self);
   g_signal_handlers_unblock_by_func (self->weather_auto_location_switch, on_weather_auto_location_changed_cb, self);
   g_signal_handlers_unblock_by_func (self->weather_location_entry, on_weather_location_searchbox_changed_cb, self);
+  g_signal_handlers_unblock_by_func (self->temperature_unit_dropdown, on_temperature_unit_changed_cb, self);
+
+  g_object_unref (weather_settings);
 
   GCAL_EXIT;
 }
@@ -254,6 +270,31 @@ on_weather_location_searchbox_changed_cb (GtkEntry            *entry,
     }
 }
 
+static void
+on_temperature_unit_changed_cb (GtkDropDown         *dropdown,
+                                 GParamSpec          *pspec,
+                                 GcalWeatherSettings *self)
+{
+  GSettings *settings;
+  const gchar *unit;
+
+  settings = g_settings_new ("org.gnome.GWeather4");
+  switch (gtk_drop_down_get_selected (dropdown))
+    {
+    case 1:
+      unit = "fahrenheit";
+      break;
+    case 2:
+      unit = "centigrade";
+      break;
+    default:
+      unit = "default";
+      break;
+    }
+  g_settings_set_string (settings, "temperature-unit", unit);
+  g_object_unref (settings);
+}
+
 
 /*
  * GObject overrides
@@ -282,16 +323,22 @@ gcal_weather_settings_class_init (GcalWeatherSettingsClass *klass)
   gtk_widget_class_bind_template_child (widget_class, GcalWeatherSettings, show_weather_switch);
   gtk_widget_class_bind_template_child (widget_class, GcalWeatherSettings, weather_auto_location_switch);
   gtk_widget_class_bind_template_child (widget_class, GcalWeatherSettings, weather_location_entry);
+  gtk_widget_class_bind_template_child (widget_class, GcalWeatherSettings, temperature_unit_dropdown);
 
   gtk_widget_class_bind_template_callback (widget_class, on_show_weather_changed_cb);
   gtk_widget_class_bind_template_callback (widget_class, on_weather_auto_location_changed_cb);
   gtk_widget_class_bind_template_callback (widget_class, on_weather_location_searchbox_changed_cb);
+  gtk_widget_class_bind_template_callback (widget_class, on_temperature_unit_changed_cb);
 }
 
 static void
 gcal_weather_settings_init (GcalWeatherSettings *self)
 {
   gtk_widget_init_template (GTK_WIDGET (self));
+
+  gtk_drop_down_set_model (self->temperature_unit_dropdown,
+                           G_LIST_MODEL (gtk_string_list_new ((const char * const[])
+                                                              { "Automatic", "Fahrenheit", "Celsius", NULL })));
 
   load_weather_settings (self);
   update_menu_weather_sensitivity (self);

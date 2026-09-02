@@ -22,6 +22,21 @@ template $GcalWeatherSettings: Box {
     }
   }
 
+  Box {
+    spacing: 18;
+
+    Label {
+      hexpand: true;
+      xalign: 0.0;
+      label: _("Temperature Unit");
+    }
+
+    DropDown temperature_unit_dropdown {
+      hexpand: true;
+      notify::selected => $on_temperature_unit_changed_cb(template) not-swapped;
+    }
+  }
+
   Box weather_auto_location_box {
     spacing: 18;
 

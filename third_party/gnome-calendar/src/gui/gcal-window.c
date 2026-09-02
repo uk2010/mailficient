@@ -841,7 +841,13 @@ show_new_event_widget (GcalView   *view,
    * not share a hierarchy.
    */
   root = gtk_widget_get_root (GTK_WIDGET (view));
-  coordinate_target = GTK_WIDGET (root);
+  /* gtk_popover_set_pointing_to() interprets the rectangle in the
+   * popover-parent's coordinate space.  In the embedded case the popover is
+   * parented to the detached Calendar content, so use that widget directly
+   * instead of the containing Mailficient window. */
+  coordinate_target = gtk_widget_get_parent (window->quick_add_popover);
+  if (coordinate_target == NULL)
+    coordinate_target = GTK_WIDGET (root);
   if (coordinate_target == NULL)
     coordinate_target = GTK_WIDGET (window);
   if (root != NULL)
@@ -873,6 +879,8 @@ show_new_event_widget (GcalView   *view,
                                  &GRAPHENE_POINT_INIT (x, y),
                                  &p))
     {
+      g_warning ("Could not map calendar click (%f, %f) into popover parent; using origin",
+                 x, y);
       /* The event still has a valid range; use the origin of the active
        * embedded surface as a safe fallback for the quick-add popover. */
       p.x = 0;
