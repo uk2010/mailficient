@@ -8,9 +8,12 @@ if gcal_archive != ''
   gcal_libdir = get_option('gcal-libdir')
   gcal_dependencies = [
     cc.find_library('edataserverui4-1.0', dirs: gcal_libdir),
+    cc.find_library('geocode-glib-2', dirs: gcal_libdir),
     cc.find_library('gweather-4', dirs: gcal_libdir),
     cc.find_library('geoclue-2', dirs: gcal_libdir),
     cc.find_library('fribidi', dirs: gcal_libdir),
+    cc.find_library('ical', dirs: gcal_libdir),
+    cc.find_library('soup-3.0'),
     cc.find_library('edbus-private', dirs: gcal_libdir / 'evolution-data-server'),
     cc.find_library('m'),
   ]
