@@ -250,7 +250,25 @@ gcal_application_show_about (GSimpleAction *simple,
                                       GTK_LICENSE_CUSTOM,
                                       gcal_weather_service_get_attribution (weather_service));
 
-  adw_dialog_present (about, GTK_WIDGET (self->window));
+  adw_dialog_present (about, gcal_window_get_present_parent (GCAL_WINDOW (self->window)));
+}
+
+static void
+gcal_application_show_shortcuts (GSimpleAction *simple,
+                                 GVariant      *parameter,
+                                 gpointer       user_data)
+{
+  GcalApplication *self = GCAL_APPLICATION (user_data);
+  g_autoptr (GtkBuilder) builder = NULL;
+  AdwDialog *dialog;
+
+  builder = gtk_builder_new_from_resource ("/org/gnome/calendar/ui/gui/shortcuts-dialog.ui");
+  dialog = ADW_DIALOG (gtk_builder_get_object (builder, "shortcuts_dialog"));
+  g_return_if_fail (dialog != NULL);
+
+  g_object_ref (dialog);
+  adw_dialog_present (dialog, gcal_window_get_present_parent (GCAL_WINDOW (self->window)));
+  g_object_unref (dialog);
 }
 
 static void
@@ -363,6 +381,7 @@ gcal_application_startup (GApplication *app)
     { "open-event", gcal_application_open_event, "s" },
     { "sync",   gcal_application_sync },
     { "search", gcal_application_launch_search },
+    { "shortcuts", gcal_application_show_shortcuts },
     { "about",  gcal_application_show_about },
     { "quit",   gcal_application_quit },
   };

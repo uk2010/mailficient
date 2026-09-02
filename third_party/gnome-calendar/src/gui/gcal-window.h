@@ -39,6 +39,8 @@ GtkWidget*           gcal_window_take_content                    (GcalWindow    
 void                 gcal_window_set_embedded_host              (GcalWindow          *self,
                                                                  GtkWidget           *host);
 
+GtkWidget*           gcal_window_get_present_parent             (GcalWindow          *self);
+
 void                 gcal_window_set_search_query               (GcalWindow          *self,
                                                                 const gchar          *query);
 

@@ -1563,6 +1563,16 @@ gcal_window_take_content (GcalWindow *self)
   if (content == NULL)
     return NULL;
 
+  /* Once detached, descendants resolve actions through Mailficient's root
+   * instead of GcalWindow/GcalApplication.  Re-export GNOME Calendar's
+   * original action groups on the embedded content so every stock menu item
+   * keeps its upstream callback and enabled state. */
+  gtk_widget_insert_action_group (content, "win", G_ACTION_GROUP (self));
+  if (gtk_window_get_application (GTK_WINDOW (self)) != NULL)
+    gtk_widget_insert_action_group (content,
+                                    "app",
+                                    G_ACTION_GROUP (gtk_window_get_application (GTK_WINDOW (self))));
+
   /* Popovers are normally parented to GcalWindow.  Move the quick-add
    * popover with the content before detaching it so it remains in the same
    * native window as the embedded calendar and can receive input correctly. */
@@ -1589,6 +1599,14 @@ gcal_window_set_embedded_host (GcalWindow *self,
   g_return_if_fail (host == NULL || GTK_IS_WIDGET (host));
 
   self->embedded_host = host;
+}
+
+GtkWidget *
+gcal_window_get_present_parent (GcalWindow *self)
+{
+  g_return_val_if_fail (GCAL_IS_WINDOW (self), NULL);
+
+  return get_present_parent (self);
 }
 
 /**
