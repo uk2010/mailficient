@@ -18,6 +18,11 @@
   color: var(--sidebar-fg-color);
   background: var(--sidebar-bg-color);
 }
+.gnome-calendar-surface .mailficient-calendar-sidebar > box,
+.gnome-calendar-surface .mailficient-calendar-sidebar > box > * {
+  color: var(--sidebar-fg-color);
+  background: var(--sidebar-bg-color);
+}
 .gnome-calendar-surface .mailficient-calendar-main {
   color: var(--view-fg-color);
   background: var(--view-bg-color);
