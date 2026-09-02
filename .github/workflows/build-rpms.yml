@@ -40,10 +40,26 @@ jobs:
 
       - name: Build Camel-enabled application tree
         run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path("packaging/com.local.Mailficient.Devel.json")
+          manifest = json.loads(source.read_text())
+          manifest["modules"] = [
+              module for module in manifest["modules"]
+              if module["name"] != "webkitgtk"
+          ]
+          app = next(module for module in manifest["modules"]
+                     if module["name"] == "mailficient")
+          app.setdefault("config-opts", []).append("-Dwebkit-min-version=2.52.5")
+          Path("packaging/native-generated.json").write_text(
+              json.dumps(manifest, indent=2) + "\n")
+          PY
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --arch=${{ matrix.flatpak_arch }} \
             "flatpak-build-${{ matrix.arch }}" \
-            packaging/com.local.Mailficient.Devel.json
+            packaging/native-generated.json
 
       - name: Verify application dependency closure
         run: |

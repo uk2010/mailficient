@@ -1,5 +1,6 @@
 option('camel', type: 'feature', value: 'auto', description: 'Build Evolution Data Server Camel integration')
 option('webkit', type: 'feature', value: 'auto', description: 'Build WebKitGTK HTML reader')
+option('webkit-min-version', type: 'string', value: '2.52.6', description: 'Minimum WebKitGTK version accepted by this build')
 option('secret', type: 'feature', value: 'auto', description: 'Build libsecret credential storage')
 option('addressbook', type: 'feature', value: 'auto', description: 'Use GNOME Evolution Data Server address books')
 option('calendar', type: 'feature', value: 'auto', description: 'Use Evolution Data Server calendars for invitations and meeting creation')

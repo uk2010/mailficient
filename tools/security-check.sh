@@ -46,7 +46,9 @@ check_absent 'Flatpak must not expose unconditional X11' \
 check_absent 'Snap must use document portals instead of broad home access' \
   '^[[:space:]]*-[[:space:]]*(home|removable-media)[[:space:]]*$' snap
 check_present 'WebKitGTK security floor is missing' \
-  "webkitgtk-6.0.*version: '>= 2\\.52\\.6'" meson.build
+  "webkit-min-version.*value: '2\\.52\\.6'" meson_options.txt
+check_present 'WebKitGTK dependency does not enforce the configured floor' \
+  "dependency\\('webkitgtk-6.0'.*get_option\\('webkit-min-version'\\)" meson.build
 check_present 'the patched WebKitGTK release is not bundled' \
   'webkitgtk-2.52.6.tar.xz' packaging/com.local.Mailficient.Devel.json
 check_present 'the libical overflow backport is not in the Flatpak manifest' \
