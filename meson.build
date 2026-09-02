@@ -12,6 +12,7 @@ if gcal_archive != ''
     cc.find_library('geoclue-2', dirs: gcal_libdir),
     cc.find_library('fribidi', dirs: gcal_libdir),
     cc.find_library('edbus-private', dirs: gcal_libdir / 'evolution-data-server'),
+    cc.find_library('m'),
   ]
   gcal_link_args = ['-Wl,--whole-archive', gcal_archive, '-Wl,--no-whole-archive']
 endif
