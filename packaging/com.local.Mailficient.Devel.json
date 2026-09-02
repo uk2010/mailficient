@@ -43,6 +43,7 @@
       "name": "geocode-glib",
       "buildsystem": "meson",
       "config-opts": [
+        "--libdir=lib",
         "-Denable-gtk-doc=false",
         "-Denable-introspection=false",
         "-Denable-installed-tests=false",
@@ -58,6 +59,7 @@
       "name": "libgweather",
       "buildsystem": "meson",
       "config-opts": [
+        "--libdir=lib",
         "-Denable_vala=false",
         "-Dgtk_doc=false",
         "-Dintrospection=false",
@@ -87,6 +89,7 @@
       "name": "gnome-calendar-library",
       "buildsystem": "meson",
       "config-opts": [
+        "--libdir=lib",
         "-Dembedded-library=true",
         "-Dbuild-tests=false"
       ],
