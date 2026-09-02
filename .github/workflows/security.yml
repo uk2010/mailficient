@@ -46,8 +46,13 @@ jobs:
           from pathlib import Path
           source = Path("packaging/com.local.Mailficient.Devel.json")
           manifest = json.loads(source.read_text())
+          manifest["modules"] = [
+              module for module in manifest["modules"]
+              if module["name"] != "webkitgtk"
+          ]
           app = next(module for module in manifest["modules"]
                      if module["name"] == "mailficient")
+          app.setdefault("config-opts", []).append("-Dwebkit-min-version=2.52.5")
           app.setdefault("config-opts", []).append("-Db_sanitize=address,undefined")
           app["build-options"] = {
               "env": {"ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
