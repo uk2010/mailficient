@@ -96,22 +96,39 @@ static GParamSpec* properties[N_PROPS] = { NULL, };
  * Callbacks
  */
 
+static GcalWindow *
+get_calendar_window (GcalApplication *self)
+{
+  GList *windows;
+
+  if (self->window != NULL)
+    return GCAL_WINDOW (self->window);
+
+  /* Mailficient constructs GcalWindow directly for embedding, so the
+   * application's legacy self->window field is not populated. */
+  windows = gtk_application_get_windows (GTK_APPLICATION (self));
+  return windows != NULL && GCAL_IS_WINDOW (windows->data) ? GCAL_WINDOW (windows->data) : NULL;
+}
+
 static void
 gcal_application_open_event (GSimpleAction *sync,
                              GVariant      *parameter,
                              gpointer       app)
 {
   GcalApplication *self;
+  GcalWindow *window;
   const gchar *event_uuid;
 
   self = GCAL_APPLICATION (app);
+  window = get_calendar_window (self);
+  g_return_if_fail (window != NULL);
   event_uuid = g_variant_get_string (parameter, NULL);
   g_assert (event_uuid != NULL);
 
   g_debug ("Opening event %s", event_uuid);
 
-  gcal_window_open_event_by_uuid (GCAL_WINDOW (self->window), event_uuid);
-  gtk_window_present (GTK_WINDOW (self->window));
+  gcal_window_open_event_by_uuid (window, event_uuid);
+  gtk_window_present (GTK_WINDOW (window));
 }
 
 static void
@@ -209,6 +226,7 @@ gcal_application_show_about (GSimpleAction *simple,
 {
   GcalWeatherService *weather_service;
   GcalApplication *self;
+  GcalWindow *window;
   AdwDialog *about;
   g_autofree gchar *copyright = NULL;
   g_autofree gchar *troubleshooting = NULL;
@@ -230,6 +248,8 @@ gcal_application_show_about (GSimpleAction *simple,
   };
 
   self = GCAL_APPLICATION (user_data);
+  window = get_calendar_window (self);
+  g_return_if_fail (window != NULL);
 
   copyright = build_about_copyright (self);
   troubleshooting = build_system_information ();
@@ -250,7 +270,7 @@ gcal_application_show_about (GSimpleAction *simple,
                                       GTK_LICENSE_CUSTOM,
                                       gcal_weather_service_get_attribution (weather_service));
 
-  adw_dialog_present (about, gcal_window_get_present_parent (GCAL_WINDOW (self->window)));
+  adw_dialog_present (about, gcal_window_get_present_parent (window));
 }
 
 static void
@@ -259,15 +279,18 @@ gcal_application_show_shortcuts (GSimpleAction *simple,
                                  gpointer       user_data)
 {
   GcalApplication *self = GCAL_APPLICATION (user_data);
+  GcalWindow *window;
   g_autoptr (GtkBuilder) builder = NULL;
   AdwDialog *dialog;
 
   builder = gtk_builder_new_from_resource ("/org/gnome/calendar/ui/gui/shortcuts-dialog.ui");
+  window = get_calendar_window (self);
+  g_return_if_fail (window != NULL);
   dialog = ADW_DIALOG (gtk_builder_get_object (builder, "shortcuts_dialog"));
   g_return_if_fail (dialog != NULL);
 
   g_object_ref (dialog);
-  adw_dialog_present (dialog, gcal_window_get_present_parent (GCAL_WINDOW (self->window)));
+  adw_dialog_present (dialog, gcal_window_get_present_parent (window));
   g_object_unref (dialog);
 }
 

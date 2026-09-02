@@ -25,6 +25,8 @@
 #include "gcal-weather-service.h"
 #include "gcal-weather-settings.h"
 
+#include <geocode-glib/geocode-glib.h>
+
 struct _GcalWeatherSettings
 {
   GtkBox              parent;
@@ -35,6 +37,7 @@ struct _GcalWeatherSettings
   GtkDropDown        *temperature_unit_dropdown;
 
   GWeatherLocation   *location;
+  GCancellable       *geocode_cancellable;
 };
 
 
@@ -51,6 +54,9 @@ static void          on_weather_auto_location_changed_cb         (GtkSwitch     
 
 static void          on_temperature_unit_changed_cb              (GtkDropDown         *dropdown,
                                                                   GParamSpec          *pspec,
+                                                                  GcalWeatherSettings *self);
+
+static void          on_weather_location_entry_activated_cb      (GtkEntry            *entry,
                                                                   GcalWeatherSettings *self);
 
 G_DEFINE_TYPE (GcalWeatherSettings, gcal_weather_settings, GTK_TYPE_BOX)
@@ -328,6 +334,88 @@ on_weather_location_searchbox_changed_cb (GtkEntry            *entry,
 }
 
 static void
+on_geocode_search_finished_cb (GeocodeForward      *forward,
+                               GAsyncResult        *result,
+                               GcalWeatherSettings *self)
+{
+  g_autoptr (GError) error = NULL;
+  GList *places;
+
+  places = geocode_forward_search_finish (forward, result, &error);
+  gtk_widget_set_sensitive (GTK_WIDGET (self->weather_location_entry), TRUE);
+
+  if (error == NULL && places != NULL)
+    {
+      GeocodePlace *place = GEOCODE_PLACE (places->data);
+      GeocodeLocation *coordinates = geocode_place_get_location (place);
+      GWeatherLocation *world = gweather_location_get_world ();
+      g_autoptr (GWeatherLocation) nearest = NULL;
+
+      nearest = gweather_location_find_nearest_city (
+        world,
+        geocode_location_get_latitude (coordinates),
+        geocode_location_get_longitude (coordinates));
+
+      if (nearest != NULL)
+        {
+          g_clear_object (&self->location);
+          self->location = g_object_ref (nearest);
+          gtk_widget_remove_css_class (GTK_WIDGET (self->weather_location_entry), "error");
+          save_weather_settings (self);
+          manage_weather_service (self);
+        }
+      else
+        {
+          gtk_widget_add_css_class (GTK_WIDGET (self->weather_location_entry), "error");
+        }
+    }
+  else if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+      gtk_widget_add_css_class (GTK_WIDGET (self->weather_location_entry), "error");
+      if (error != NULL)
+        g_warning ("Could not resolve weather location: %s", error->message);
+    }
+
+  g_list_free_full (places, g_object_unref);
+  g_object_unref (self);
+}
+
+static void
+on_weather_location_entry_activated_cb (GtkEntry            *entry,
+                                        GcalWeatherSettings *self)
+{
+  g_autoptr (GeocodeForward) forward = NULL;
+  const gchar *text;
+
+  if (gtk_switch_get_active (self->weather_auto_location_switch))
+    return;
+
+  /* A built-in GNOME Weather city match is already precise enough and does
+   * not require the network. */
+  if (self->location != NULL)
+    {
+      save_weather_settings (self);
+      manage_weather_service (self);
+      return;
+    }
+
+  text = gtk_editable_get_text (GTK_EDITABLE (entry));
+  if (text == NULL || *text == '\0')
+    return;
+
+  g_cancellable_cancel (self->geocode_cancellable);
+  g_cancellable_reset (self->geocode_cancellable);
+
+  forward = geocode_forward_new_for_string (text);
+  geocode_forward_set_answer_count (forward, 1);
+  gtk_widget_set_sensitive (GTK_WIDGET (entry), FALSE);
+  geocode_forward_search_async (forward,
+                                self->geocode_cancellable,
+                                (GAsyncReadyCallback) on_geocode_search_finished_cb,
+                                g_object_ref (self));
+}
+
+static void
 on_temperature_unit_changed_cb (GtkDropDown         *dropdown,
                                  GParamSpec          *pspec,
                                  GcalWeatherSettings *self)
@@ -362,6 +450,8 @@ gcal_weather_settings_finalize (GObject *object)
 {
   GcalWeatherSettings *self = (GcalWeatherSettings *)object;
 
+  g_cancellable_cancel (self->geocode_cancellable);
+  g_clear_object (&self->geocode_cancellable);
   g_clear_object (&self->location);
 
   G_OBJECT_CLASS (gcal_weather_settings_parent_class)->finalize (object);
@@ -385,6 +475,7 @@ gcal_weather_settings_class_init (GcalWeatherSettingsClass *klass)
   gtk_widget_class_bind_template_callback (widget_class, on_show_weather_changed_cb);
   gtk_widget_class_bind_template_callback (widget_class, on_weather_auto_location_changed_cb);
   gtk_widget_class_bind_template_callback (widget_class, on_weather_location_searchbox_changed_cb);
+  gtk_widget_class_bind_template_callback (widget_class, on_weather_location_entry_activated_cb);
   gtk_widget_class_bind_template_callback (widget_class, on_temperature_unit_changed_cb);
 }
 
@@ -392,6 +483,8 @@ static void
 gcal_weather_settings_init (GcalWeatherSettings *self)
 {
   gtk_widget_init_template (GTK_WIDGET (self));
+
+  self->geocode_cancellable = g_cancellable_new ();
 
   gtk_drop_down_set_model (self->temperature_unit_dropdown,
                            G_LIST_MODEL (gtk_string_list_new ((const char * const[])

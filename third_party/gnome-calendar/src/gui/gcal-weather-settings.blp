@@ -52,11 +52,11 @@ template $GcalWeatherSettings: Box {
   }
 
   Entry weather_location_entry {
-    placeholder-text: _("Search locations");
+    placeholder-text: _("Enter city, ZIP code, or address");
     primary-icon-name: "edit-find-symbolic";
     primary-icon-activatable: false;
     primary-icon-sensitive: false;
     changed => $on_weather_location_searchbox_changed_cb(template) not-swapped;
-    activate => $on_weather_location_searchbox_changed_cb(template) not-swapped;
+    activate => $on_weather_location_entry_activated_cb(template) not-swapped;
   }
 }
