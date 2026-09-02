@@ -486,9 +486,18 @@ gcal_weather_settings_init (GcalWeatherSettings *self)
 
   self->geocode_cancellable = g_cancellable_new ();
 
+  /* Installing the model selects its first row and emits notify::selected.
+   * Do not let that initialization signal overwrite the persisted unit with
+   * "Automatic" before load_weather_settings() has read it. */
+  g_signal_handlers_block_by_func (self->temperature_unit_dropdown,
+                                   on_temperature_unit_changed_cb,
+                                   self);
   gtk_drop_down_set_model (self->temperature_unit_dropdown,
                            G_LIST_MODEL (gtk_string_list_new ((const char * const[])
                                                               { "Automatic", "Fahrenheit", "Celsius", NULL })));
+  g_signal_handlers_unblock_by_func (self->temperature_unit_dropdown,
+                                     on_temperature_unit_changed_cb,
+                                     self);
 
   load_weather_settings (self);
   update_menu_weather_sensitivity (self);
