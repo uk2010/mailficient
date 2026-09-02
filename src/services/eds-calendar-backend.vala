@@ -3,6 +3,7 @@ namespace Mailficient {
 // submits bounded iTIP objects and new event drafts, then returns the user to
 // GNOME Calendar instead of maintaining a parallel event database.
 public class EdsCalendarBackend : Object, CalendarBackend {
+    private E.SourceRegistry? registry_cache;
     internal const int MAX_EVENT_OCCURRENCES = 2000;
     internal const int MAX_RECURRENCE_EXPANSION = 8192;
     internal const int MAX_CALENDAR_OBJECT_BYTES = 1024 * 1024;
@@ -118,6 +119,11 @@ public class EdsCalendarBackend : Object, CalendarBackend {
                 string calendar_color = "";
                 var selectable = source.get_extension (
                     E.SOURCE_EXTENSION_CALENDAR) as E.SourceSelectable;
+                // GNOME Calendar's sidebar toggles ESourceSelectable.selected;
+                // it does not disable the source in the registry.  Today and
+                // Events must honor the same visibility selection.
+                if (selectable != null && !selectable.get_selected ())
+                    continue;
                 if (selectable != null)
                     calendar_color = selectable.dup_color () ?? "";
                 bool writable = !client.is_readonly ();
@@ -484,7 +490,16 @@ public class EdsCalendarBackend : Object, CalendarBackend {
 
     private async E.SourceRegistry source_registry (
         Cancellable? cancellable) throws Error {
-        try { return yield new E.SourceRegistry (cancellable); }
+        if (registry_cache != null) return registry_cache;
+        try {
+            var registry = yield new E.SourceRegistry (cancellable);
+            registry.source_changed.connect ((source) => {
+                if (source.has_extension (E.SOURCE_EXTENSION_CALENDAR))
+                    calendars_changed ();
+            });
+            registry_cache = registry;
+            return registry;
+        }
         catch (Error error) {
             if (error is IOError.CANCELLED) throw error;
             throw new CalendarError.NO_CALENDAR (

@@ -45,6 +45,9 @@ struct _GcalApplication
   GcalShellSearchProvider *search_provider;
 
   GcalContext        *context;
+
+  GtkBuilder         *shortcuts_builder;
+  AdwDialog          *shortcuts_dialog;
 };
 
 static GcalApplication *default_application;
@@ -280,18 +283,19 @@ gcal_application_show_shortcuts (GSimpleAction *simple,
 {
   GcalApplication *self = GCAL_APPLICATION (user_data);
   GcalWindow *window;
-  g_autoptr (GtkBuilder) builder = NULL;
-  AdwDialog *dialog;
-
-  builder = gtk_builder_new_from_resource ("/org/gnome/calendar/ui/gui/shortcuts-dialog.ui");
   window = get_calendar_window (self);
   g_return_if_fail (window != NULL);
-  dialog = ADW_DIALOG (gtk_builder_get_object (builder, "shortcuts_dialog"));
-  g_return_if_fail (dialog != NULL);
 
-  g_object_ref (dialog);
-  adw_dialog_present (dialog, gcal_window_get_present_parent (window));
-  g_object_unref (dialog);
+  if (self->shortcuts_dialog == NULL)
+    {
+      self->shortcuts_builder = gtk_builder_new_from_resource ("/org/gnome/calendar/ui/gui/shortcuts-dialog.ui");
+      self->shortcuts_dialog = ADW_DIALOG (gtk_builder_get_object (self->shortcuts_builder,
+                                                                   "shortcuts_dialog"));
+      g_return_if_fail (self->shortcuts_dialog != NULL);
+      g_object_ref (self->shortcuts_dialog);
+    }
+
+  adw_dialog_present (self->shortcuts_dialog, gcal_window_get_present_parent (window));
 }
 
 static void
@@ -323,6 +327,8 @@ gcal_application_finalize (GObject *object)
   g_clear_pointer (&self->uuid, g_free);
   g_clear_object (&self->context);
   g_clear_object (&self->search_provider);
+  g_clear_object (&self->shortcuts_dialog);
+  g_clear_object (&self->shortcuts_builder);
 
   G_OBJECT_CLASS (gcal_application_parent_class)->finalize (object);
 

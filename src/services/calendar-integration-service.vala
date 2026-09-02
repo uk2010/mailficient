@@ -5,6 +5,7 @@ public enum CalendarCreateDisposition {
 }
 
 public interface CalendarBackend : Object {
+    public signal void calendars_changed ();
     public abstract bool can_respond_directly { get; }
     public abstract bool can_manage_events { get; }
     public abstract async void respond (CalendarInvitation invitation,
@@ -156,6 +157,7 @@ public class DesktopCalendarBackend : Object, CalendarBackend {
 }
 
 public class CalendarIntegrationService : Object {
+    public signal void calendars_changed ();
     public const int EVENT_LOOKAHEAD_YEARS = 2;
     public const int MAX_DISPLAYED_INVITATIONS = 5;
     public const int MAX_EVENT_TITLE_BYTES = 240;
@@ -171,6 +173,7 @@ public class CalendarIntegrationService : Object {
         this.cache = cache;
         this.attachments = attachments;
         this.backend = backend;
+        backend.calendars_changed.connect (() => calendars_changed ());
     }
 
     public bool can_respond_directly { get { return backend.can_respond_directly; } }

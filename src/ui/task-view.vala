@@ -26,6 +26,9 @@ public class TaskView : Gtk.Box {
     public TaskView (CalendarIntegrationService service) {
         Object (orientation: Gtk.Orientation.VERTICAL, spacing: 0);
         this.service = service;
+        service.calendars_changed.connect (() => {
+            if (get_mapped ()) reload ();
+        });
         add_css_class ("task-view");
 
         view_header.add_css_class ("task-view-header");
